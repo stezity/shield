@@ -1035,13 +1035,21 @@ body.targeting-cursor #map-canvas {
   <div class="menu-title" style="font-size:48px; letter-spacing:8px; color:#ff8a76;">SANDBOX</div>
   <div class="menu-subtitle">UNLIMITED MODE · NO DEFEAT · NO VICTORY · INFINITE FUNDS</div>
 
-  <div class="scenarios" id="sandbox-list" style="grid-template-columns:repeat(2,1fr); max-width:900px;">
+  <div class="scenarios" id="sandbox-list" style="grid-template-columns:repeat(3,1fr); max-width:1200px;">
     <div class="scenario-card" id="sandbox-defender" style="border-left-color:#00d4ff;">
-      <h3 style="color:#00d4ff;">🛡 DEFEND ISRAEL</h3>
-      <p>Watch the IDF defend in fully automatic mode. Random attacks roll in indefinitely. Use the time to test purchases, layouts, and strategies. Full IDF grid pre-deployed. $5,000,000 starting budget.</p>
+      <h3 style="color:#00d4ff;">🛡 DEFEND · 2025</h3>
+      <p>Present-day reality. Post-Oct-7 / Iron Swords aftermath. Hamas degraded; Hezbollah holding fire after Aug ceasefire; Iran proxies active; Houthis hit Eilat regularly. $5M start. Intensity ramps from 1.</p>
       <div class="scenario-difficulty">
         <span style="color:var(--green);">No defeats</span>
-        <span style="color:var(--green);">Infinite funds</span>
+        <span style="color:var(--green);">$5M start</span>
+      </div>
+    </div>
+    <div class="scenario-card" id="sandbox-defender-2027" style="border-left-color:#a070ff;">
+      <h3 style="color:#c8a0ff;">🛡 DEFEND · 2027 <small style="color:#ffaa00;font-size:10px;">⚡ HYPOTHETICAL</small></h3>
+      <p>Hypothetical near-future: 2025 ceasefire collapses → IRGC + Hezbollah + Houthi simultaneous attack. Iran deploys Fattah-2 hypersonic. Faster tempo, bigger salvos. ALL factions active from minute 0. $8M start. Intensity ramps from 2.</p>
+      <div class="scenario-difficulty">
+        <span style="color:var(--amber);">Higher tempo</span>
+        <span style="color:#c8a0ff;">All factions</span>
       </div>
     </div>
     <div class="scenario-card" id="sandbox-attacker" style="border-left-color:#c0392b;">
@@ -2007,9 +2015,9 @@ function pickWeaponName(faction, type, distanceKm) {
   // Algorithm: pick from the 3 SHORTEST-range weapons that still reach target (cheap-ammo principle).
   const reaching = list.filter(n => (WEAPON_RANGES[n] || 9999) >= distanceKm * 0.9);
   if (reaching.length === 0) {
-    // No weapon in this category reaches — fall back to longest-range one (better than nothing)
-    const sorted = list.slice().sort((a, b) => (WEAPON_RANGES[b] || 0) - (WEAPON_RANGES[a] || 0));
-    return sorted[0] || list[0];
+    // NO weapon in this category can physically reach — return generic name.
+    // Was: picked longest-range out-of-range weapon → "Burkan-1 (60km) → Tel Aviv (150km)" nonsense.
+    return null;
   }
   // Sort by range ASCENDING — shortest first (cheapest, most plentiful)
   reaching.sort((a, b) => (WEAPON_RANGES[a] || 9999) - (WEAPON_RANGES[b] || 9999));
@@ -2753,6 +2761,38 @@ const SANDBOX_INTENSITY_LABELS = ['CALM','PROBING','ACTIVE','HOSTILE','SATURATIO
 const SANDBOX_INTENSITY_COLORS = ['#52be80','#5dade2','#ffaa44','#ff8844','#ff5544','#aa1010'];
 
 // Per-intensity attack profile
+// === SANDBOX ERAS — choose hypothetical timeline at sandbox start ===
+// '2025' = current real-world state (Iron Swords aftermath)
+// '2027' = hypothetical near-future war (post-ceasefire collapse, Iran direct phase, hypersonics)
+const SANDBOX_ERAS = {
+  '2025': {
+    label: '2025 — Present Day',
+    description: 'Post-Oct-7 reality. Hamas degraded but persistent. Hezbollah holding fire after Aug deal. Iran proxies active. Houthis hit Eilat regularly.',
+    startIntensity: 1, intensityFloor: 1,
+    initialFactions: ['hamas'],                 // intensity 1 starts with just Hamas
+    weaponPool: { hamas: ['rocket','mortar','heavyRocket'],
+                  hezbollah: ['rocket','heavyRocket','drone','cruise','tacBallistic'],
+                  iran: ['ballistic','tacBallistic','drone','cruise'],
+                  houthi: ['drone','ballistic','cruise'] },
+    extraStartMoney: 5000000,
+    timeDisplay: 'normal'                       // mm:ss
+  },
+  '2027': {
+    label: '2027 — Direct Iran War (hypothetical)',
+    description: 'Hypothetical near-future: 2025 ceasefire collapses, IRGC + Houthi + Hezbollah simultaneously attacking. Iran fields hypersonic Fattah-2. Higher tempo, more strategic strikes.',
+    startIntensity: 2, intensityFloor: 2,
+    initialFactions: ['hamas','hezbollah','houthi','iran'],   // ALL active from minute 0
+    weaponPool: { hamas: ['rocket','mortar','heavyRocket','cruise'],
+                  hezbollah: ['rocket','heavyRocket','drone','cruise','tacBallistic'],
+                  iran: ['ballistic','tacBallistic','drone','cruise'],   // includes Fattah-2 hypersonic
+                  houthi: ['drone','ballistic','cruise'] },
+    extraStartMoney: 8000000,
+    intensityRiseFaster: 0.5,                   // intensity climbs 2× faster
+    salvoSizeBonus: 1.4,                         // 40% bigger salvos
+    timeDisplay: 'futuristic'                    // "Y2027.D042 · H14:35"
+  }
+};
+
 const SANDBOX_INTENSITY_PROFILE = [
   { spawnIntervalMs: 999999, salvoMin: 0, salvoMax: 0, factionPool: [] },                                    // 0 CALM
   { spawnIntervalMs: 22000,  salvoMin: 1, salvoMax: 2, factionPool: ['hamas'] },                              // 1 PROBING
@@ -8663,7 +8703,31 @@ function spawnThreat(typeId, enemyId, targetCityId, explicitLat, explicitLon, ex
     } else if (enemyId === 'iran') {
       candidates = candidates.filter(c => c.importance >= 7);
     } else if (enemyId === 'houthi') {
-      candidates = candidates.filter(c => c.id === 'eilat' || c.importance >= 8);
+      // === HOUTHI TARGETING DOCTRINE (realistic per real-world 2024-25 strikes) ===
+      // - DRONES (Samad-3, Wa'id, Shahed): mostly Eilat (~75%), occasionally Negev
+      // - CRUISE: mostly Eilat or shipping lane (Red Sea region — out of game scope; routes to Eilat)
+      // - BALLISTIC (Burkan-2H, Zulfiqar): RARE central-Israel hits (~25%), mostly land in Lakhish/Negev
+      //   The "Lakhish" pattern: Houthi long-range CEP is ~5-10km — they aim Tel Aviv but
+      //   often impact Beit Shemesh / Kiryat Gat / open Negev (real-world Sept 2024 pattern)
+      if (typeId === 'drone') {
+        // 75% Eilat, 25% any importance≥6 (Eilat + nearby) — drones are slow, cheap, swarm tactic
+        candidates = candidates.filter(c => c.id === 'eilat' || c.importance >= 6);
+      } else if (typeId === 'cruise') {
+        // Cruise = Eilat-bound mostly, sometimes Tel Aviv/Haifa
+        candidates = candidates.filter(c => c.id === 'eilat' || c.importance >= 8);
+      } else if (typeId === 'ballistic' || typeId === 'tacBallistic') {
+        // Real Houthi ballistic — Tel Aviv aimed but spreads. Include central + south + Lakhish.
+        // Uses LAKHISH-DISTRICT cities (Kiryat Gat, Beit Shemesh, Ashdod, Beersheba) more than central.
+        candidates = candidates.filter(c => {
+          if (c.id === 'eilat') return true;
+          if (c.importance >= 8) return true;
+          // Lakhish district — small towns south-central likely to absorb a missed strike
+          if (['beersheba', 'ashdod', 'kiryat_gat', 'beit_shemesh'].includes(c.id)) return true;
+          return false;
+        });
+      } else {
+        candidates = candidates.filter(c => c.id === 'eilat' || c.importance >= 8);
+      }
     }
     // === DOCTRINE FILTER: heavy / cruise / ballistic NEVER fired at trivial targets ===
     // If doctrineFiltered is EMPTY (all candidates were kibbutzim/villages too small for this weapon),
@@ -8684,6 +8748,24 @@ function spawnThreat(typeId, enemyId, targetCityId, explicitLat, explicitLon, ex
       if (telaviv && Math.random() < 0.95) {
         targetCity = telaviv;
       }
+    }
+    // === HOUTHI BALLISTIC DOCTRINE (real Sept 2024 / Oct 2024 strike pattern) ===
+    // Houthi long-range CEP is poor — they aim Tel Aviv but typically impact Lakhish/Negev.
+    // Distribution: ~50% Beersheba/Negev, ~25% Ashdod/Lakhish, ~15% Eilat, ~10% Tel Aviv/Jerusalem.
+    if (enemyId === 'houthi' && (typeId === 'ballistic' || typeId === 'tacBallistic')) {
+      const r = Math.random();
+      let preferIds = [];
+      if (r < 0.50) preferIds = ['beersheba', 'dimona_city', 'arad', 'sderot'];
+      else if (r < 0.75) preferIds = ['ashdod', 'ashkelon', 'kiryat_gat'];
+      else if (r < 0.90) preferIds = ['eilat'];
+      else preferIds = ['telaviv', 'jerusalem'];
+      const pick = candidates.find(c => preferIds.includes(c.id));
+      if (pick) targetCity = pick;
+    }
+    // === HOUTHI DRONE DOCTRINE — overwhelming Eilat focus ===
+    if (enemyId === 'houthi' && typeId === 'drone') {
+      const eilat = candidates.find(c => c.id === 'eilat');
+      if (eilat && Math.random() < 0.85) targetCity = eilat;
     }
     if (!targetCity) {
       // === DOCTRINAL TARGET PICK — uses faction personality (priorities + chaos) ===
@@ -12866,11 +12948,18 @@ function spawnGazaHamasThreat(weaponType) {
    SANDBOX · DEFEND — runtime
    ========================================================= */
 function initSandboxDefender() {
+  // === Pick era from menu choice (default 2025) ===
+  const eraId = state._pendingSandboxEra || '2025';
+  const era = SANDBOX_ERAS[eraId] || SANDBOX_ERAS['2025'];
+  state._pendingSandboxEra = null;
   state.sandbox = {
-    intensity: 1,                              // 0-5
-    intensityFloor: 1,                          // never drops below this
-    intensityMaxReached: 1,
-    nextIntensityRiseAt: state.gameTime + 120000,
+    eraId: eraId,
+    era: era,
+    sandboxStartedAt: Date.now(),
+    intensity: era.startIntensity || 1,
+    intensityFloor: era.intensityFloor || 1,
+    intensityMaxReached: era.startIntensity || 1,
+    nextIntensityRiseAt: state.gameTime + (era.intensityRiseFaster ? 60000 : 120000),
     nextLullCheckAt: state.gameTime + 30000,
     spawnTimer: 5000,
     score: 0,
@@ -12887,8 +12976,13 @@ function initSandboxDefender() {
     missionsCompleted: 0,
     missionStats: { intercepts: 0, used: 0, popImpacts: 0, threatsTotal: 0, perCity: {}, perFactionWeapon: {} },
     nextEventAt: state.gameTime + 60000,
-    activeEvents: []                            // {id, expiresAt}
+    activeEvents: []
   };
+  // Apply era starting bonus money
+  if (era.extraStartMoney) state.money = era.extraStartMoney;
+  // Era-aware notification
+  showNotification('SANDBOX · ' + era.label, era.description, 'info');
+  logEvent(`SANDBOX ERA: ${era.label}`, 'info');
   // Pick first mission
   pickNextSandboxMission();
 }
@@ -13181,19 +13275,35 @@ function tickSandboxDefender(dt) {
   if (profile.spawnIntervalMs < 999999) {
     s.spawnTimer -= dt;
     if (s.spawnTimer <= 0) {
-      const pool = profile.factionPool;
+      // === ERA OVERRIDE: 2027 era forces all factions in pool from minute 0 ===
+      let pool = profile.factionPool;
+      if (s.era && s.era.initialFactions && s.era.initialFactions.length > pool.length) {
+        // Merge era's initial factions into the current intensity pool
+        const merged = new Set([...pool, ...s.era.initialFactions]);
+        pool = Array.from(merged);
+      }
       const faction = pool[Math.floor(Math.random() * pool.length)];
       const doctrine = FACTION_DOCTRINES[faction] || { salvoSizeBias: 1, silentBurstMode: false };
       // Houthi silent-burst mode: 60% of intervals are double-length (silent), then sudden burst
       let intervalMul = 1.0;
       if (doctrine.silentBurstMode && Math.random() < 0.6) intervalMul = 2.5;
+      // 2027 era: faster intensity ramp + higher tempo
+      if (s.era && s.era.intensityRiseFaster) intervalMul *= s.era.intensityRiseFaster;
       s.spawnTimer = profile.spawnIntervalMs * (0.7 + Math.random() * 0.6) * intervalMul;
-      // Apply doctrine salvo-size bias
+      // Apply doctrine salvo-size bias + era multiplier
       let baseSize = profile.salvoMin + Math.floor(Math.random() * (profile.salvoMax - profile.salvoMin + 1));
-      const salvoSize = Math.max(1, Math.round(baseSize * doctrine.salvoSizeBias));
+      let salvoMul = doctrine.salvoSizeBias;
+      if (s.era && s.era.salvoSizeBonus) salvoMul *= s.era.salvoSizeBonus;
+      const salvoSize = Math.max(1, Math.round(baseSize * salvoMul));
       const gen = state.scenarioGen;
       for (let i = 0; i < salvoSize; i++) {
-        const w = pickFactionWeapon(faction);
+        // Era-restricted weapon pool — pick from era.weaponPool if defined
+        let w;
+        if (s.era && s.era.weaponPool && s.era.weaponPool[faction]) {
+          w = pickWeightedWeaponFrom(faction, s.era.weaponPool[faction]) || pickFactionWeapon(faction);
+        } else {
+          w = pickFactionWeapon(faction);
+        }
         setTimeout(() => {
           if (state.scenarioGen !== gen || !state.active) return;
           spawnThreat(w, faction);
@@ -15078,10 +15188,26 @@ function endGazaCampaign(victory) {
    UI
    ========================================================= */
 function updateUI() {
-  document.getElementById('time-display').textContent = formatTime(state.gameTime);
+  // === SANDBOX 2027 ERA: futuristic timestamp instead of plain mm:ss ===
+  // Format: Y2027.D042 · H14:35 (game-time mapped to fictional Day-of-year + 24h clock)
+  let timeStr = formatTime(state.gameTime);
+  let opStr = state.scenario ? state.scenario.name.toUpperCase() : '—';
+  if (state.sandbox && state.sandbox.era && state.sandbox.era.timeDisplay === 'futuristic') {
+    const elapsedSec = Math.floor(state.gameTime / 1000);
+    // 1 real-time second = 1 in-game minute. So 60 sec = 1 hour, 1440 sec = 1 day
+    const inGameMinutes = elapsedSec;
+    const inGameHours = Math.floor(inGameMinutes / 60) % 24;
+    const inGameDays = Math.floor(inGameMinutes / (60 * 24)) + 1;   // start at Day 1
+    const minOfHour = inGameMinutes % 60;
+    timeStr = `Y2027·D${String(inGameDays).padStart(3,'0')}·H${String(inGameHours).padStart(2,'0')}:${String(minOfHour).padStart(2,'0')}`;
+    opStr = '◇ DIRECT IRAN WAR · 2027';
+  } else if (state.sandbox && state.sandbox.era && state.sandbox.eraId === '2025') {
+    opStr = '◇ DEFEND ISRAEL · 2025';
+  }
+  document.getElementById('time-display').textContent = timeStr;
   document.getElementById('wave-display').textContent = state.scenario ?
     `${Math.min(state.currentWave + (state.inWave ? 1 : 0), state.scenario.waves.length)}/${state.scenario.waves.length}` : '0/0';
-  document.getElementById('op-name').textContent = state.scenario ? state.scenario.name.toUpperCase() : '—';
+  document.getElementById('op-name').textContent = opStr;
 
   const active = state.threats.filter(t => !t.intercepted && !t.impacted).length;
   let level = 'low', text = 'LOW';
@@ -16039,6 +16165,14 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('sandbox-defender').onclick = () => {
     audio.init(); audio.click();
     document.getElementById('sandbox-menu').classList.add('hidden');
+    state._pendingSandboxEra = '2025';
+    startScenario('sandbox');
+  };
+  const sd2027 = document.getElementById('sandbox-defender-2027');
+  if (sd2027) sd2027.onclick = () => {
+    audio.init(); audio.click();
+    document.getElementById('sandbox-menu').classList.add('hidden');
+    state._pendingSandboxEra = '2027';
     startScenario('sandbox');
   };
   document.getElementById('sandbox-attacker').onclick = () => {
