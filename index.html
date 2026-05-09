@@ -2779,11 +2779,11 @@ const SANDBOX_ERAS = {
   },
   '2027': {
     label: '2027 — Direct Iran War (hypothetical)',
-    description: 'Hypothetical near-future: 2025 ceasefire collapses, IRGC + Houthi + Hezbollah simultaneously attacking. Iran fields hypersonic Fattah-2. Higher tempo, more strategic strikes.',
+    description: 'Hypothetical near-future: Hamas DESTROYED (post-Iron-Swords). 2025 ceasefire collapses, IRGC + Houthi + Hezbollah direct war. Iran fields hypersonic Fattah-2. Higher tempo, more strategic strikes.',
     startIntensity: 2, intensityFloor: 2,
-    initialFactions: ['hamas','hezbollah','houthi','iran'],   // ALL active from minute 0
-    weaponPool: { hamas: ['rocket','mortar','heavyRocket','cruise'],
-                  hezbollah: ['rocket','heavyRocket','drone','cruise','tacBallistic'],
+    initialFactions: ['hezbollah','houthi','iran'],   // NO HAMAS — destroyed by 2027 lore
+    excludeFactions: ['hamas'],                       // hard block on Hamas spawns/TSTs/territory
+    weaponPool: { hezbollah: ['rocket','heavyRocket','drone','cruise','tacBallistic'],
                   iran: ['ballistic','tacBallistic','drone','cruise'],   // includes Fattah-2 hypersonic
                   houthi: ['drone','ballistic','cruise'] },
     extraStartMoney: 8000000,
@@ -2792,6 +2792,15 @@ const SANDBOX_ERAS = {
     timeDisplay: 'futuristic'                    // "Y2027.D042 · H14:35"
   }
 };
+
+// Helper: is a faction blocked in the current sandbox era?
+// Returns true if state.sandbox.era.excludeFactions contains the given faction.
+// Use this everywhere Hamas-specific spawning / TSTs / retaliation could fire.
+function isFactionExcludedInEra(factionId) {
+  if (!state.sandbox || !state.sandbox.era) return false;
+  const exc = state.sandbox.era.excludeFactions;
+  return Array.isArray(exc) && exc.includes(factionId);
+}
 
 const SANDBOX_INTENSITY_PROFILE = [
   { spawnIntervalMs: 999999, salvoMin: 0, salvoMax: 0, factionPool: [] },                                    // 0 CALM
@@ -4934,6 +4943,8 @@ function drawIntelReveal() {
   const pulse = 0.5 + (Math.sin(now / 200) + 1) * 0.25;
   const disabledMap = state.disabledLaunchSites || {};
   ['hamas', 'hezbollah', 'iran', 'houthi'].forEach(fid => {
+    // Skip excluded factions (e.g., Hamas in 2027 sandbox era)
+    if (typeof isFactionExcludedInEra === 'function' && isFactionExcludedInEra(fid)) return;
     const f = ENEMIES[fid];
     if (!f || !f.launchSites) return;
     f.launchSites.forEach((site, idx) => {
@@ -5064,6 +5075,8 @@ function drawEnemyTargets() {
   const isGaza = state.scenario && state.scenario.campaign === 'gaza';
   state.enemyTargets.forEach(t => {
     if (isGaza && t.faction !== 'hamas') return;
+    // Era exclusion: hide Hamas targets in 2027 (Hamas destroyed)
+    if (typeof isFactionExcludedInEra === 'function' && isFactionExcludedInEra(t.faction)) return;
     const [sx, sy] = geoToScreen(t.lat, t.lon);
     if (sx < -30 || sx > canvasW + 30 || sy < -30 || sy > canvasH + 30) return;
 
@@ -7620,8 +7633,12 @@ function drawTerritories() {
 
 
 function drawHostileRegions() {
+  // === ERA EXCLUSION: skip Gaza territory if Hamas excluded (2027 era) ===
+  const hideGaza = (typeof isFactionExcludedInEra === 'function' && isFactionExcludedInEra('hamas'));
   HOSTILE_REGIONS.forEach(region => {
     if (!region.polygon || region.polygon.length < 3) return;
+    if (hideGaza && region.faction === 'hamas') return;
+    if (hideGaza && region.name && /gaza/i.test(region.name)) return;
 
     // Перевод lat/lon в экранные координаты
     const pts = region.polygon.map(p => geoToScreen(p[0], p[1]));
@@ -7787,8 +7804,11 @@ const MAP_CONTEXT_LABELS = [
 function drawContextLabels() {
   if (camera.zoom < 0.7) return;        // hide labels when very zoomed out
   const detailLevel = camera.zoom >= 1.4 ? 3 : (camera.zoom >= 1.0 ? 2 : 1);
+  // Era exclusion: hide Gaza-region labels if Hamas is excluded (2027)
+  const hideGaza = (typeof isFactionExcludedInEra === 'function' && isFactionExcludedInEra('hamas'));
   ctx.textAlign = 'left';
   MAP_CONTEXT_LABELS.forEach(lbl => {
+    if (hideGaza && lbl.region === 'gaza') return;
     // Detail filter: only show large at low zoom, then medium, then everything
     const sizeRank = lbl.size === 'large' ? 1 : (lbl.size === 'medium' ? 2 : 3);
     if (sizeRank > detailLevel) return;
@@ -8600,6 +8620,8 @@ function spawnThreat(typeId, enemyId, targetCityId, explicitLat, explicitLon, ex
   const e = ENEMIES[enemyId];
   const tType = THREAT_TYPES[typeId];
   if (!e || !tType) return;
+  // === ERA EXCLUSION (e.g., Hamas in 2027 sandbox = destroyed faction) ===
+  if (typeof isFactionExcludedInEra === 'function' && isFactionExcludedInEra(enemyId)) return;
   // Hezbollah: route random spawns through realistic launcher-target pairing.
   // Explicit calls (with targetCityId, explicit coords, or pinned site index) bypass.
   if (enemyId === 'hezbollah' && !targetCityId && typeof explicitLat !== 'number' && typeof explicitSiteIndex !== 'number') {
@@ -10792,6 +10814,10 @@ function spawnRandomTST(forcedTemplateId) {
   // Gaza scenario: only Hamas/PIJ targets (PIJ events use faction:'hamas' so they pass naturally)
   if (state.scenario && state.scenario.campaign === 'gaza') {
     allowed = allowed.filter(t => t.faction === 'hamas');
+  }
+  // === ERA EXCLUSION: skip Hamas/PIJ TSTs in 2027 (Hamas destroyed) ===
+  if (typeof isFactionExcludedInEra === 'function') {
+    allowed = allowed.filter(t => !isFactionExcludedInEra(t.faction));
   }
   // === DEDUPLICATION ===
   // 1. unique-marked templates that were already STRUCK → never appear again this scenario
@@ -13287,10 +13313,14 @@ function tickSandboxDefender(dt) {
       // === ERA OVERRIDE: 2027 era forces all factions in pool from minute 0 ===
       let pool = profile.factionPool;
       if (s.era && s.era.initialFactions && s.era.initialFactions.length > pool.length) {
-        // Merge era's initial factions into the current intensity pool
         const merged = new Set([...pool, ...s.era.initialFactions]);
         pool = Array.from(merged);
       }
+      // === ERA EXCLUSION: drop excluded factions (e.g., Hamas in 2027) ===
+      if (s.era && Array.isArray(s.era.excludeFactions)) {
+        pool = pool.filter(f => !s.era.excludeFactions.includes(f));
+      }
+      if (pool.length === 0) return;       // nothing to spawn this tick
       const faction = pool[Math.floor(Math.random() * pool.length)];
       const doctrine = FACTION_DOCTRINES[faction] || { salvoSizeBias: 1, silentBurstMode: false };
       // Houthi silent-burst mode: 60% of intervals are double-length (silent), then sudden burst
