@@ -8693,13 +8693,22 @@ function spawnThreat(typeId, enemyId, targetCityId, explicitLat, explicitLon, ex
       candidates = candidates.filter(c => c.lat >= range.latMin && c.lat <= latMax);
     }
     if (enemyId === 'hamas') {
-      candidates = candidates
-        .sort((a, b) => haversineKm(a.lat, a.lon, sLat, sLon) - haversineKm(b.lat, b.lon, sLat, sLon))
-        .slice(0, 18);
+      // For SHORT-range weapons (mortar/rocket): nearest 18 cities only.
+      // For HEAVY/CRUISE: KEEP ALL in-range cities (Tel Aviv MUST be reachable from Gaza)
+      // — was bug: heavyRocket got sliced to nearest 18 → Tel Aviv excluded → Fajr-5 hit Ashkelon.
+      if (typeId === 'mortar' || typeId === 'rocket') {
+        candidates = candidates
+          .sort((a, b) => haversineKm(a.lat, a.lon, sLat, sLon) - haversineKm(b.lat, b.lon, sLat, sLon))
+          .slice(0, 18);
+      }
+      // heavyRocket / cruise → no slice, let the picker choose Tel Aviv from full pool
     } else if (enemyId === 'hezbollah') {
-      candidates = candidates
-        .sort((a, b) => haversineKm(a.lat, a.lon, sLat, sLon) - haversineKm(b.lat, b.lon, sLat, sLon))
-        .slice(0, 20);
+      // Same logic for Hezbollah — keep heavy weapons un-sliced so Tel Aviv stays selectable
+      if (typeId === 'mortar' || typeId === 'rocket') {
+        candidates = candidates
+          .sort((a, b) => haversineKm(a.lat, a.lon, sLat, sLon) - haversineKm(b.lat, b.lon, sLat, sLon))
+          .slice(0, 20);
+      }
     } else if (enemyId === 'iran') {
       candidates = candidates.filter(c => c.importance >= 7);
     } else if (enemyId === 'houthi') {
