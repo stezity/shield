@@ -8772,19 +8772,32 @@ function spawnThreat(typeId, enemyId, targetCityId, explicitLat, explicitLon, ex
       return;
     }
     candidates = doctrineFiltered;
-    // === HAMAS HEAVY ROCKET DOCTRINE (applies everywhere) ===
-    // ALL Fajr-5 / M-302 / A-120 / cruise → Tel Aviv. Fallback Jerusalem if TA destroyed.
-    // Real-world: every Hamas heavy rocket since 2014 was launched at Tel Aviv as propaganda.
+    // === HAMAS HEAVY ROCKET DOCTRINE — Gush Dan saturation (Tel Aviv metro) ===
+    // Hamas AIMS Fajr-5/M-302/A-120 at Tel Aviv but CEP scatters across the whole metro.
+    // Real distribution from 2014/2021/2023 strikes: ~40% TA core, ~50% Gush Dan suburbs,
+    // ~10% Ashdod/Jerusalem (deep miss / propaganda statement).
     if (enemyId === 'hamas' && (typeId === 'heavyRocket' || typeId === 'cruise')) {
-      const telaviv = candidates.find(c => c.id === 'telaviv');
-      if (telaviv) {
-        targetCity = telaviv;
-      } else {
-        // Tel Aviv destroyed → fallback to Jerusalem
-        const jerusalem = candidates.find(c => c.id === 'jerusalem');
-        if (jerusalem) targetCity = jerusalem;
+      // Weighted target pool — Tel Aviv axis prominent, plus all reachable metro suburbs
+      const TA_AXIS_WEIGHTS = {
+        telaviv: 40,                         // prime target
+        rishon: 10, holon: 8, batyam: 7, bnei_brak: 6, ramat_gan: 6,
+        givatayim: 4, petah: 5, herzliya: 4,
+        ramla: 2, lod: 2, rehovot: 3,
+        ashdod: 5,                           // southern Gush Dan edge
+        jerusalem: 4,                         // rare big-statement strike
+        yavne: 2, ness_ziona: 1
+      };
+      // Build flat weighted array of city OBJECTS that exist in candidates
+      const flat = [];
+      for (const cid of Object.keys(TA_AXIS_WEIGHTS)) {
+        const c = candidates.find(c => c.id === cid);
+        if (!c) continue;
+        for (let k = 0; k < TA_AXIS_WEIGHTS[cid]; k++) flat.push(c);
       }
-      // If both dead — fall through to normal picker (very rare endgame state)
+      if (flat.length > 0) {
+        targetCity = flat[Math.floor(Math.random() * flat.length)];
+      }
+      // No Gush Dan target reachable → fall through (very edge case)
     }
     // === HOUTHI BALLISTIC DOCTRINE (real Sept 2024 / Oct 2024 strike pattern) ===
     // Houthi long-range CEP is poor — they aim Tel Aviv but typically impact Lakhish/Negev.
@@ -12942,19 +12955,27 @@ function spawnGazaHamasThreat(weaponType) {
   // Hamas doesn't waste a Fajr-5 (worth $50K+, hard to smuggle) on Nir Oz (population 1).
   candidates = candidates.filter(c => isWeaponTargetAppropriate(weaponType, c));
   if (candidates.length === 0) return;   // no doctrinally-appropriate target for this weapon → abort silently
-  // === HAMAS HEAVY ROCKET DOCTRINE: ALL Fajr-5 / M-302 / A-120 → Tel Aviv ===
-  // 100% Tel Aviv (when alive) → fallback Jerusalem if TA destroyed.
-  // Real-world: every Hamas heavy rocket since 2014 was launched at Tel Aviv as propaganda.
+  // === HAMAS HEAVY ROCKET DOCTRINE — Gush Dan saturation (Tel Aviv metro) ===
+  // Aim Tel Aviv but CEP-spread across whole metro: ~40% TA, ~50% Gush Dan suburbs,
+  // ~10% Ashdod / Jerusalem. Real 2014/2021/2023 distribution.
   let target;
   if (weaponType === 'heavyRocket' || weaponType === 'cruise') {
-    const telaviv = candidates.find(c => c.id === 'telaviv');
-    if (telaviv) {
-      target = telaviv;
-      logEvent(`▲ Hamas heavy rocket → TEL AVIV (Fajr-5 / M-302 / A-120 doctrine)`, 'danger');
-    } else {
-      // Tel Aviv destroyed → fallback to Jerusalem (propaganda value)
-      const jerusalem = candidates.find(c => c.id === 'jerusalem');
-      if (jerusalem) target = jerusalem;
+    const TA_AXIS_WEIGHTS = {
+      telaviv: 40,
+      rishon: 10, holon: 8, batyam: 7, bnei_brak: 6, ramat_gan: 6,
+      givatayim: 4, petah: 5, herzliya: 4,
+      ramla: 2, lod: 2, rehovot: 3,
+      ashdod: 5, jerusalem: 4, yavne: 2, ness_ziona: 1
+    };
+    const flat = [];
+    for (const cid of Object.keys(TA_AXIS_WEIGHTS)) {
+      const c = candidates.find(c => c.id === cid);
+      if (!c) continue;
+      for (let k = 0; k < TA_AXIS_WEIGHTS[cid]; k++) flat.push(c);
+    }
+    if (flat.length > 0) {
+      target = flat[Math.floor(Math.random() * flat.length)];
+      logEvent(`▲ Hamas heavy rocket → ${target.name} (Gush Dan saturation doctrine)`, 'danger');
     }
   }
   if (!target) {
