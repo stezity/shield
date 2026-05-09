@@ -2367,6 +2367,17 @@ const ENEMY_TARGETS = [
   { id: 't_khan_younis',  name: 'Khan Younis HQ',          lat: 31.3464, lon: 34.3068, faction: 'hamas',     importance: 7,  type: 'HQ',       hardness: 0.4 },
   { id: 't_rafah_arsenal',name: 'Rafah arsenal',           lat: 31.2906, lon: 34.2447, faction: 'hamas',     importance: 6,  type: 'arsenal',  hardness: 0.5 },
   { id: 't_jabaliya',     name: 'Jabalia tunnels',         lat: 31.5285, lon: 34.4828, faction: 'hamas',     importance: 7,  type: 'arsenal',  hardness: 0.55 },
+  // === Additional Gaza populated centers — clickable strike targets ===
+  { id: 't_beit_lahia',   name: 'Beit Lahia',              lat: 31.5520, lon: 34.5023, faction: 'hamas',     importance: 5,  type: 'city',     hardness: 0.25 },
+  { id: 't_beit_hanoun_c',name: 'Beit Hanoun (city)',      lat: 31.5410, lon: 34.5380, faction: 'hamas',     importance: 5,  type: 'city',     hardness: 0.25 },
+  { id: 't_shati_camp',   name: 'Al-Shati refugee camp',   lat: 31.5300, lon: 34.4400, faction: 'hamas',     importance: 4,  type: 'city',     hardness: 0.20 },
+  { id: 't_nuseirat',     name: 'Nuseirat camp',           lat: 31.4500, lon: 34.3950, faction: 'hamas',     importance: 5,  type: 'city',     hardness: 0.25 },
+  { id: 't_bureij',       name: 'Bureij camp',             lat: 31.4400, lon: 34.4060, faction: 'hamas',     importance: 4,  type: 'city',     hardness: 0.20 },
+  { id: 't_maghazi',      name: 'Al-Maghazi camp',         lat: 31.4296, lon: 34.4014, faction: 'hamas',     importance: 4,  type: 'city',     hardness: 0.20 },
+  { id: 't_deir_balah',   name: 'Deir al-Balah',           lat: 31.4180, lon: 34.3510, faction: 'hamas',     importance: 6,  type: 'city',     hardness: 0.30 },
+  { id: 't_bani_suheila', name: 'Bani Suheila',            lat: 31.3434, lon: 34.3303, faction: 'hamas',     importance: 4,  type: 'city',     hardness: 0.20 },
+  { id: 't_abasan',       name: 'Abasan',                  lat: 31.3196, lon: 34.3527, faction: 'hamas',     importance: 4,  type: 'city',     hardness: 0.20 },
+  { id: 't_tal_sultan',   name: 'Tal as-Sultan',           lat: 31.2864, lon: 34.2256, faction: 'hamas',     importance: 4,  type: 'city',     hardness: 0.20 },
 
   // === Hezbollah / Southern Lebanon and Beirut ===
   { id: 't_dahieh',       name: 'Dahieh (Beirut southern suburbs)', lat: 33.8500, lon: 35.4900, faction: 'hezbollah', importance: 9, type: 'HQ', hardness: 0.5 },
@@ -2376,6 +2387,22 @@ const ENEMY_TARGETS = [
   { id: 't_nabatieh',     name: 'Nabatieh command post',    lat: 33.3789, lon: 35.4839, faction: 'hezbollah', importance: 7,  type: 'HQ',       hardness: 0.4 },
   { id: 't_bekaa',        name: 'Bekaa Valley (depots)',    lat: 33.8500, lon: 35.9000, faction: 'hezbollah', importance: 8,  type: 'arsenal',  hardness: 0.5 },
   { id: 't_bint_jbeil',   name: 'Bint Jbeil',               lat: 33.1218, lon: 35.4326, faction: 'hezbollah', importance: 5,  type: 'launch',   hardness: 0.3 },
+  // === Additional South Lebanon villages / cities — clickable strike targets ===
+  { id: 't_tyre_city',    name: 'Tyre (city)',              lat: 33.2750, lon: 35.2050, faction: 'hezbollah', importance: 6,  type: 'city',     hardness: 0.30 },
+  { id: 't_sidon',        name: 'Sidon',                    lat: 33.5571, lon: 35.3729, faction: 'hezbollah', importance: 6,  type: 'city',     hardness: 0.30 },
+  { id: 't_marjayoun',    name: 'Marjayoun',                lat: 33.3640, lon: 35.5919, faction: 'hezbollah', importance: 5,  type: 'city',     hardness: 0.25 },
+  { id: 't_hasbaya',      name: 'Hasbaya',                  lat: 33.3963, lon: 35.6818, faction: 'hezbollah', importance: 4,  type: 'city',     hardness: 0.25 },
+  { id: 't_khiam',        name: 'Khiam',                    lat: 33.3260, lon: 35.6028, faction: 'hezbollah', importance: 4,  type: 'city',     hardness: 0.25 },
+  { id: 't_aita_shab',    name: 'Aita ash-Shab',            lat: 33.0938, lon: 35.3489, faction: 'hezbollah', importance: 4,  type: 'launch',   hardness: 0.30 },
+  { id: 't_maroun_ras',   name: 'Maroun al-Ras',            lat: 33.1014, lon: 35.4115, faction: 'hezbollah', importance: 4,  type: 'launch',   hardness: 0.30 },
+  { id: 't_yaroun',       name: 'Yaroun',                   lat: 33.0908, lon: 35.4458, faction: 'hezbollah', importance: 3,  type: 'city',     hardness: 0.20 },
+  { id: 't_markaba',      name: 'Markaba',                  lat: 33.2600, lon: 35.5050, faction: 'hezbollah', importance: 4,  type: 'city',     hardness: 0.20 },
+  { id: 't_tibnin',       name: 'Tibnin',                   lat: 33.1956, lon: 35.4128, faction: 'hezbollah', importance: 4,  type: 'city',     hardness: 0.25 },
+  { id: 't_adaisseh',     name: 'Adaisseh',                 lat: 33.2542, lon: 35.5403, faction: 'hezbollah', importance: 4,  type: 'launch',   hardness: 0.25 },
+  { id: 't_kfar_kila',    name: 'Kfar Kila',                lat: 33.2497, lon: 35.5703, faction: 'hezbollah', importance: 4,  type: 'launch',   hardness: 0.25 },
+  { id: 't_jezzine',      name: 'Jezzine',                  lat: 33.5439, lon: 35.5847, faction: 'hezbollah', importance: 5,  type: 'city',     hardness: 0.25 },
+  { id: 't_aitaroun',     name: 'Aitaroun',                 lat: 33.1086, lon: 35.4458, faction: 'hezbollah', importance: 3,  type: 'launch',   hardness: 0.25 },
+  { id: 't_kfarchouba',   name: 'Kfarchouba',               lat: 33.2606, lon: 35.6694, faction: 'hezbollah', importance: 3,  type: 'launch',   hardness: 0.25 },
 
   // === Iran ===
   { id: 't_tehran',       name: 'TEHRAN (capital)',         lat: 35.6892, lon: 51.3890, faction: 'iran',      importance: 10, type: 'capital',  hardness: 0.5 },
@@ -7677,49 +7704,15 @@ function drawRadarSweep() {
   ctx.stroke();
 }
 
-// === Visual map context labels (Gaza, South Lebanon — non-game places for orientation) ===
-// These are NOT cities (no health, no targets). They're rendered as small grey labels
-// to anchor the player on the map. When zoomed out further they fade.
+// === Visual-only map context labels — places that are NOT clickable strike targets ===
+// (All Gaza/Lebanon cities that ARE strike targets live in ENEMY_TARGETS — they get red ★ stars.
+// This array is now ONLY for crossings, valleys, and minor villages without strike value.)
 const MAP_CONTEXT_LABELS = [
-  // === GAZA STRIP === — palestinian-controlled cities & refugee camps
-  { name: 'Beit Lahia',     lat: 31.5520, lon: 34.5023, region: 'gaza', size: 'small' },
-  { name: 'Jabalia',        lat: 31.5285, lon: 34.4828, region: 'gaza', size: 'medium' },
-  { name: 'Beit Hanoun',    lat: 31.5395, lon: 34.5363, region: 'gaza', size: 'small' },
-  { name: 'Gaza City',      lat: 31.5018, lon: 34.4668, region: 'gaza', size: 'large' },
-  { name: 'Al-Shati Camp',  lat: 31.5300, lon: 34.4400, region: 'gaza', size: 'small' },
-  { name: 'Nuseirat',       lat: 31.4500, lon: 34.3950, region: 'gaza', size: 'small' },
-  { name: 'Bureij',         lat: 31.4400, lon: 34.4060, region: 'gaza', size: 'small' },
-  { name: 'Al-Maghazi',     lat: 31.4296, lon: 34.4014, region: 'gaza', size: 'small' },
-  { name: 'Deir al-Balah',  lat: 31.4180, lon: 34.3510, region: 'gaza', size: 'medium' },
-  { name: 'Khan Younis',    lat: 31.3464, lon: 34.3068, region: 'gaza', size: 'large' },
-  { name: 'Bani Suheila',   lat: 31.3434, lon: 34.3303, region: 'gaza', size: 'small' },
-  { name: 'Abasan',         lat: 31.3196, lon: 34.3527, region: 'gaza', size: 'small' },
-  { name: 'Rafah',          lat: 31.2906, lon: 34.2447, region: 'gaza', size: 'large' },
-  { name: 'Tal as-Sultan',  lat: 31.2864, lon: 34.2256, region: 'gaza', size: 'small' },
+  // Border crossings (orange dots)
   { name: 'Erez Crossing',  lat: 31.5658, lon: 34.5572, region: 'gaza', size: 'border' },
   { name: 'Kerem Shalom',   lat: 31.2300, lon: 34.2900, region: 'gaza', size: 'border' },
-  // === SOUTH LEBANON === — Hezbollah operating area
-  { name: 'Tyre (Sour)',    lat: 33.2705, lon: 35.2038, region: 'lebanon', size: 'large' },
-  { name: 'Sidon (Saida)',  lat: 33.5571, lon: 35.3729, region: 'lebanon', size: 'large' },
-  { name: 'Nabatieh',       lat: 33.3789, lon: 35.4839, region: 'lebanon', size: 'medium' },
-  { name: 'Bint Jbeil',     lat: 33.1218, lon: 35.4326, region: 'lebanon', size: 'medium' },
-  { name: 'Marjayoun',      lat: 33.3640, lon: 35.5919, region: 'lebanon', size: 'small' },
-  { name: 'Hasbaya',        lat: 33.3963, lon: 35.6818, region: 'lebanon', size: 'small' },
-  { name: 'Khiam',          lat: 33.3260, lon: 35.6028, region: 'lebanon', size: 'small' },
-  { name: 'Aita ash-Shab',  lat: 33.0938, lon: 35.3489, region: 'lebanon', size: 'small' },
-  { name: 'Maroun al-Ras',  lat: 33.1014, lon: 35.4115, region: 'lebanon', size: 'small' },
-  { name: 'Kfarchouba',     lat: 33.2606, lon: 35.6694, region: 'lebanon', size: 'small' },
-  { name: 'Yaroun',         lat: 33.0908, lon: 35.4458, region: 'lebanon', size: 'small' },
-  { name: 'Markaba',        lat: 33.2600, lon: 35.5050, region: 'lebanon', size: 'small' },
-  { name: 'Tibnin (Tibnine)',lat: 33.1956, lon: 35.4128, region: 'lebanon', size: 'small' },
-  { name: 'Adaisseh',       lat: 33.2542, lon: 35.5403, region: 'lebanon', size: 'small' },
-  { name: 'Aitaroun',       lat: 33.1086, lon: 35.4458, region: 'lebanon', size: 'small' },
-  { name: 'Rmeish',         lat: 33.0917, lon: 35.3878, region: 'lebanon', size: 'small' },
-  { name: 'Kfar Kila',      lat: 33.2497, lon: 35.5703, region: 'lebanon', size: 'small' },
-  { name: 'Jezzine',        lat: 33.5439, lon: 35.5847, region: 'lebanon', size: 'small' },
-  { name: 'Beirut (south)', lat: 33.8500, lon: 35.4900, region: 'lebanon', size: 'large' },
-  { name: 'Bekaa Valley',   lat: 33.8500, lon: 35.9000, region: 'lebanon', size: 'medium' },
-  { name: 'Baalbek',        lat: 34.0058, lon: 36.2181, region: 'lebanon', size: 'medium' }
+  // Tiny South-Lebanon villages without separate strike value (Rmeish — christian, Israel-friendly, no Hezb)
+  { name: 'Rmeish',         lat: 33.0917, lon: 35.3878, region: 'lebanon', size: 'small' }
 ];
 
 function drawContextLabels() {
@@ -12132,7 +12125,7 @@ function fireDoctrinalLeaderRetaliation(target) {
 //  - Iran: ballistic + Shahed swarm dominate; cruise NEARLY NEVER used at Israel (none in 2025 war)
 //  - Houthi: drones + ballistic only; NO cruise (zero historical use)
 const FACTION_WEAPON_WEIGHTS = {
-  hamas:     { rocket: 58, mortar: 36, heavyRocket: 6,  drone: 0 },     // Hamas had ZERO drone production capacity historically — set to 0
+  hamas:     { rocket: 50, mortar: 30, heavyRocket: 20, drone: 0 },     // heavyRocket boosted from 6→20: Hamas's only Tel Aviv-reaching weapon
   hezbollah: { rocket: 50, heavyRocket: 28, drone: 14, cruise: 2,  tacBallistic: 1 },
   iran:      { ballistic: 50, drone: 45, cruise: 5 },
   houthi:    { drone: 60, ballistic: 38, heavyRocket: 2 }    // no cruise — never used historically
@@ -12760,14 +12753,28 @@ function spawnGazaHamasThreat(weaponType) {
   // Hamas doesn't waste a Fajr-5 (worth $50K+, hard to smuggle) on Nir Oz (population 1).
   candidates = candidates.filter(c => isWeaponTargetAppropriate(weaponType, c));
   if (candidates.length === 0) return;   // no doctrinally-appropriate target for this weapon → abort silently
-  // Weight by importance (Hamas aims for high-value when in range)
-  let totalWeight = 0;
-  for (const c of candidates) totalWeight += (c.importance || 1);
-  let r = Math.random() * totalWeight;
-  let target = candidates[0];
-  for (const c of candidates) {
-    r -= (c.importance || 1);
-    if (r <= 0) { target = c; break; }
+  // === HAMAS HEAVY ROCKET DOCTRINE: Tel Aviv is the prized propaganda target ===
+  // Real-world (1991 Scuds, 2014 Operation Protective Edge, 2021 Guardian, 2023 Iron Swords):
+  // every long-range Hamas/PIJ rocket is fired at Tel Aviv first. M-302/Fajr-5 = "Tel Aviv weapons".
+  // 60% chance to override target with Tel Aviv if it's in candidates.
+  let target;
+  if (weaponType === 'heavyRocket' || weaponType === 'cruise') {
+    const telaviv = candidates.find(c => c.id === 'telaviv');
+    if (telaviv && Math.random() < 0.60) {
+      target = telaviv;
+      logEvent(`▲ Hamas heavy rocket fired toward TEL AVIV — propaganda doctrine`, 'danger');
+    }
+  }
+  if (!target) {
+    // Standard importance-weighted pick (already biases capital/big cities)
+    let totalWeight = 0;
+    for (const c of candidates) totalWeight += (c.importance || 1);
+    let r = Math.random() * totalWeight;
+    target = candidates[0];
+    for (const c of candidates) {
+      r -= (c.importance || 1);
+      if (r <= 0) { target = c; break; }
+    }
   }
 
   // 2. Find nearest Hamas launch site to that target (within range)
