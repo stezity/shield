@@ -8772,26 +8772,25 @@ function spawnThreat(typeId, enemyId, targetCityId, explicitLat, explicitLon, ex
       return;
     }
     candidates = doctrineFiltered;
-    // === HAMAS HEAVY ROCKET DOCTRINE — Gush Dan + HaShfela + Lakhish saturation ===
-    // Real-world: Hamas heavy rockets aim central Israel but CEP spreads them across
-    // THREE regions. Tel Aviv is the propaganda target but doesn't get the lion's share —
-    // the WIDER central Israel takes the bulk of fires.
-    //   Gush Dan  ~50% (Tel Aviv metro)
-    //   HaShfela  ~30% (coastal lowland — Rehovot, Ashdod, Yavne, Lod, Ramla)
-    //   Lakhish   ~15% (Kiryat Gat, Beit Shemesh, Ashkelon edge)
-    //   Other     ~5%  (Jerusalem propaganda, Herzliya)
+    // === HAMAS HEAVY ROCKET DOCTRINE — POOR CEP doctrine ===
+    // Hamas AIMS Tel Aviv but rocket CEP is huge (1-3 km error) → most fall in surrounding regions.
+    // Tel Aviv core hits are RARE (lucky shots through saturation). Bulk lands in Shfela/Lakhish.
+    //   Gush Dan  ~36% (Tel Aviv only ~10% — most aimed shots miss the city)
+    //   HaShfela  ~37% (coastal lowland — biggest probability zone for misses)
+    //   Lakhish   ~19% (long-fall misses landing south)
+    //   Other     ~3%  (Jerusalem propaganda)
     if (enemyId === 'hamas' && (typeId === 'heavyRocket' || typeId === 'cruise')) {
       const TA_AXIS_WEIGHTS = {
-        // === GUSH DAN (~50%) ===
-        telaviv: 18, rishon: 8, holon: 6, batyam: 5,
-        bnei_brak: 4, ramat_gan: 4, givatayim: 2, petah: 3,
-        // === HA-SHFELA (~30%) ===
-        ashdod: 7, rehovot: 5, yavne: 3, lod: 3, ramla: 3,
-        ness_ziona: 2, beit_shemesh: 4, gedera: 3,
-        // === LAKHISH (~15%) ===
-        kiryat_gat: 5, ashkelon: 4, sderot: 3,
-        // === RARE BIG-STATEMENT (~5%) ===
-        jerusalem: 3, herzliya: 2
+        // === GUSH DAN (~36%) — TA is RARE direct hit ===
+        telaviv: 10, rishon: 5, holon: 4, batyam: 4,
+        bnei_brak: 3, ramat_gan: 3, givatayim: 2, petah: 3, herzliya: 2,
+        // === HA-SHFELA (~37%) — coastal lowland, very large area, most spillover ===
+        ashdod: 8, rehovot: 5, yavne: 4, lod: 4, ramla: 4,
+        ness_ziona: 3, beit_shemesh: 5, gedera: 4,
+        // === LAKHISH (~19%) — long-fall misses south ===
+        kiryat_gat: 8, ashkelon: 6, sderot: 5,
+        // === RARE BIG-STATEMENT (~3%) ===
+        jerusalem: 3
       };
       const flat = [];
       for (const cid of Object.keys(TA_AXIS_WEIGHTS)) {
@@ -12959,23 +12958,23 @@ function spawnGazaHamasThreat(weaponType) {
   // Hamas doesn't waste a Fajr-5 (worth $50K+, hard to smuggle) on Nir Oz (population 1).
   candidates = candidates.filter(c => isWeaponTargetAppropriate(weaponType, c));
   if (candidates.length === 0) return;   // no doctrinally-appropriate target for this weapon → abort silently
-  // === HAMAS HEAVY ROCKET DOCTRINE — Gush Dan + HaShfela + Lakhish saturation ===
-  // Real CEP-driven distribution across the whole central Israel: Tel Aviv aimed,
-  // but most ricochet to suburbs and lowland.
-  //   Gush Dan (~50%) · HaShfela (~30%) · Lakhish (~15%) · big-statement (~5%)
+  // === HAMAS HEAVY ROCKET DOCTRINE — POOR CEP doctrine ===
+  // Hamas AIMS Tel Aviv but CEP is huge → most rockets fall in surrounding zones.
+  // Tel Aviv core only ~10% (rare lucky direct hit). Bulk lands in Shfela/Lakhish.
+  //   Gush Dan ~36% · HaShfela ~37% · Lakhish ~19% · Jerusalem rare ~3%
   let target;
   if (weaponType === 'heavyRocket' || weaponType === 'cruise') {
     const TA_AXIS_WEIGHTS = {
-      // Gush Dan
-      telaviv: 18, rishon: 8, holon: 6, batyam: 5,
-      bnei_brak: 4, ramat_gan: 4, givatayim: 2, petah: 3,
-      // HaShfela
-      ashdod: 7, rehovot: 5, yavne: 3, lod: 3, ramla: 3,
-      ness_ziona: 2, beit_shemesh: 4, gedera: 3,
-      // Lakhish
-      kiryat_gat: 5, ashkelon: 4, sderot: 3,
-      // Rare big-statement
-      jerusalem: 3, herzliya: 2
+      // Gush Dan (~36%) — Tel Aviv RARE direct hit
+      telaviv: 10, rishon: 5, holon: 4, batyam: 4,
+      bnei_brak: 3, ramat_gan: 3, givatayim: 2, petah: 3, herzliya: 2,
+      // HaShfela (~37%) — coastal lowland, biggest spillover zone
+      ashdod: 8, rehovot: 5, yavne: 4, lod: 4, ramla: 4,
+      ness_ziona: 3, beit_shemesh: 5, gedera: 4,
+      // Lakhish (~19%) — long-fall misses south
+      kiryat_gat: 8, ashkelon: 6, sderot: 5,
+      // Rare big-statement (~3%)
+      jerusalem: 3
     };
     const flat = [];
     for (const cid of Object.keys(TA_AXIS_WEIGHTS)) {
