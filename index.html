@@ -1792,7 +1792,9 @@ const BATTERY_TYPES = {
     rangeKm: 70, altitudeRange: '0–10 km',
     speed: 0.11, reloadTime: 1200,             // boosted from 0.085 — was too slow, threats impacted before catch
     capacity: 60, launchers: 3,
-    canTarget: ['rocket', 'mortar', 'drone', 'cruise', 'tacBallistic'],
+    // heavyRocket added — Tamir interceptor IS rated for Fajr-5/M-302/A-120 in terminal phase
+    // (real-world: Iron Dome shot down hundreds of heavy rockets in 2014 + 2021 + 2023 wars)
+    canTarget: ['rocket', 'mortar', 'drone', 'cruise', 'tacBallistic', 'heavyRocket'],
     cost: 50000, accuracy: 0.94                 // 0.96 → 0.94 — occasional misses near target are realistic
   },
   davidsSling: {
