@@ -8629,7 +8629,15 @@ function spawnThreat(typeId, enemyId, targetCityId, explicitLat, explicitLon, ex
       targetCity = { id: 'virtual_' + (nextId), name: 'Open area', lat: explicitLat, lon: explicitLon, importance: 1, population: 0, alive: true, type: 'virtual' };
     }
   }
-  if (targetCityId) targetCity = state.cities.find(c => c.id === targetCityId && c.alive);
+  if (targetCityId) {
+    const tc = state.cities.find(c => c.id === targetCityId && c.alive);
+    // Doctrine guard: even if a caller asks for "Be'eri kibbutz with Fajr-5", refuse it.
+    // Real-world: Hamas wouldn't waste a precious heavy rocket on a 1-person target.
+    if (tc && (typeof isWeaponTargetAppropriate !== 'function' || isWeaponTargetAppropriate(typeId, tc))) {
+      targetCity = tc;
+    }
+    // If the explicit target was rejected, fall through to normal picker logic below
+  }
   if (!targetCity) {
     let candidates = state.cities.filter(c => c.alive);
     // === Apply per-faction × per-weapon geographic range table ===
@@ -8654,11 +8662,17 @@ function spawnThreat(typeId, enemyId, targetCityId, explicitLat, explicitLon, ex
       candidates = candidates.filter(c => c.id === 'eilat' || c.importance >= 8);
     }
     // === DOCTRINE FILTER: heavy / cruise / ballistic NEVER fired at trivial targets ===
+    // If doctrineFiltered is EMPTY (all candidates were kibbutzim/villages too small for this weapon),
+    // ABORT the spawn — faction won't waste a $50K Fajr-5 on Be'eri (pop 1).
+    // Was: candidates kept the unfiltered list with kibbutzim → Fajr-5 hit Be'eri kibbutz. BUG.
     const doctrineFiltered = (typeof isWeaponTargetAppropriate === 'function')
       ? candidates.filter(c => isWeaponTargetAppropriate(typeId, c))
       : candidates;
-    if (doctrineFiltered.length > 0) candidates = doctrineFiltered;
-    if (candidates.length === 0) candidates = state.cities.filter(c => c.alive);
+    if (doctrineFiltered.length === 0) {
+      // No doctrinally appropriate target in range → silently skip this spawn
+      return;
+    }
+    candidates = doctrineFiltered;
     // === DOCTRINAL TARGET PICK — uses faction personality (priorities + chaos) ===
     targetCity = (typeof pickDoctrinalTarget === 'function')
       ? pickDoctrinalTarget(enemyId, candidates)
