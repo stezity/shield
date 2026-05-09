@@ -1999,26 +1999,28 @@ function pickWeaponName(faction, type, distanceKm) {
   const list = WEAPON_NAMES[faction] && WEAPON_NAMES[faction][type];
   if (!list || list.length === 0) return null;
   if (typeof distanceKm !== 'number') return list[Math.floor(Math.random() * list.length)];
-  // Filter by real range: weapon must reach target AND not be massive overkill
-  const valid = list.filter(name => {
-    const r = WEAPON_RANGES[name];
-    if (typeof r !== 'number') return true;     // unknown — allow
-    // Must reach (with 10% margin)
-    if (r < distanceKm * 0.9) return false;
-    // Don't pick a 1500km missile for a 10km strike (overkill cap = 8x)
-    if (r > distanceKm * 8 && distanceKm < 50) return false;
-    return true;
-  });
-  if (valid.length === 0) {
-    // No exact match — pick the closest-range weapon that can reach
-    const reaching = list.filter(n => (WEAPON_RANGES[n] || 9999) >= distanceKm * 0.9);
-    if (reaching.length > 0) {
-      reaching.sort((a, b) => (WEAPON_RANGES[a] || 9999) - (WEAPON_RANGES[b] || 9999));
-      return reaching[0];
-    }
-    return list[0];
+  // === REALISTIC AMMO ECONOMY ===
+  // Hamas / Hezbollah / Iran wouldn't waste a $50K long-range rocket on a target a $500 Qassam can reach.
+  // Real-world: Kfar Aza (5 km from Gaza) gets Qassam-3, NOT J-90 (90 km). J-90 = Tel Aviv weapon.
+  // Algorithm: pick from the 3 SHORTEST-range weapons that still reach target (cheap-ammo principle).
+  const reaching = list.filter(n => (WEAPON_RANGES[n] || 9999) >= distanceKm * 0.9);
+  if (reaching.length === 0) {
+    // No weapon in this category reaches — fall back to longest-range one (better than nothing)
+    const sorted = list.slice().sort((a, b) => (WEAPON_RANGES[b] || 0) - (WEAPON_RANGES[a] || 0));
+    return sorted[0] || list[0];
   }
-  return valid[Math.floor(Math.random() * valid.length)];
+  // Sort by range ASCENDING — shortest first (cheapest, most plentiful)
+  reaching.sort((a, b) => (WEAPON_RANGES[a] || 9999) - (WEAPON_RANGES[b] || 9999));
+  // Take the 3 shortest weapons that reach. With weighting bias toward index 0:
+  //   60% pick shortest, 30% second-shortest, 10% third-shortest.
+  // This matches doctrine — most fires are with cheapest ammunition that does the job.
+  const top = reaching.slice(0, 3);
+  const r = Math.random();
+  if (top.length === 1) return top[0];
+  if (top.length === 2) return r < 0.7 ? top[0] : top[1];
+  if (r < 0.60) return top[0];
+  if (r < 0.90) return top[1];
+  return top[2];
 }
 
 // === Threat types — all hostile objects in red-orange palette ===
