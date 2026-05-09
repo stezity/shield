@@ -4296,6 +4296,27 @@ function launchAirStrike(lat, lon) {
   }
 }
 
+// === ENEMY TARGET DURABILITY: HQs/strategic/bunkers absorb many bombs; small launches die fast ===
+// Was: every target died at damage >= 100, bombs do ~17 dmg → ~6 bombs = dead. Too fragile.
+// Now: divisor scales by importance + type. Hardened bunkers (Sinwar, Natanz) need 5-6 SORTIES.
+function targetDurability(target) {
+  if (!target) return 1;
+  let d = 1;
+  d += (target.importance || 0) * 0.20;       // imp 10 → +2.0 baseline
+  switch (target.type) {
+    case 'leader':    d += 3.0; break;   // ~9 sorties for Sinwar/Nasrallah bunker (imp 10)
+    case 'strategic': d += 4.5; break;   // ~12-14 sorties for Natanz/Fordow (use US support / MOP)
+    case 'capital':   d += 2.5; break;   // ~6-7 sorties for Tehran/Gaza City (entire admin quarter)
+    case 'HQ':        d += 2.0; break;   // ~5-6 sorties for command posts
+    case 'arsenal':   d += 1.0; break;   // ~3-4 sorties for depots (dispersed but explosive)
+    case 'city':      d += 1.5; break;   // ~3-5 sorties for population centers
+    case 'launch':    d -= 0.5; break;   // ~1-2 sorties for mobile launchers (soft, exposed)
+    case 'powerplant':d += 1.5; break;
+    case 'port':      d += 1.0; break;
+  }
+  return Math.max(1, d);
+}
+
 function updateAirStrikes(dt) {
   if (!state.airstrikes) return;
   state.airstrikes.forEach(a => {
@@ -4331,7 +4352,9 @@ function updateAirStrikes(dt) {
             const gazaMul = (state.gaza && state.scenario && state.scenario.campaign === 'gaza') ? 0.35 : 1.0;
             // Single bombs each do ~12-22 dmg (6 bombs ≈ 90-130 total → kills most non-hardened targets)
             const dmgRange = a.isSingleBombing ? (12 + Math.random() * 10) : (6 + Math.random() * 12);
-            const dmg = Math.round(dmgRange * gazaMul);
+            // Divide by target durability — Sinwar bunker (5×) needs ~5 sorties, mobile launcher (1.2×) ≈ 1
+            const durability = targetDurability(target);
+            const dmg = Math.round((dmgRange * gazaMul) / durability);
             target.damage = (target.damage || 0) + dmg;
             if (a.isSingleBombing) a.bombHits = (a.bombHits || 0) + 1;
             if (target.damage >= 100) {
@@ -4411,7 +4434,9 @@ function updateAirStrikes(dt) {
       if (hit) {
         // Gaza Campaign: each strike does ~3x less damage (4-6 strikes to kill)
         const gazaMul = (state.gaza && state.scenario && state.scenario.campaign === 'gaza') ? 0.35 : 1.0;
-        const damage = Math.round((40 + Math.random() * 40) * gazaMul);
+        // Divide by target durability so HQs / strategic targets need multiple sorties
+        const durability = targetDurability(target);
+        const damage = Math.round(((40 + Math.random() * 40) * gazaMul) / durability);
         target.damage = (target.damage || 0) + damage;
         const reward = STRIKE_REWARD[target.type] || 1500;
         // Don't pay the player for IDF strikes when they're playing AS the attacker (they're being struck, not striking)
@@ -12234,6 +12259,7 @@ function ensureWorldState() {
 
 // Pop a random crisis (weighted random with cooldown)
 function spawnCrisis() {
+  if (state.playAs === 'attacker') return;   // crises = IDF-defender mechanic only
   ensureWorldState();
   if (state.world.activeCrisis) return;   // already active
   const ev = CRISIS_EVENTS[Math.floor(Math.random() * CRISIS_EVENTS.length)];
@@ -12298,6 +12324,18 @@ function closeCrisisPopup() {
 
 // Per-frame crisis tick — handles spawn + countdown timer
 function tickCrisis(dt) {
+  // === CRISIS / DILEMMA POPUPS are IDF-defender-only ===
+  // The dilemmas are about IDF strike decisions (civilian collateral, ceasefire votes, etc.)
+  // — they make no sense when the player IS the attacker (Resistance Axis).
+  if (state.playAs === 'attacker') {
+    // If a crisis was somehow active when player switched modes, dismiss it cleanly
+    if (state.world && state.world.activeCrisis) {
+      const popup = document.getElementById('crisis-popup');
+      if (popup) popup.style.display = 'none';
+      state.world.activeCrisis = null;
+    }
+    return;
+  }
   ensureWorldState();
   const w = state.world;
   if (w.activeCrisis) {
