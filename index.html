@@ -8673,10 +8673,20 @@ function spawnThreat(typeId, enemyId, targetCityId, explicitLat, explicitLon, ex
       return;
     }
     candidates = doctrineFiltered;
-    // === DOCTRINAL TARGET PICK — uses faction personality (priorities + chaos) ===
-    targetCity = (typeof pickDoctrinalTarget === 'function')
-      ? pickDoctrinalTarget(enemyId, candidates)
-      : candidates[Math.floor(Math.random() * candidates.length)];
+    // === HAMAS HEAVY ROCKET DOCTRINE (also applies in non-Gaza scenarios) ===
+    // Fajr-5 / M-302 / A-120 are Tel Aviv weapons — 95% bias toward TA when reachable.
+    if (enemyId === 'hamas' && (typeId === 'heavyRocket' || typeId === 'cruise')) {
+      const telaviv = candidates.find(c => c.id === 'telaviv');
+      if (telaviv && Math.random() < 0.95) {
+        targetCity = telaviv;
+      }
+    }
+    if (!targetCity) {
+      // === DOCTRINAL TARGET PICK — uses faction personality (priorities + chaos) ===
+      targetCity = (typeof pickDoctrinalTarget === 'function')
+        ? pickDoctrinalTarget(enemyId, candidates)
+        : candidates[Math.floor(Math.random() * candidates.length)];
+    }
   }
   if (!targetCity) return;
 
@@ -12805,20 +12815,24 @@ function spawnGazaHamasThreat(weaponType) {
   // Hamas doesn't waste a Fajr-5 (worth $50K+, hard to smuggle) on Nir Oz (population 1).
   candidates = candidates.filter(c => isWeaponTargetAppropriate(weaponType, c));
   if (candidates.length === 0) return;   // no doctrinally-appropriate target for this weapon → abort silently
-  // === HAMAS HEAVY ROCKET DOCTRINE: Tel Aviv is the prized propaganda target ===
-  // Real-world (1991 Scuds, 2014 Operation Protective Edge, 2021 Guardian, 2023 Iron Swords):
-  // every long-range Hamas/PIJ rocket is fired at Tel Aviv first. M-302/Fajr-5 = "Tel Aviv weapons".
-  // 60% chance to override target with Tel Aviv if it's in candidates.
+  // === HAMAS HEAVY ROCKET DOCTRINE: ALL Fajr-5 / M-302 / A-120 fly at Tel Aviv ===
+  // Real-world: every long-range Hamas/PIJ rocket from 2014 onward was specifically
+  // launched at Tel Aviv as propaganda. Heavy rockets = "Tel Aviv weapons", no exceptions.
+  // 95% Tel Aviv → 5% Jerusalem/Ashdod fallback (rare salvo dispersion).
   let target;
   if (weaponType === 'heavyRocket' || weaponType === 'cruise') {
     const telaviv = candidates.find(c => c.id === 'telaviv');
-    if (telaviv && Math.random() < 0.60) {
+    if (telaviv && Math.random() < 0.95) {
       target = telaviv;
-      logEvent(`▲ Hamas heavy rocket fired toward TEL AVIV — propaganda doctrine`, 'danger');
+      logEvent(`▲ Hamas heavy rocket → TEL AVIV (Fajr-5 / M-302 / A-120 doctrine)`, 'danger');
+    } else {
+      // 5% fallback: Jerusalem (propaganda value) or Ashdod (range fallback)
+      const fallbacks = candidates.filter(c => ['jerusalem', 'ashdod', 'rishon', 'holon'].includes(c.id));
+      if (fallbacks.length > 0) target = fallbacks[Math.floor(Math.random() * fallbacks.length)];
     }
   }
   if (!target) {
-    // Standard importance-weighted pick (already biases capital/big cities)
+    // Standard importance-weighted pick (for non-heavy weapons or if TA not in range)
     let totalWeight = 0;
     for (const c of candidates) totalWeight += (c.importance || 1);
     let r = Math.random() * totalWeight;
