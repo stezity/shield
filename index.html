@@ -8772,13 +8772,19 @@ function spawnThreat(typeId, enemyId, targetCityId, explicitLat, explicitLon, ex
       return;
     }
     candidates = doctrineFiltered;
-    // === HAMAS HEAVY ROCKET DOCTRINE (also applies in non-Gaza scenarios) ===
-    // Fajr-5 / M-302 / A-120 are Tel Aviv weapons — 95% bias toward TA when reachable.
+    // === HAMAS HEAVY ROCKET DOCTRINE (applies everywhere) ===
+    // ALL Fajr-5 / M-302 / A-120 / cruise → Tel Aviv. Fallback Jerusalem if TA destroyed.
+    // Real-world: every Hamas heavy rocket since 2014 was launched at Tel Aviv as propaganda.
     if (enemyId === 'hamas' && (typeId === 'heavyRocket' || typeId === 'cruise')) {
       const telaviv = candidates.find(c => c.id === 'telaviv');
-      if (telaviv && Math.random() < 0.95) {
+      if (telaviv) {
         targetCity = telaviv;
+      } else {
+        // Tel Aviv destroyed → fallback to Jerusalem
+        const jerusalem = candidates.find(c => c.id === 'jerusalem');
+        if (jerusalem) targetCity = jerusalem;
       }
+      // If both dead — fall through to normal picker (very rare endgame state)
     }
     // === HOUTHI BALLISTIC DOCTRINE (real Sept 2024 / Oct 2024 strike pattern) ===
     // Houthi long-range CEP is poor — they aim Tel Aviv but typically impact Lakhish/Negev.
@@ -12936,20 +12942,19 @@ function spawnGazaHamasThreat(weaponType) {
   // Hamas doesn't waste a Fajr-5 (worth $50K+, hard to smuggle) on Nir Oz (population 1).
   candidates = candidates.filter(c => isWeaponTargetAppropriate(weaponType, c));
   if (candidates.length === 0) return;   // no doctrinally-appropriate target for this weapon → abort silently
-  // === HAMAS HEAVY ROCKET DOCTRINE: ALL Fajr-5 / M-302 / A-120 fly at Tel Aviv ===
-  // Real-world: every long-range Hamas/PIJ rocket from 2014 onward was specifically
-  // launched at Tel Aviv as propaganda. Heavy rockets = "Tel Aviv weapons", no exceptions.
-  // 95% Tel Aviv → 5% Jerusalem/Ashdod fallback (rare salvo dispersion).
+  // === HAMAS HEAVY ROCKET DOCTRINE: ALL Fajr-5 / M-302 / A-120 → Tel Aviv ===
+  // 100% Tel Aviv (when alive) → fallback Jerusalem if TA destroyed.
+  // Real-world: every Hamas heavy rocket since 2014 was launched at Tel Aviv as propaganda.
   let target;
   if (weaponType === 'heavyRocket' || weaponType === 'cruise') {
     const telaviv = candidates.find(c => c.id === 'telaviv');
-    if (telaviv && Math.random() < 0.95) {
+    if (telaviv) {
       target = telaviv;
       logEvent(`▲ Hamas heavy rocket → TEL AVIV (Fajr-5 / M-302 / A-120 doctrine)`, 'danger');
     } else {
-      // 5% fallback: Jerusalem (propaganda value) or Ashdod (range fallback)
-      const fallbacks = candidates.filter(c => ['jerusalem', 'ashdod', 'rishon', 'holon'].includes(c.id));
-      if (fallbacks.length > 0) target = fallbacks[Math.floor(Math.random() * fallbacks.length)];
+      // Tel Aviv destroyed → fallback to Jerusalem (propaganda value)
+      const jerusalem = candidates.find(c => c.id === 'jerusalem');
+      if (jerusalem) target = jerusalem;
     }
   }
   if (!target) {
