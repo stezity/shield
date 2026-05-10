@@ -1312,10 +1312,11 @@ body.targeting-cursor #map-canvas {
           <span class="attacker-salvo-label">COUNT:</span>
           <button class="salvo-step" data-delta="-5">−5</button>
           <button class="salvo-step" data-delta="-1">−</button>
-          <input type="number" id="salvo-count-input" value="1" min="1" max="1000">
+          <input type="number" id="salvo-count-input" value="1" min="1" max="99999">
           <button class="salvo-step" data-delta="1">+</button>
           <button class="salvo-step" data-delta="5">+5</button>
           <button class="salvo-step" data-delta="50">+50</button>
+          <button class="salvo-step" data-delta="500">+500</button>
         </div>
         <div class="attacker-salvo-row">
           <span class="attacker-salvo-label">SPREAD:</span>
@@ -1807,6 +1808,8 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.5.2 — patch: salvo count fully uncapped (was: 3 hidden clamps to 50 in input
+//           handler, button handler, launchAttackerStrike) + +500 quick-step button
 //   2.5.1 — patch: third version label (footer 'v2.0') now syncs from GAME_VERSION
 //   2.5.0 — sandbox cheats panel (Resistance Axis: instant fire, infinite arsenal,
 //           IDF retal toggle, no-snap), salvo cap 50→1000, version system added
@@ -1818,7 +1821,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.5.1';
+const GAME_VERSION = '2.5.2';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -9676,7 +9679,8 @@ function showAttackerPanel() {
     countInput.oninput = () => {
       let n = parseInt(countInput.value, 10);
       if (isNaN(n) || n < 1) n = 1;
-      if (n > 50) n = 50;
+      // No upper cap — sandbox-style unlimited salvo (was: clamped to 50)
+      if (n > 99999) n = 99999;   // sanity ceiling only (prevents UI freeze)
       state.attackMode.salvo = n;
       countInput.value = n;
       updateAttackerStatus();
@@ -9688,7 +9692,7 @@ function showAttackerPanel() {
       const delta = parseInt(btn.dataset.delta, 10) || 0;
       let n = (state.attackMode.salvo || 1) + delta;
       if (n < 1) n = 1;
-      if (n > 50) n = 50;
+      if (n > 99999) n = 99999;
       state.attackMode.salvo = n;
       if (countInput) countInput.value = n;
       updateAttackerStatus();
@@ -9908,9 +9912,9 @@ function attackerLaunchAt(lat, lon) {
   // Track active factions for IDF retaliation
   state.activeFactions = state.activeFactions || {};
   state.activeFactions[state.attackMode.faction] = Date.now();
-  // === Salvo cap: 50 normally, 1000 with cheat ===
-  const maxSalvo = cheats.noArsenal ? 1000 : 50;
-  let salvoCount = Math.max(1, Math.min(maxSalvo, state.attackMode.salvo || 1));
+  // === Salvo cap: UNLIMITED with infinite-arsenal cheat, else cap by stock (later) ===
+  // No artificial cap — the only limit is what the player types in the input + their hardware.
+  let salvoCount = Math.max(1, state.attackMode.salvo || 1);
   // === ATTACKER CAMPAIGN: arsenal check (skipped if infinite-ammo cheat) ===
   if (!cheats.noArsenal && state.attacker && state.attacker.factionId === state.attackMode.faction) {
     const stock = Math.floor(state.attacker.arsenal[state.attackMode.type] || 0);
