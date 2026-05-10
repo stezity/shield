@@ -1,0 +1,29 @@
+# === Ruflo / Claude Code agent runtime — keep LOCAL, not in repo ===
+# (These provide local AI assistance, not part of the deployed game)
+.claude/
+.claude-flow/
+.mcp.json
+CLAUDE.md
+CLAUDE.local.md
+.agents/
+
+# === Node / npm (if anything ever gets installed locally) ===
+node_modules/
+package-lock.json
+
+# === IDE / OS ===
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# === Logs ===
+*.log
+npm-debug.log*
+
+# === Build output (none currently, but defensive) ===
+dist/
+build/
