@@ -1808,6 +1808,11 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.5.4 — patch: nearest Iron Dome now intercepts drones EN-ROUTE (was: only the
+//           destination-city battery engaged → drones flew through Nahariya/Akko
+//           untouched on way to Krayot). Drone-specific protection-zone now accepts
+//           any battery near the drone's current/predicted position; sort prefers
+//           closest battery to drone (not closest to target)
 //   2.5.3 — patch: Hezbollah drone restricted to NORTH only (latMin 32.0→32.6, blocks
 //           Tel Aviv axis & central). spawnHezbollahThreat now applies FACTION_RANGES
 //           per-weapon lat filter (was bypassed entirely)
@@ -1824,7 +1829,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.5.3';
+const GAME_VERSION = '2.5.4';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -10054,6 +10059,20 @@ function findBestBattery(threat) {
   // (95km away) — which is physically impossible and was the bug the user reported.
   const isInProtectionZone = (b) => {
     const t = BATTERY_TYPES[b.type];
+    // === DRONE EN-ROUTE INTERCEPT DOCTRINE ===
+    // Drones fly slow (~150 km/h) and low — ANY battery the drone passes near
+    // should engage, not just batteries protecting the destination city.
+    // (Was: a Nahariya Iron Dome wouldn't engage a Hezbollah drone heading to
+    // Krayot because Krayot was technically the "target" and the drone passed
+    // through Nahariya's protection envelope without being touched.)
+    if (threat.type === 'drone') {
+      const distNow = haversineKm(b.lat, b.lon, threat.curLat, threat.curLon);
+      if (distNow <= t.rangeKm * 1.2) return true;            // drone in current range
+      // Also check predicted intercept point — drone WILL fly into range
+      const ip = predictInterceptPoint(b, threat);
+      if (ip && haversineKm(b.lat, b.lon, ip.lat, ip.lon) <= t.rangeKm) return true;
+    }
+    // Default: battery covers the target city
     // 1.2x slack accounts for terminal trajectory curvature
     const targetDistKm = haversineKm(b.lat, b.lon, threat.targetLat, threat.targetLon);
     return targetDistKm <= t.rangeKm * 1.2;
@@ -10110,6 +10129,16 @@ function findBestBattery(threat) {
     return 2;
   };
   pool.sort((a, b) => {
+    // === DRONES: pick the battery NEAREST to the drone right now (en-route intercept) ===
+    // Slow-moving UAVs are best engaged by whoever is closest along their path —
+    // not by the destination city's battery (which may be far from current drone position).
+    if (threat.type === 'drone') {
+      const da = haversineKm(a.lat, a.lon, threat.curLat, threat.curLon);
+      const db = haversineKm(b.lat, b.lon, threat.curLat, threat.curLon);
+      if (Math.abs(da - db) > 1) return da - db;             // closer wins (1km tolerance)
+      // Same-distance tiebreak — cheaper system first (Iron Dome before D.Sling)
+      return priorityFor(a) - priorityFor(b);
+    }
     const pa = priorityFor(a), pb = priorityFor(b);
     if (pa !== pb) return pa - pb;
     // Within same priority — closest to threatened city
