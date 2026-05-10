@@ -1019,7 +1019,7 @@ body.targeting-cursor #map-canvas {
     </div>
   </div>
 
-  <div class="menu-version">v2.0 · GAME SIMULATOR · TILES © OPENSTREETMAP / © CARTODB</div>
+  <div class="menu-version"><span id="version-footer">v2.5.0</span> · GAME SIMULATOR · TILES © OPENSTREETMAP / © CARTODB</div>
 </div>
 
 <!-- ===== SCENARIO SELECTION ===== -->
@@ -1807,6 +1807,7 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.5.1 — patch: third version label (footer 'v2.0') now syncs from GAME_VERSION
 //   2.5.0 — sandbox cheats panel (Resistance Axis: instant fire, infinite arsenal,
 //           IDF retal toggle, no-snap), salvo cap 50→1000, version system added
 //   2.4.0 — Hamas heavy rocket distribution: poor-CEP doctrine across Gush Dan +
@@ -1817,7 +1818,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.5.0';
+const GAME_VERSION = '2.5.1';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -16245,11 +16246,13 @@ function hideTutorialMessage() { if (tutorialEl) tutorialEl.style.display = 'non
    ИНИЦИАЛИЗАЦИЯ
    ========================================================= */
 document.addEventListener('DOMContentLoaded', () => {
-  // Sync version labels from constant (single source of truth)
+  // Sync ALL version labels from constant (single source of truth)
   const verLbl = document.getElementById('version-label');
   if (verLbl) verLbl.textContent = 'v' + GAME_VERSION;
   const hudVer = document.getElementById('hud-version');
   if (hudVer) hudVer.textContent = 'v' + GAME_VERSION;
+  const verFoot = document.getElementById('version-footer');
+  if (verFoot) verFoot.textContent = 'v' + GAME_VERSION;
   initCanvas();
   setupCanvasInteraction();
   preloadTiles();
