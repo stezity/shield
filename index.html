@@ -1312,9 +1312,10 @@ body.targeting-cursor #map-canvas {
           <span class="attacker-salvo-label">COUNT:</span>
           <button class="salvo-step" data-delta="-5">−5</button>
           <button class="salvo-step" data-delta="-1">−</button>
-          <input type="number" id="salvo-count-input" value="1" min="1" max="50">
+          <input type="number" id="salvo-count-input" value="1" min="1" max="1000">
           <button class="salvo-step" data-delta="1">+</button>
           <button class="salvo-step" data-delta="5">+5</button>
+          <button class="salvo-step" data-delta="50">+50</button>
         </div>
         <div class="attacker-salvo-row">
           <span class="attacker-salvo-label">SPREAD:</span>
@@ -1322,6 +1323,14 @@ body.targeting-cursor #map-canvas {
           <button class="spread-btn" data-spread="0.025">MED</button>
           <button class="spread-btn" data-spread="0.06">WIDE</button>
           <button class="spread-btn" data-spread="0.12">SCATTER</button>
+        </div>
+        <!-- ===== SANDBOX CHEATS (Resistance Axis only) ===== -->
+        <div class="attacker-cheats-header" style="margin-top:10px;padding-top:8px;border-top:1px dashed rgba(255,107,94,0.4);font-size:10px;letter-spacing:2px;color:#ff8a76;font-weight:bold;">⚡ SANDBOX CHEATS</div>
+        <div class="attacker-cheats" style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:#f0d0c8;margin-top:4px;">
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" id="cheat-no-reload" checked> No reload (instant fire)</label>
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" id="cheat-no-arsenal" checked> Infinite arsenal (no regen needed)</label>
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" id="cheat-no-idf-retal"> Disable IDF retaliation</label>
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" id="cheat-no-snap"> No snap-to-city (precise click)</label>
         </div>
         <div id="attacker-status">No weapon armed.</div>
       </div>
@@ -8688,8 +8697,11 @@ function spawnThreat(typeId, enemyId, targetCityId, explicitLat, explicitLon, ex
       const d = haversineKm(explicitLat, explicitLon, c.lat, c.lon);
       if (d < nearestKm) { nearestKm = d; nearest = c; }
     }
-    if (nearest && nearestKm < 12) {
-      targetCity = nearest;          // snap to real city if within 12 km
+    // === SANDBOX CHEAT: smaller snap radius if "no snap" enabled (precise click) ===
+    const cheats = (typeof readAttackerCheats === 'function') ? readAttackerCheats() : null;
+    const snapRadiusKm = (cheats && cheats.noSnap) ? 2 : 12;
+    if (nearest && nearestKm < snapRadiusKm) {
+      targetCity = nearest;          // snap to real city if within radius
     } else {
       // virtual target — open desert / sea, no OREF alert
       targetCity = { id: 'virtual_' + (nextId), name: 'Open area', lat: explicitLat, lon: explicitLon, importance: 1, population: 0, alive: true, type: 'virtual' };
@@ -9866,10 +9878,12 @@ function attackerLaunchAt(lat, lon) {
       'warn');
     return false;
   }
-  // === Reload check — block if weapon is reloading ===
+  // === SANDBOX CHEATS — read live from UI ===
+  const cheats = readAttackerCheats();
+  // === Reload check — bypass if cheat enabled ===
   state.attackerReload = state.attackerReload || 0;
   const now = Date.now();
-  if (now < state.attackerReload) {
+  if (!cheats.noReload && now < state.attackerReload) {
     const remaining = Math.ceil((state.attackerReload - now) / 1000);
     showNotification('RELOADING', `Wait ${remaining}s before next launch`, 'warn');
     return false;
@@ -9877,10 +9891,11 @@ function attackerLaunchAt(lat, lon) {
   // Track active factions for IDF retaliation
   state.activeFactions = state.activeFactions || {};
   state.activeFactions[state.attackMode.faction] = Date.now();
-  // === Salvo with player-chosen spread ===
-  let salvoCount = Math.max(1, Math.min(50, state.attackMode.salvo || 1));
-  // === ATTACKER CAMPAIGN: cap salvo by available arsenal ===
-  if (state.attacker && state.attacker.factionId === state.attackMode.faction) {
+  // === Salvo cap: 50 normally, 1000 with cheat ===
+  const maxSalvo = cheats.noArsenal ? 1000 : 50;
+  let salvoCount = Math.max(1, Math.min(maxSalvo, state.attackMode.salvo || 1));
+  // === ATTACKER CAMPAIGN: arsenal check (skipped if infinite-ammo cheat) ===
+  if (!cheats.noArsenal && state.attacker && state.attacker.factionId === state.attackMode.faction) {
     const stock = Math.floor(state.attacker.arsenal[state.attackMode.type] || 0);
     if (stock <= 0) {
       showNotification('OUT OF AMMO', `No ${WEAPON_DISPLAY[state.attackMode.type].label} remaining. Wait for arsenal regeneration.`, 'warn');
@@ -9909,8 +9924,8 @@ function attackerLaunchAt(lat, lon) {
     const offLon = (Math.random() - 0.5) * spreadDeg * 2;
     const tLat = lat + offLat;
     const tLon = lon + offLon;
-    // Deduct arsenal + count launch (+ mission progress)
-    if (state.attacker && state.attacker.factionId === state.attackMode.faction) {
+    // Deduct arsenal + count launch (skip arsenal consumption with infinite cheat)
+    if (!cheats.noArsenal && state.attacker && state.attacker.factionId === state.attackMode.faction) {
       attackerConsumeLaunch(state.attackMode.type, siteIdx, targetCityId);
     }
     if (i === 0) {
@@ -9937,7 +9952,8 @@ function attackerLaunchAt(lat, lon) {
   };
   const baseMs = RELOAD_BASE[state.attackMode.type] || 4000;
   const reloadMs = baseMs + (salvoCount - 1) * (baseMs * 0.15);
-  state.attackerReload = now + reloadMs;
+  // Skip reload entirely if cheat enabled (instant fire)
+  if (!cheats.noReload) state.attackerReload = now + reloadMs;
   if (salvoCount > 1) {
     logEvent(`⚡ Salvo ×${salvoCount}: ${ENEMIES[state.attackMode.faction].name} ${state.attackMode.type} from ${site.name} · reload ${(reloadMs/1000).toFixed(1)}s`, 'warn');
   }
@@ -13546,12 +13562,33 @@ function attackerCheckMissionProgress(ev) {
   }
 }
 
+// === Sandbox cheat reader — pulls live UI checkbox state ===
+// Returns flags for: noReload, noArsenal, noIDFRetal, noSnap.
+// Defaults to all-off if checkboxes not present (e.g., not in attacker mode).
+function readAttackerCheats() {
+  const $ = (id) => document.getElementById(id);
+  return {
+    noReload:    !!($('cheat-no-reload')    && $('cheat-no-reload').checked),
+    noArsenal:   !!($('cheat-no-arsenal')   && $('cheat-no-arsenal').checked),
+    noIDFRetal:  !!($('cheat-no-idf-retal') && $('cheat-no-idf-retal').checked),
+    noSnap:      !!($('cheat-no-snap')      && $('cheat-no-snap').checked)
+  };
+}
+
 // Per-frame attacker tick — arsenal regen, IDF retaliation, smuggling events.
 function tickAttackerCampaign(dt) {
   const a = state.attacker;
   if (!a || !a.factionId) return;
   const now = state.gameTime;
   const f = ATTACKER_FACTIONS[a.factionId];
+
+  // === SANDBOX CHEAT: skip arsenal regen tick entirely if infinite-ammo enabled (perf) ===
+  const cheats = readAttackerCheats();
+  if (cheats.noArsenal) {
+    // Just keep arsenals topped up so UI shows non-zero stocks
+    for (const w of Object.keys(a.arsenal || {})) a.arsenal[w] = a.arsenalCap[w] || 999;
+    return;   // skip the rest of regen logic entirely
+  }
 
   // --- Arsenal regen (per-second × dt × event modifiers) ---
   let regenMul = 1.0;
@@ -13576,7 +13613,8 @@ function tickAttackerCampaign(dt) {
     if (a.damagedSites[k] <= 0.1) delete a.damagedSites[k];
   }
   // --- IDF retaliation: every 60s game-time, if at least 5 launches, hit a random site ---
-  if (a.launches >= 5 && now >= a.nextIdfStrikeAt) {
+  // Skip entirely if cheat enabled (player wants no retaliation)
+  if (a.launches >= 5 && now >= a.nextIdfStrikeAt && !cheats.noIDFRetal) {
     a.nextIdfStrikeAt = now + (45000 + Math.random() * 30000);
     const sites = (ENEMIES[a.factionId] && ENEMIES[a.factionId].launchSites) || [];
     if (sites.length > 0) {
