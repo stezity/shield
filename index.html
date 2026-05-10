@@ -1808,6 +1808,10 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.5.5 — patch: Hezbollah drone terrain-aware targeting (mountain regions HARD,
+//           border + coastal route + Hula valley EASY). Border easy: Kiryat Shmona,
+//           Nahariya, Metula. Coastal via Nahariya → Akko/Krayot/Haifa. Hula valley
+//           low-altitude → Tiberias. Mountains (Safed/Karmiel/Maalot) very rare.
 //   2.5.4 — patch: nearest Iron Dome now intercepts drones EN-ROUTE (was: only the
 //           destination-city battery engaged → drones flew through Nahariya/Akko
 //           untouched on way to Krayot). Drone-specific protection-zone now accepts
@@ -1829,7 +1833,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.5.4';
+const GAME_VERSION = '2.5.5';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -12954,17 +12958,48 @@ function spawnHezbollahThreat(weaponType) {
   // === DOCTRINE FILTER + DOCTRINAL TARGET PICK ===
   targets = targets.filter(c => isWeaponTargetAppropriate(weaponType, c));
   if (targets.length === 0) return;
-  // Use Hezbollah doctrine weighted picker (precision strategic — north + military + infrastructure)
-  const picked = pickDoctrinalTarget('hezbollah', targets);
-  if (picked) targets = [picked];
-  // Weight by importance + slight north preference (Hezbollah likes hitting close)
-  let totalW = 0;
-  for (const c of targets) totalW += (c.importance || 1);
-  let r = Math.random() * totalW;
-  let target = targets[0];
-  for (const c of targets) {
-    r -= (c.importance || 1);
-    if (r <= 0) { target = c; break; }
+  // === HEZBOLLAH DRONE TERRAIN-AWARE TARGETING ===
+  // Drones (Mirsad-1, Ayoub) fly low and slow — they prefer FLAT routes:
+  //  - BORDER (easy, flat)        : Kiryat Shmona, Nahariya, Metula
+  //  - COASTAL ROUTE (via Nahariya): Akko, Krayot/Kiryat Yam, Haifa, Haifa Airport
+  //  - HULA VALLEY ROUTE (via K.Shmona, low altitude): Tiberias
+  //  - MOUNTAINS (HARD, rare)     : Safed, Karmiel, Maalot — terrain blocks LOS, drones often crash
+  let target;
+  if (weaponType === 'drone') {
+    const HEZ_DRONE_WEIGHTS = {
+      // Border easy (flat valley access)
+      kiryat_shmona: 18,
+      nahariya: 15,
+      metula: 5,
+      // Coastal route (Nahariya → south along coast)
+      akko: 8,
+      kiryat_yam: 8,    // = Krayot
+      haifa: 10,
+      // Hula Valley route (low-altitude through valley)
+      tiberias: 8,
+      // Mountain targets (HARD — terrain masks signal, low success)
+      safed: 2, karmiel: 2, maalot: 2
+    };
+    const flat = [];
+    for (const cid of Object.keys(HEZ_DRONE_WEIGHTS)) {
+      const c = targets.find(c => c.id === cid);
+      if (!c) continue;
+      for (let k = 0; k < HEZ_DRONE_WEIGHTS[cid]; k++) flat.push(c);
+    }
+    if (flat.length > 0) target = flat[Math.floor(Math.random() * flat.length)];
+  }
+  if (!target) {
+    // Default doctrine picker for non-drone weapons
+    const picked = pickDoctrinalTarget('hezbollah', targets);
+    if (picked) targets = [picked];
+    let totalW = 0;
+    for (const c of targets) totalW += (c.importance || 1);
+    let r = Math.random() * totalW;
+    target = targets[0];
+    for (const c of targets) {
+      r -= (c.importance || 1);
+      if (r <= 0) { target = c; break; }
+    }
   }
 
   // 2. Compatible launch sites for this weapon + target zone
