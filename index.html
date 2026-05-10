@@ -326,10 +326,21 @@ body::after {
 #notifications { position: fixed; top: 80px; right: 312px; z-index: 500; display: flex; flex-direction: column; gap: 6px; pointer-events: none; }
 .notification {
   background: rgba(8, 17, 30, 0.95); border-left: 4px solid var(--accent);
-  padding: 10px 16px; min-width: 280px; max-width: 400px;
+  padding: 10px 28px 10px 16px; min-width: 280px; max-width: 400px;
   font-size: 12px; animation: slide-in 0.3s ease-out;
   box-shadow: 0 4px 12px rgba(0,0,0,0.6);
+  pointer-events: auto;          /* re-enable clicks for the close button */
+  position: relative;
 }
+.notif-close {
+  position: absolute; top: 4px; right: 6px;
+  width: 18px; height: 18px; line-height: 14px; font-size: 14px;
+  background: transparent; border: 1px solid rgba(255,255,255,0.25);
+  color: var(--text-dim); cursor: pointer; padding: 0;
+  font-weight: bold; border-radius: 2px;
+  font-family: Consolas, monospace;
+}
+.notif-close:hover { background: rgba(255,255,255,0.18); color: #fff; border-color: #fff; }
 .notification.warn { border-color: var(--amber); }
 .notification.danger { border-color: var(--red); }
 .notification.success { border-color: var(--green); }
@@ -1808,6 +1819,13 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.6.0 — MAJOR: Iron Dome reload fix (era-transition full restock + war-time
+//           production surge). Closeable notifications. US PRESIDENT SYSTEM —
+//           getUSPresident() derives from era year (Bush/Obama/Trump/Biden/Trump-2);
+//           17 new events (10 US-aid president-aware + 7 general). Gaza random events
+//           re-enabled. Phase 1 Gaza fixes: palDeaths reverse-attribution bug fixed,
+//           state.escalationLevel synced to gaza.escalation (Sinwar TST now unlocks),
+//           Iron Swords 2023 salvo tapers 100%→40% over era duration (was unsurvivable).
 //   2.5.6 — patch: TST cards no longer get stuck on screen after EXPIRED/STRUCK.
 //           updateTSTs garbage-collected state.tsts but never called renderTSTPanel,
 //           so 'TARGET RELOCATED' cards stayed in DOM until next spawn or player click.
@@ -1837,7 +1855,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.5.6';
+const GAME_VERSION = '2.6.0';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -3596,8 +3614,266 @@ const EVENT_POOL = [
       }
       logEvent(`⚠ ${ENEMIES[fid].name} ELITE LONG-RANGE: ${count}× ${wName} → ${target.name}`, 'danger');
     }
+  },
+  // ===== EXPANDED US SUPPORT — president + situation aware =====
+  // US support level depends on: who's in office (Biden = strong, Trump = transactional,
+  // Obama = restrained, future = fictional). Modulated by Israeli civilian casualties,
+  // international pressure, and Gaza era. Higher US support = better aid events, more interceptors.
+  {
+    id: 'us_president_biden_emergency', weight: 7, title: 'BIDEN: $14B EMERGENCY AID',
+    desc: 'President Biden signs emergency $14B aid package — full restock + Patriot batteries',
+    type: 'success',
+    requires: () => isUSPresident('biden') && (state.gaza ? state.gaza.escalation > 40 : true),
+    apply() {
+      let added = 0;
+      state.batteries.filter(b => b.type === 'ironDome').forEach(b => { const g = Math.min(35, b.capacity - b.ammo); b.ammo += g; added += g; });
+      state.batteries.filter(b => b.type === 'davidsSling').forEach(b => { const g = Math.min(15, b.capacity - b.ammo); b.ammo += g; added += g; });
+      state.money += 50000;
+      state.usSupportLeft = (state.usSupportLeft || 0) + 2;
+      logEvent(`USA (Biden): +${added} interceptors, +$50K, +2 US strikes`, 'success');
+    }
+  },
+  {
+    id: 'us_president_trump_deal', weight: 5, title: 'TRUMP: TRANSACTIONAL DEAL',
+    desc: 'President Trump arranges arms-for-stance deal — interceptors arrive but pol. capital cost',
+    type: 'success',
+    requires: () => isUSPresident('trump'),
+    apply() {
+      let added = 0;
+      state.batteries.filter(b => b.type === 'ironDome').forEach(b => { const g = Math.min(20, b.capacity - b.ammo); b.ammo += g; added += g; });
+      state.usSupportLeft = (state.usSupportLeft || 0) + 1;
+      state.politicalCapital = Math.max(0, (state.politicalCapital || 100) - 8);   // gave Trump something
+      logEvent(`USA (Trump): +${added} Tamir, +1 US strike, −8 PC for the deal`, 'success');
+    }
+  },
+  {
+    id: 'us_president_trump_freedom', weight: 4, title: 'TRUMP: "DO WHAT YOU MUST"',
+    desc: 'Trump publicly lifts restrictions — extra strikes + reduced international pressure',
+    type: 'success',
+    requires: () => isUSPresident('trump'),
+    apply() {
+      state.strikesLeft += 5;
+      if (state.diplomacy) state.diplomacy.internationalPressure = Math.max(0, (state.diplomacy.internationalPressure || 30) - 15);
+      logEvent(`USA (Trump): +5 air strikes, intl pressure −15`, 'success');
+    }
+  },
+  {
+    id: 'us_president_obama_restraint', weight: 4, title: 'OBAMA: CALL FOR RESTRAINT',
+    desc: 'White House publicly urges proportionality — strike count capped, but pol. capital boost',
+    type: 'warn',
+    requires: () => isUSPresident('obama'),
+    apply() {
+      state.strikesLeft = Math.min(state.strikesLeft, 8);          // hard cap
+      state.politicalCapital = Math.min(100, (state.politicalCapital || 100) + 12);
+      logEvent(`USA (Obama): strikes capped at 8, PC +12`, 'warn');
+    }
+  },
+  {
+    id: 'us_carrier_arrived', weight: 6, title: 'USS GERALD R. FORD ARRIVED',
+    desc: 'US carrier strike group enters E. Mediterranean — deterrence boost, Iran throttled',
+    type: 'success',
+    requires: () => (state.gaza ? state.gaza.escalation > 25 : true),
+    apply() {
+      state.iranDelayUntil = Math.max(state.iranDelayUntil || 0, state.gameTime + 90000);
+      if (state.diplomacy) state.diplomacy.internationalPressure = Math.max(0, (state.diplomacy.internationalPressure || 30) - 8);
+      state.usSupportLeft = (state.usSupportLeft || 0) + 1;
+      logEvent('USA: Carrier deterrence — Iran throttled 90s, +1 US strike', 'success');
+    }
+  },
+  {
+    id: 'us_thaad_battery', weight: 3, title: 'US DEPLOYS THAAD',
+    desc: 'US deploys THAAD battery to Negev — instant strategic anti-missile capability',
+    type: 'success',
+    requires: () => (state.gaza ? state.gaza.escalation > 50 : false) || (state.escalationLevel || 0) >= 4,
+    apply() {
+      // Spawn a temporary THAAD battery near Negev
+      const thaadLat = 31.0 + Math.random() * 0.4, thaadLon = 35.0 + Math.random() * 0.5;
+      state.batteries.push({
+        id: 'thaad_us_' + Date.now(), type: 'thaad',
+        lat: thaadLat, lon: thaadLon,
+        ammo: 48, capacity: 48,
+        cooldown: 0, reloadTotal: 0,
+        priority: 'auto', launchFlash: 0,
+        usDeployed: true,
+        name: 'THAAD (US Negev)'
+      });
+      logEvent('USA: THAAD battery deployed (Negev) — 48 interceptors active', 'success');
+    }
+  },
+  {
+    id: 'us_intel_share', weight: 5, title: 'US INTEL SHARE',
+    desc: 'NSA shares Iranian launch intel — early-warning + reveals enemy launch sites for 2 min',
+    type: 'success',
+    apply() {
+      state.earlyWarningUntil = state.gameTime + 120000;
+      state.intelRevealUntil = Date.now() + 120000;
+      logEvent('USA: Intel share — early warning + launch sites revealed 2min', 'success');
+    }
+  },
+  {
+    id: 'us_munition_freeze', weight: 3, title: 'US PARTIAL ARMS FREEZE',
+    desc: 'White House pauses 2,000-lb bomb deliveries — strikes cost more political capital',
+    type: 'warn',
+    requires: () => isUSPresident('biden') && (state.gaza ? state.gaza.civDeaths > 3000 : false),
+    apply() {
+      state.politicalCapital = Math.max(0, (state.politicalCapital || 100) - 10);
+      state._strikePCcost = (state._strikePCcost || 0) + 2;            // each future strike costs +2 PC
+      logEvent('USA: Munitions freeze — strike PC cost rising', 'warn');
+    }
+  },
+  // ===== MORE GENERAL EVENTS =====
+  {
+    id: 'mossad_op', weight: 4, title: 'MOSSAD OPERATION',
+    desc: 'Covert sabotage hits Iranian assembly line — Iran throttle 5 min',
+    type: 'success',
+    apply() {
+      state.iranDelayUntil = Math.max(state.iranDelayUntil || 0, state.gameTime + 300000);
+      logEvent('Mossad: Iran throttled 5min', 'success');
+    }
+  },
+  {
+    id: 'unit8200_intercept', weight: 4, title: 'UNIT 8200 INTERCEPT',
+    desc: 'Signal intel reveals enemy launch coords — 90s satellite reveal',
+    type: 'success',
+    apply() {
+      state.intelRevealUntil = Date.now() + 90000;
+      logEvent('Unit 8200: launch sites revealed 90s', 'success');
+    }
+  },
+  {
+    id: 'shaba_clash', weight: 3, title: 'SHEBAA FARMS CLASH',
+    desc: 'Border skirmish escalates — Hezbollah probing volley incoming',
+    type: 'warn',
+    apply() {
+      const gen = state.scenarioGen;
+      for (let i = 0; i < 5; i++) setTimeout(() => {
+        if (state.scenarioGen !== gen || !state.active) return;
+        spawnThreat('rocket', 'hezbollah');
+      }, i * 600);
+      logEvent('Border clash: 5 Hezbollah rockets', 'warn');
+    }
+  },
+  {
+    id: 'rafael_surge', weight: 5, title: 'RAFAEL PRODUCTION SURGE',
+    desc: 'Rafael activates 3-shift production — Tamir output +50% for 3 min',
+    type: 'success',
+    apply() {
+      state._rafaelSurgeUntil = state.gameTime + 180000;
+      logEvent('Rafael: production surge 50% for 3min', 'success');
+    }
+  },
+  {
+    id: 'tunnel_collapse', weight: 4, title: 'HAMAS TUNNEL COLLAPSED',
+    desc: 'IAF strike collapsed major tunnel network — Hamas spawn rate −30% for 2min',
+    type: 'success',
+    apply() {
+      if (state.gaza) state.gaza.suppressionUntil = Math.max(state.gaza.suppressionUntil || 0, state.gameTime + 120000);
+      logEvent('Tunnel collapsed: Hamas −30% for 2min', 'success');
+    }
+  },
+  {
+    id: 'iran_nuclear_alarm', weight: 2, title: 'NATANZ ENRICHMENT ALARM',
+    desc: 'Iran accelerates nuclear program — international pressure −10, US support +1 strike',
+    type: 'warn',
+    apply() {
+      if (state.diplomacy) state.diplomacy.internationalPressure = Math.max(0, (state.diplomacy.internationalPressure || 30) - 10);
+      state.usSupportLeft = (state.usSupportLeft || 0) + 1;
+      logEvent('Natanz alarm: intl pressure −10, +1 US strike', 'warn');
+    }
+  },
+  {
+    id: 'qatar_mediates', weight: 3, title: 'QATAR MEDIATES',
+    desc: 'Doha brokers Hamas pause — Hamas spawn paused 90s, but PC −5',
+    type: 'info',
+    apply() {
+      if (state.gaza) state.gaza.pauseAttacksUntil = Math.max(state.gaza.pauseAttacksUntil || 0, state.gameTime + 90000);
+      state.politicalCapital = Math.max(0, (state.politicalCapital || 100) - 5);
+      logEvent('Qatar: Hamas paused 90s, PC −5', 'info');
+    }
+  },
+  {
+    id: 'ammo_resupply_emergency', weight: 6, title: 'EMERGENCY RESUPPLY TRUCKS',
+    desc: 'IDF logistics surge — all batteries +30% ammo instantly',
+    type: 'success',
+    apply() {
+      let added = 0;
+      state.batteries.forEach(b => {
+        const cap = (BATTERY_TYPES[b.type] && BATTERY_TYPES[b.type].capacity) || b.capacity || 60;
+        const give = Math.min(Math.floor(cap * 0.3), cap - b.ammo);
+        b.ammo += give; added += give;
+      });
+      logEvent(`Resupply: +${added} interceptors across grid`, 'success');
+    }
+  },
+  {
+    id: 'iaf_decap', weight: 3, title: 'IAF DECAPITATION STRIKE',
+    desc: 'IAF F-35 hit a senior Hezbollah commander — expect harsh response within 60s',
+    type: 'warn',
+    apply() {
+      state.retaliationWave = 'hezbollah';
+      const gen = state.scenarioGen;
+      setTimeout(() => {
+        if (state.scenarioGen !== gen || !state.active) return;
+        for (let i = 0; i < 10; i++) setTimeout(() => spawnThreat(Math.random() < 0.5 ? 'rocket' : 'heavyRocket', 'hezbollah'), i * 500);
+      }, 30000 + Math.random() * 30000);
+      logEvent('IAF decap: Hezbollah retaliation in 30-60s', 'warn');
+    }
+  },
+  {
+    id: 'evacuation_drill', weight: 3, title: 'NATIONAL EVACUATION DRILL',
+    desc: 'Civil-defense drill — civilian panic −15, popular support +5',
+    type: 'success',
+    apply() {
+      state.panic = Math.max(0, (state.panic || 0) - 15);
+      state.popularSupport = Math.min(100, (state.popularSupport || 80) + 5);
+      logEvent('Drill: panic −15, support +5', 'success');
+    }
   }
 ];
+
+// === US PRESIDENT SYSTEM ===
+// Determines current US administration based on Gaza era year (or sandbox era).
+// Affects which US events fire + what aid level Israel gets.
+function getUSPresident() {
+  // Gaza scenario: derive from current era year
+  if (state.gaza && state.gaza.eraIndex != null && typeof GAZA_ERAS !== 'undefined') {
+    const yr = (GAZA_ERAS[state.gaza.eraIndex] || {}).year || 2024;
+    if (yr <= 2008)            return 'bush';      // GWB (2001-2009)
+    if (yr <= 2016)            return 'obama';     // 2009-2017
+    if (yr <= 2020)            return 'trump';     // 1st term 2017-2021
+    if (yr <= 2024)            return 'biden';     // 2021-2025
+    return 'trump';                                // 2025+ second term
+  }
+  // Sandbox: 2027 era → fictional Trump 2nd term
+  if (state.sandbox && state.sandbox.eraId === '2027') return 'trump';
+  // Default sandbox 2025 = Biden→Trump transition (use Biden by default)
+  return 'biden';
+}
+function isUSPresident(name) { return getUSPresident() === name; }
+
+// US Support level — composite score 0-100 used by random-event weighting.
+//   - High = more frequent aid events, larger packages
+//   - Low  = arms freezes, criticism, fewer interceptors
+function getUSSupportLevel() {
+  let lvl = 60;                                          // baseline
+  const pres = getUSPresident();
+  if (pres === 'biden') lvl += 20;
+  else if (pres === 'trump') lvl += 10;
+  else if (pres === 'obama') lvl -= 5;
+  else if (pres === 'bush') lvl -= 5;
+  // Civilian casualties (Palestinian) erode US support faster under Dem administrations
+  if (state.gaza) {
+    const civ = state.gaza.civDeaths || 0;
+    if (pres === 'biden' || pres === 'obama') lvl -= Math.min(40, civ / 200);
+    else lvl -= Math.min(20, civ / 500);              // Trump/Bush more tolerant
+  }
+  // International pressure inversely affects (Biden cares more about diplomacy)
+  if (state.diplomacy && state.diplomacy.internationalPressure) {
+    if (pres === 'biden') lvl -= state.diplomacy.internationalPressure * 0.3;
+    else lvl -= state.diplomacy.internationalPressure * 0.1;
+  }
+  return Math.max(0, Math.min(100, Math.round(lvl)));
+}
 
 /* =========================================================
    МАССИРОВАННЫЙ УДАР — модальный планировщик
@@ -4650,24 +4926,32 @@ function drawAirStrikes() {
 }
 
 function pickWeightedEvent(pool) {
-  const total = pool.reduce((s, e) => s + (e.weight || 1), 0);
+  // Filter by requires() predicate (e.g., president-specific events skip if wrong administration)
+  const filtered = pool.filter(e => {
+    if (typeof e.requires !== 'function') return true;
+    try { return !!e.requires(); } catch (err) { return false; }
+  });
+  if (filtered.length === 0) return null;
+  const total = filtered.reduce((s, e) => s + (e.weight || 1), 0);
   let r = Math.random() * total;
-  for (const ev of pool) {
+  for (const ev of filtered) {
     r -= (ev.weight || 1);
     if (r <= 0) return ev;
   }
-  return pool[0];
+  return filtered[0];
 }
 
 function updateRandomEvents(dt) {
   // Disable random AI events when player is the attacker
   if (state.playAs === 'attacker') return;
-  // Gaza campaign focuses solely on the Hamas-Israel conflict — no Iran/Houthi/Hezbollah events.
-  if (state.scenario && state.scenario.campaign === 'gaza') return;
+  // Gaza campaign now ALSO uses random events (more aid, more variety) — was: skipped entirely
+  // (Use a smaller pool of Gaza-relevant events: US support / IDF-related / Hamas-only)
+  // if (state.scenario && state.scenario.campaign === 'gaza') return;
   if (!state.eventTimer) state.eventTimer = 25000 + Math.random() * 30000;
   state.eventTimer -= dt;
   if (state.eventTimer <= 0) {
     const ev = pickWeightedEvent(EVENT_POOL);
+    if (!ev) { state.eventTimer = 25000 + Math.random() * 30000; return; }
     showNotification(`◆ ${ev.title}`, ev.desc, ev.type);
     logEvent(`◆ EVENT: ${ev.title} — ${ev.desc}`, ev.type === 'success' ? 'success' : (ev.type === 'danger' ? 'danger' : 'warn'));
     try { ev.apply(); } catch(e) {}
@@ -4678,8 +4962,19 @@ function updateRandomEvents(dt) {
 function updateFactories(dt) {
   // Заводы пополняют боезапас ближайших соответствующих батарей
   if (!state.factoryProgress) state.factoryProgress = {};
+  // === WAR-TIME PRODUCTION SURGE ===
+  // Peacetime baseline: 0.35 Tamir/sec. War-time: real Rafael surged to ~5x in 2021/2023.
+  // Scale by Gaza escalation (0-100): 1.0 at esc=0, up to 4.0 at esc=80+.
+  let warMul = 1.0;
+  if (state.gaza && state.gaza.escalation > 20) {
+    warMul = 1.0 + Math.min(3.0, (state.gaza.escalation - 20) * 0.05);   // esc 80 = 4.0×
+  } else if (state.sandbox && state.sandbox.intensity >= 3) {
+    warMul = 1.0 + (state.sandbox.intensity - 2) * 0.6;                   // intensity 5 = 2.8×
+  }
+  // Rafael production-surge event (3-min boost)
+  if (state._rafaelSurgeUntil && state.gameTime < state._rafaelSurgeUntil) warMul *= 1.5;
   FACTORIES.forEach(f => {
-    state.factoryProgress[f.id] = (state.factoryProgress[f.id] || 0) + f.rate * dt / 1000;
+    state.factoryProgress[f.id] = (state.factoryProgress[f.id] || 0) + f.rate * warMul * dt / 1000;
     while (state.factoryProgress[f.id] >= 1) {
       state.factoryProgress[f.id] -= 1;
       // Найти ближайшую батарею соответствующего типа с местом
@@ -9431,11 +9726,10 @@ function handleImpact(threat) {
   }
   state.stats.missed++;
   state.stats.cityDamage += damage;
-  // Track civilian deaths in Gaza campaign (drives pressure spikes)
+  // Track ISRAELI civilian casualties from Hamas rocket impact on Israeli city.
+  // BUG FIX (v2.6.0): was incrementing state.gaza.civDeaths (Palestinian casualty counter)
+  // when an Israeli city was hit — wrong attribution. Now only israeliCasualties incremented.
   if (state.gaza && city.population > 0) {
-    const palDeaths = Math.round(damage * 0.5 * (1 + city.population / 200));
-    state.gaza.civDeaths += palDeaths;
-    // Israeli civilian casualties from this rocket impact (smaller numbers, populated city scale)
     const israeliDeaths = Math.max(1, Math.round(damage * 0.18 * (city.population / 200 + 0.4)));
     state.gaza.israeliCasualties += israeliDeaths;
     // Each impact on a populated city raises pressure proportionally
@@ -12100,12 +12394,25 @@ function tickGazaCampaign(dt) {
     }
   }
 
+  // === Sync state.escalationLevel from gaza escalation (so leader-class TSTs unlock) ===
+  // Was: state.escalationLevel never updated in Gaza, so Sinwar (politicalLevel 2) etc. never appeared.
+  state.escalationLevel = Math.floor(g.escalation / 25);          // 0-100 → 0-4 tiers
+  // === IRON SWORDS TAPERING ===
+  // Real Oct 7 wave was massive in opening hour then tapered. Game's flat 45 salvo / 3.5s
+  // was unsurvivable. Taper salvo size by elapsed era time so opening hour is brutal but
+  // mid-era is manageable.
+  let salvoSizeMul = 1.0;
+  if (era.year === 2023 && era.isOperation) {
+    const elapsedFrac = Math.min(1, (state.gameTime - g.eraStartGameTime) / era.durationMs);
+    // 100% at start → 40% at end (linear)
+    salvoSizeMul = 1.0 - elapsedFrac * 0.6;
+  }
   // --- Hamas attack spawning ---
   if (now > g.pauseAttacksUntil) {
     g.spawnTimer -= dt;
     if (g.spawnTimer <= 0) {
       const intensity = 0.5 + g.escalation / 100;          // 0.5..1.5 multiplier
-      const salvoSize = Math.max(1, Math.round(era.hamas.salvoMax * (0.4 + Math.random() * intensity)));
+      const salvoSize = Math.max(1, Math.round(era.hamas.salvoMax * (0.4 + Math.random() * intensity) * salvoSizeMul));
       const weapons = era.hamas.weapons;
       const gen = state.scenarioGen;
       for (let i = 0; i < salvoSize; i++) {
@@ -12235,6 +12542,24 @@ function applyGazaEraToIdf(era, isInitial) {
     state.batteryStock.davidsSling = (state.batteryStock.davidsSling || 0) + (era.idf.deltaStock.davidsSling || 0);
     state.batteryStock.arrow3      = (state.batteryStock.arrow3      || 0) + (era.idf.deltaStock.arrow3      || 0);
     if (typeof updateBuildPanel === 'function') updateBuildPanel();
+  }
+  // === EMERGENCY RESUPPLY at every era transition ===
+  // Real-world: between operations IDF surges interceptor production / receives US shipments.
+  // Each new era = "reset to full ammo" so player isn't stuck with depleted batteries from
+  // previous war. Was: the persistent ammo deficit made Iron Dome feel useless from era 2014+.
+  if (!isInitial && state.batteries) {
+    state.batteries.forEach(b => {
+      const cap = (BATTERY_TYPES[b.type] && BATTERY_TYPES[b.type].capacity) || b.capacity || 60;
+      b.ammo = cap;
+      b.cooldown = 0;
+      b.reloadTotal = 0;
+    });
+    if (typeof showNotification === 'function') {
+      showNotification('★ EMERGENCY RESUPPLY', 'All batteries restocked to full ammo (US/Rafael shipment).', 'success');
+    }
+    if (typeof logEvent === 'function') {
+      logEvent(`◆ All batteries fully restocked for ${era.label}`, 'success');
+    }
   }
   // Hide/show defense-related UI based on whether interceptors are even invented yet
   applyGazaDefenseUI(g.canDeployDefenses);
@@ -15753,11 +16078,12 @@ function showNotification(title, message, type) {
   const cont = document.getElementById('notifications');
   const div = document.createElement('div');
   div.className = 'notification ' + (type || 'info');
-  div.innerHTML = `<div class="title">${title}</div><div>${message}</div>`;
+  div.innerHTML = `<button class="notif-close" title="Close" onclick="this.parentElement.remove()">×</button><div class="title">${title}</div><div>${message}</div>`;
   cont.appendChild(div);
   setTimeout(() => {
+    if (!div.parentElement) return;        // already closed by user
     div.style.animation = 'fade-out 0.3s forwards';
-    setTimeout(() => div.remove(), 300);
+    setTimeout(() => { if (div.parentElement) div.remove(); }, 300);
   }, 4500);
 }
 
