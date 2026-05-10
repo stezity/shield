@@ -1819,6 +1819,15 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.7.0 — MAJOR: Phase 2+3 Gaza overhaul. Era data fixes (heavyRocket range monotonic
+//           in 2018/2019/2024, removed leftover 'cruise' from 2023, +2015-16 'Quiet Rebuild'
+//           era + 2023b transitional 'Sustained Campaign' era so salvo cliff 45→14 becomes
+//           45→28→14). Hostages system (state.gaza.hostagesHeld, deal mechanics, Oct 7
+//           initial mass-take). ICJ event auto-triggers at civDeaths>5000. state.world hooks
+//           (leader kills bump usSupport, civCas drives sanctions/usSupport erosion under
+//           Biden/Obama). Alt-ending OSLO III at pressure<30 + civDeaths<5000 (pacifist
+//           victory + 5K score bonus). Hostages-released score bonus. Endgame uses
+//           GAZA_ERAS.length instead of hardcoded '13'.
 //   2.6.0 — MAJOR: Iron Dome reload fix (era-transition full restock + war-time
 //           production surge). Closeable notifications. US PRESIDENT SYSTEM —
 //           getUSPresident() derives from era year (Bush/Obama/Trump/Biden/Trump-2);
@@ -1855,7 +1864,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.6.0';
+const GAME_VERSION = '2.7.0';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -2742,7 +2751,8 @@ const GAZA_ERAS = [
     hamas: {
       weapons: ['rocket','mortar','heavyRocket'], salvoMax: 8, intervalMs: 9500, accuracy: 0.50,
       tstChance: 0.07, autoEscalateChance: 0.035, maxLat: 32.5,
-      weaponRanges: { mortar: 8, rocket: 45, heavyRocket: 100, drone: 100 }
+      // FIX v2.7: heavyRocket range 100→160 (was regression vs 2014's 160) — arsenal only grows
+      weaponRanges: { mortar: 8, rocket: 45, heavyRocket: 160 }
     },
     idf:   { canDeployDefenses: true, types: ['ironDome','davidsSling'], deltaStock: { ironDome: 1, davidsSling: 0, arrow3: 0 } },
     civPenalty: 1.25,
@@ -2755,7 +2765,8 @@ const GAZA_ERAS = [
     hamas: {
       weapons: ['rocket','mortar','heavyRocket'], salvoMax: 12, intervalMs: 8000, accuracy: 0.54,
       tstChance: 0.09, autoEscalateChance: 0.035, maxLat: 32.8,
-      weaponRanges: { mortar: 8, rocket: 45, heavyRocket: 130, drone: 100 }
+      // FIX v2.7: heavyRocket range 130→160 — never decrease vs prior eras
+      weaponRanges: { mortar: 8, rocket: 45, heavyRocket: 160 }
     },
     idf:   { canDeployDefenses: true, types: ['ironDome','davidsSling'], deltaStock: { ironDome: 1, davidsSling: 0, arrow3: 0 } },
     civPenalty: 1.15,
@@ -2793,27 +2804,58 @@ const GAZA_ERAS = [
     durationMs: 5 * 60 * 1000,
     isOperation: true, operationName: 'October 7 · Iron Swords', autoOpScale: 'large',
     hamas: {
-      weapons: ['rocket','mortar','heavyRocket','cruise'], salvoMax: 45, intervalMs: 3500, accuracy: 0.62,
+      // FIX v2.7: removed 'cruise' — Hamas had ZERO operational cruise missiles in 2023.
+      weapons: ['rocket','mortar','heavyRocket'], salvoMax: 45, intervalMs: 3500, accuracy: 0.62,
       tstChance: 0.14, autoEscalateChance: 0.075, maxLat: 32.8,
-      weaponRanges: { mortar: 8, rocket: 80, heavyRocket: 160, drone: 100, cruise: 150 }
+      weaponRanges: { mortar: 8, rocket: 80, heavyRocket: 160 }
     },
     idf:   { canDeployDefenses: true, types: ['ironDome','davidsSling','arrow3'], deltaStock: { ironDome: 2, davidsSling: 1, arrow3: 1 } },
     civPenalty: 1.4,
     description: 'Oct 7: Hamas breach of border barrier. ~1,200 Israelis killed, 250+ hostages taken. ~5,000 rockets in opening hour. Israel declares war. Arrow-3 unlocked. +2 ID, +1 DS, +1 Arrow-3.'
   },
   {
+    // === NEW v2.7: 2023b transitional era — taper Iron Swords intensity gradually ===
+    year: 2023.5, label: '2023b — Iron Swords · Sustained Campaign (Nov-Dec)',
+    durationMs: 4 * 60 * 1000,
+    hamas: {
+      weapons: ['rocket','mortar','heavyRocket'], salvoMax: 28, intervalMs: 5500, accuracy: 0.58,
+      tstChance: 0.12, autoEscalateChance: 0.050, maxLat: 32.8,
+      weaponRanges: { mortar: 8, rocket: 80, heavyRocket: 160 }
+    },
+    idf:   { canDeployDefenses: true, types: ['ironDome','davidsSling','arrow3'], deltaStock: { ironDome: 1, davidsSling: 0, arrow3: 0 } },
+    civPenalty: 1.5,
+    description: 'Late Oct → Dec 2023. Initial shock has passed but Hamas sustains barrages. IDF ground operation north Gaza. ~10,000 Palestinians killed. International pressure rising. +1 Iron Dome.'
+  },
+  {
     year: 2024, label: '2024 — Iron Swords · Protracted war',
     durationMs: 5 * 60 * 1000,
     hamas: {
+      // FIX v2.7: heavyRocket range 130→160 (no decrease vs prior eras), removed drone leftover
       weapons: ['rocket','mortar','heavyRocket'], salvoMax: 14, intervalMs: 6500, accuracy: 0.55,
       tstChance: 0.10, autoEscalateChance: 0.030, maxLat: 32.5,
-      weaponRanges: { mortar: 8, rocket: 70, heavyRocket: 130, drone: 100 }
+      weaponRanges: { mortar: 8, rocket: 70, heavyRocket: 160 }
     },
     idf:   { canDeployDefenses: true, types: ['ironDome','davidsSling','arrow3'], deltaStock: { ironDome: 2, davidsSling: 1, arrow3: 0 } },
     civPenalty: 1.6,
     description: 'Hamas degraded but persistent. 40,000+ Palestinians killed by mid-2024 — international pressure surges. ICJ proceedings, hostage deals dominate diplomacy.'
+  },
+  {
+    // === NEW v2.7: 2015-16 transitional era — quiet rebuild between Protective Edge and David's Sling ===
+    year: 2015, label: '2015-16 — Quiet Rebuild',
+    durationMs: 3 * 60 * 1000,
+    hamas: {
+      weapons: ['rocket','mortar'], salvoMax: 4, intervalMs: 13000, accuracy: 0.42,
+      tstChance: 0.05, autoEscalateChance: 0.015, maxLat: 32.0,
+      weaponRanges: { mortar: 8, rocket: 45 }
+    },
+    idf:   { canDeployDefenses: true, types: ['ironDome'], deltaStock: { ironDome: 1, davidsSling: 0, arrow3: 0 } },
+    civPenalty: 1.0,
+    description: '2015-16: Stabbing/lone-wolf intifada in West Bank dominates. Gaza quiet — Hamas rebuilds tunnel network covertly. Iron Dome inventory expanded. Calm before David\'s Sling era.'
   }
 ];
+
+// === SORT ERAS BY YEAR (so transitional inserts are placed correctly in timeline) ===
+GAZA_ERAS.sort((a, b) => (a.year || 0) - (b.year || 0));
 
 /* =========================================================
    SANDBOX · DEFEND — DATA TABLES
@@ -12320,7 +12362,13 @@ function initGazaCampaign() {
     citiesLost: 0,                               // cities destroyed (alive=false, importance>=4)
     interceptsTotal: 0,                          // successful interceptions across the campaign
     newsHeadlines: [],                           // scrolling ticker headlines
-    nextStateOfWarAt: gnow + 5 * 60 * 1000       // periodic situation report
+    nextStateOfWarAt: gnow + 5 * 60 * 1000,      // periodic situation report
+    // === HOSTAGES (NEW v2.7) — only relevant from 2023+ era ===
+    hostagesHeld:     0,
+    hostagesReleased: 0,
+    hostageDealsCompleted: 0,
+    nextHostageEventAt: gnow + 60000 + Math.random() * 60000,
+    icjFiredAlready: false                       // ICJ proceedings event triggers once at civDeaths > 5000
   };
   // Reset battery stock — pre-2011 era has nothing
   state.batteryStock = { ironDome: 0, davidsSling: 0, arrow3: 0 };
@@ -12397,6 +12445,61 @@ function tickGazaCampaign(dt) {
   // === Sync state.escalationLevel from gaza escalation (so leader-class TSTs unlock) ===
   // Was: state.escalationLevel never updated in Gaza, so Sinwar (politicalLevel 2) etc. never appeared.
   state.escalationLevel = Math.floor(g.escalation / 25);          // 0-100 → 0-4 tiers
+
+  // === HOSTAGES SYSTEM (NEW v2.7) — only active in 2023+ era ===
+  // Real Oct 7: 250+ hostages taken into Gaza. Subsequent year = hostage-deal-driven diplomacy.
+  if (era.year >= 2023 && now > (g.nextHostageEventAt || 0)) {
+    g.nextHostageEventAt = now + 90000 + Math.random() * 90000;
+    if (era.year === 2023 && g.hostagesHeld === 0 && Math.random() < 0.7) {
+      // Initial Oct 7 mass-hostage event — once
+      g.hostagesHeld = 240 + Math.floor(Math.random() * 30);
+      addGazaNews(`★ ${g.hostagesHeld} hostages taken into Gaza tunnels`, 'bad');
+      showNotification('HOSTAGE CRISIS', `${g.hostagesHeld} Israeli hostages held in Gaza. Negotiate a deal or attempt rescue ops.`, 'danger');
+      g.pressure = Math.min(100, g.pressure + 25);
+    } else if (g.hostagesHeld > 0 && Math.random() < 0.3) {
+      // Periodic hostage-deal opportunities — small batches released
+      const batch = 3 + Math.floor(Math.random() * 8);
+      const released = Math.min(batch, g.hostagesHeld);
+      g.hostagesHeld -= released;
+      g.hostagesReleased += released;
+      g.hostageDealsCompleted++;
+      addGazaNews(`Hostage deal: ${released} released. ${g.hostagesHeld} still held.`, 'good');
+      showNotification('HOSTAGE DEAL', `${released} hostages released via Qatar mediation. ${g.hostagesHeld} still in Gaza.`, 'success');
+      g.pressure = Math.max(0, g.pressure - 8);
+      // Hostage deals cost popular support (Israelis split on prisoner exchanges)
+      state.popularSupport = Math.max(0, (state.popularSupport || 80) - 3);
+    }
+  }
+
+  // === ICJ TRIGGER (one-shot at civDeaths > 5000) ===
+  if (g.civDeaths > 5000 && !g.icjFiredAlready) {
+    g.icjFiredAlready = true;
+    showNotification('⚠ ICJ PROCEEDINGS OPENED', 'South Africa files genocide case at International Court of Justice. International pressure +20, US support −5, sanctions +15.', 'danger');
+    addGazaNews('★ ICJ: South Africa files genocide case against Israel', 'bad');
+    g.pressure = Math.min(100, g.pressure + 20);
+    if (state.diplomacy) state.diplomacy.internationalPressure = Math.min(100, (state.diplomacy.internationalPressure || 30) + 25);
+    if (state.world) {
+      state.world.usSupport = Math.max(0, (state.world.usSupport || 60) - 5);
+      state.world.sanctions = Math.min(100, (state.world.sanctions || 10) + 15);
+    }
+    state.politicalCapital = Math.max(0, (state.politicalCapital || 100) - 12);
+  }
+  // === STATE.WORLD HOOKS — civilian casualties drive sanctions/usSupport ===
+  // Once per ~30 sec game-time, sync world state from accumulated civDeaths.
+  // Was: state.world disconnected from Gaza state.
+  if (state.world && now > (g._nextWorldSyncAt || 0)) {
+    g._nextWorldSyncAt = now + 30000;
+    const civ = g.civDeaths || 0;
+    // Sanctions creep up with mass civ deaths (logarithmic — first 1000 cheap, 10K very expensive)
+    const sanctionsTarget = Math.min(80, 10 + Math.log10(civ + 1) * 12);
+    if (sanctionsTarget > (state.world.sanctions || 10)) {
+      state.world.sanctions = Math.min(80, state.world.sanctions + 0.5);
+    }
+    // US support erodes under Biden/Obama with mass civ; Trump/Bush less so
+    const pres = (typeof getUSPresident === 'function') ? getUSPresident() : 'biden';
+    const erosionRate = (pres === 'biden' || pres === 'obama') ? 0.3 : 0.1;
+    if (civ > 2000) state.world.usSupport = Math.max(20, (state.world.usSupport || 60) - erosionRate);
+  }
   // === IRON SWORDS TAPERING ===
   // Real Oct 7 wave was massive in opening hour then tapered. Game's flat 45 salvo / 3.5s
   // was unsurvivable. Taper salvo size by elapsed era time so opening hour is brutal but
@@ -14302,8 +14405,17 @@ function applyGazaStrikeEffect(targetMeta) {
     g.leadersKilled++;
     logEvent(`!!!! LEADER ELIMINATED — heavy collateral, pressure +${pressureRisk.toFixed(1)}`, 'danger');
     addGazaNews(`BREAKING: Senior Hamas leader eliminated in IDF strike — civilian casualties reported`, 'bad');
+    // === STATE.WORLD HOOK: leader kill bumps US support ("we got the bad guy") ===
+    // Was: state.world.usSupport disconnected from gaza events.
+    if (state.world) state.world.usSupport = Math.min(100, (state.world.usSupport || 60) + 8);
+    if (state.diplomacy) state.diplomacy.internationalPressure = Math.max(0, (state.diplomacy.internationalPressure || 30) - 5);
   } else if (escGain >= 4) {
     addGazaNews(`IDF airstrike confirmed — Hamas commander killed`, 'good');
+    if (state.world) state.world.usSupport = Math.min(100, (state.world.usSupport || 60) + 2);
+  }
+  // Heavy collateral hits also bump sanctions (massive strikes = more international scrutiny)
+  if (pressureRisk >= 6 && state.world) {
+    state.world.sanctions = Math.min(100, (state.world.sanctions || 10) + 2);
   }
 }
 
@@ -15637,10 +15749,17 @@ function endGazaCampaign(victory) {
     resultTitle = 'STRATEGIC DEFEAT';
     resultClass = 'defeat';
     cause = `${g.citiesLost} major Israeli cities destroyed — civilian collapse, mandate lost.`;
+  } else if (reachedFinal && victory && g.pressure < 30 && g.civDeaths < 5000) {
+    // === ALT-ENDING (NEW v2.7): OSLO III peace deal — pacifist victory ===
+    // Achieved by surviving all eras AND keeping pressure < 30 AND civDeaths < 5000
+    // (i.e. defended without massive collateral). Highest score tier.
+    resultTitle = '★ OSLO III SIGNED ★';
+    resultClass = 'victory';
+    cause = 'Survived all eras with minimal pressure and limited Palestinian civilian deaths. International community brokers historic two-state peace agreement. Best-possible outcome.';
   } else if (reachedFinal && victory) {
     resultTitle = 'CAMPAIGN ENDURED';
     resultClass = 'victory';
-    cause = 'Survived all 13 historical eras of the Gaza-Israel conflict (2007 → 2024).';
+    cause = `Survived all ${GAZA_ERAS.length} historical eras of the Gaza-Israel conflict (2007 → 2024).`;
   } else {
     resultTitle = victory ? 'CAMPAIGN COMPLETE' : 'DEFEAT';
     resultClass = victory ? 'victory' : 'defeat';
@@ -15654,6 +15773,8 @@ function endGazaCampaign(victory) {
   score -= Math.min(2000, g.civDeaths * 0.04);  // civilian deaths penalty (capped)
   score += (g.strikesLanded || 0) * 8;          // tactical effectiveness
   score += g.leadersKilled * 250;               // leader eliminations
+  score += (g.hostagesReleased || 0) * 30;      // NEW v2.7: hostage rescue bonus
+  if (resultTitle.includes('OSLO')) score += 5000;   // pacifist-victory bonus
   score = Math.max(0, Math.round(score));
   // Determine playstyle rating
   let playstyle, styleColor, styleDesc;
