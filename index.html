@@ -994,7 +994,7 @@ body.targeting-cursor #map-canvas {
 <!-- ===== START MENU ===== -->
 <div id="start-menu" class="fullscreen">
   <div class="menu-title">SHIELD</div>
-  <div class="menu-subtitle">MULTI-LAYER DEFENSE · AIR DEFENSE SIMULATOR</div>
+  <div class="menu-subtitle">MULTI-LAYER DEFENSE · AIR DEFENSE SIMULATOR <span id="version-label" style="color:var(--accent);font-weight:bold;font-size:11px;letter-spacing:2px;margin-left:8px;">v2.5.0</span></div>
   <div class="menu-tagline">DISCLAIMER: Game simulator. All system characteristics and scenarios are approximate and fictional.<br>Map: CartoDB Dark Matter tiles (based on OpenStreetMap data).</div>
 
   <button class="menu-button" id="btn-scenarios">▶ SCENARIOS</button>
@@ -1069,7 +1069,7 @@ body.targeting-cursor #map-canvas {
 <div id="game-container" style="display:none;">
 
   <div id="top-bar" class="panel">
-    <div class="logo">SHIELD <small>COMMAND CENTER · IADS</small></div>
+    <div class="logo">SHIELD <small>COMMAND CENTER · IADS · <span id="hud-version">v2.5.0</span></small></div>
     <div class="hud-info">
       <div class="threat-level low" id="threat-level">LEVEL: LOW</div>
       <div class="hud-item"><span class="label">OPERATION:</span><span class="value" id="op-name">—</span></div>
@@ -1803,6 +1803,22 @@ const CITIES_BASE = [
 // further along the threat trajectory → meeting point shifts CLOSER TO THE PROTECTED CITY,
 // which is what we want visually (interception above Israeli territory, not at the border).
 // Each speed must still be >= 1.5x its primary threat speed or the interceptor can't catch up.
+// === SHIELD GAME VERSION ===
+// Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
+// Displayed in start menu + in-game HUD subtitle.
+// Recent history:
+//   2.5.0 — sandbox cheats panel (Resistance Axis: instant fire, infinite arsenal,
+//           IDF retal toggle, no-snap), salvo cap 50→1000, version system added
+//   2.4.0 — Hamas heavy rocket distribution: poor-CEP doctrine across Gush Dan +
+//           HaShfela + Lakhish (Tel Aviv only ~10% direct hit, bulk in surrounding regions)
+//   2.3.0 — 2027 sandbox era ('Direct Iran War' hypothetical); Hamas excluded;
+//           futuristic HUD time format Y2027·D042·H14:35
+//   2.2.0 — Houthi targeting doctrine (Eilat-favored drones, Lakhish-impact ballistics);
+//           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
+//   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
+//           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
+const GAME_VERSION = '2.5.0';
+
 const BATTERY_TYPES = {
   ironDome: {
     name: 'Iron Dome', shortName: 'IRON DOME', color: '#00d4ff',
@@ -16229,6 +16245,11 @@ function hideTutorialMessage() { if (tutorialEl) tutorialEl.style.display = 'non
    ИНИЦИАЛИЗАЦИЯ
    ========================================================= */
 document.addEventListener('DOMContentLoaded', () => {
+  // Sync version labels from constant (single source of truth)
+  const verLbl = document.getElementById('version-label');
+  if (verLbl) verLbl.textContent = 'v' + GAME_VERSION;
+  const hudVer = document.getElementById('hud-version');
+  if (hudVer) hudVer.textContent = 'v' + GAME_VERSION;
   initCanvas();
   setupCanvasInteraction();
   preloadTiles();
