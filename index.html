@@ -350,6 +350,12 @@ body::after {
 .notification.success .title { color: var(--green); }
 @keyframes slide-in { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
 @keyframes fade-out { to { opacity: 0; transform: translateX(20px); } }
+/* News ticker marquee — horizontal scroll instead of truncating with ellipsis */
+@keyframes news-marquee {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+#gaza-news-scroll-wrap:hover #gaza-news-scroll { animation-play-state: paused; }   /* hover to read */
 
 #shelter-countdown {
   position: absolute; top: 24px; left: 50%; transform: translateX(-50%);
@@ -1819,6 +1825,13 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.9.1 — Phase 6 polish completion: NEWS MARQUEE animation (60s linear scroll,
+//           hover-to-pause, doubled content for seamless loop) replaces ellipsis truncation.
+//           HUD additions: 🇺🇸 PRESIDENT pill (Bush/Obama/Trump/Biden), US support bar
+//           (composite 0-100 score). Per-era civilian casualty tracking (civDeathsByEra,
+//           israeliCasualtiesByEra dictionaries). Extended endgame stats: ceasefires
+//           honored, hostages released/held, total interceptors, per-era IL/PS casualty
+//           breakdown grid (year × IL × PS).
 //   2.9.0 — MAJOR Phase 6: Gaza-only focus + audit bug fixes. 4 critical bugs squashed:
 //           (1) Final-era ceasefire (Trump Jan 2025) now fires before endGame. (2) Ceasefire
 //           modal cleaned up at scenario teardown + state.paused reset. (3) De-dup threshold
@@ -1902,7 +1915,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.9.0';
+const GAME_VERSION = '2.9.1';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -9948,6 +9961,12 @@ function handleImpact(threat) {
   if (state.gaza && city.population > 0) {
     const israeliDeaths = Math.max(1, Math.round(damage * 0.18 * (city.population / 200 + 0.4)));
     state.gaza.israeliCasualties += israeliDeaths;
+    // Per-era breakdown for endgame stats (NEW v2.9.1)
+    if (state.gaza.eraIndex != null && GAZA_ERAS[state.gaza.eraIndex]) {
+      const yr = GAZA_ERAS[state.gaza.eraIndex].year;
+      state.gaza.israeliCasualtiesByEra = state.gaza.israeliCasualtiesByEra || {};
+      state.gaza.israeliCasualtiesByEra[yr] = (state.gaza.israeliCasualtiesByEra[yr] || 0) + israeliDeaths;
+    }
     // Each impact on a populated city raises pressure proportionally
     state.gaza.pressure = Math.min(100, state.gaza.pressure + damage * 0.35);
     // News headline for impacts on big cities (importance >= 5)
@@ -12542,6 +12561,10 @@ function initGazaCampaign() {
     nextDealAt: gnow + 90000,                    // earliest game-time for first deal offer
     pauseAttacksUntil: 0,                        // ceasefire game-time stamp
     civDeaths: 0, leadersKilled: 0,              // counters for UI / pressure modifiers
+    civDeathsByEra: {},                          // { eraYear: deaths } — for endgame breakdown
+    israeliCasualtiesByEra: {},                  // { eraYear: casualties }
+    ceasefiresHonored: 0,                        // count of historical ceasefires that fired
+    ceasefireViolationsByPlayer: 0,              // STRIKE-ANYWAY clicks
     strikesLanded: 0,
     activeOp: null,                              // current player-initiated operation
     opCooldowns: { small: 0, medium: 0, large: 0 },
@@ -12801,6 +12824,7 @@ function triggerHistoricalCeasefire(era) {
   const g = state.gaza;
   if (!g || !era.historicalCeasefire) return;
   const cf = era.historicalCeasefire;
+  g.ceasefiresHonored = (g.ceasefiresHonored || 0) + 1;       // for endgame stats
   // Force pause Hamas attacks for the ceasefire window
   g.pauseAttacksUntil = state.gameTime + cf.durationMs;
   // Apply pressure change (typically negative — diplomatic relief)
@@ -14595,7 +14619,10 @@ function updateGazaNewsTicker() {
     el.innerHTML =
       '<span style="background:#5dade2;color:#000;font-weight:bold;padding:6px 10px;font-size:10px;letter-spacing:1px;flex-shrink:0;">📡 LIVE</span>' +
       '<span style="padding:0 12px;color:#888;font-size:10px;flex-shrink:0;border-right:1px solid #333;">WIRE FEED</span>' +
-      '<div id="gaza-news-scroll" style="white-space:nowrap;overflow:hidden;flex:1;padding:0 12px;text-overflow:ellipsis;">— awaiting wire reports —</div>' +
+      // === MARQUEE container (NEW v2.9.1) — horizontal scroll instead of ellipsis truncation ===
+      '<div id="gaza-news-scroll-wrap" style="flex:1;overflow:hidden;position:relative;">' +
+      '<div id="gaza-news-scroll" style="white-space:nowrap;display:inline-block;padding:0 12px;animation:news-marquee 60s linear infinite;">— awaiting wire reports —</div>' +
+      '</div>' +
       '<button id="gaza-news-close" title="Hide feed" style="background:transparent;border:1px solid #555;color:#aaa;width:22px;height:18px;font-size:12px;line-height:1;cursor:pointer;font-family:monospace;border-radius:2px;margin-right:6px;flex-shrink:0;padding:0;">×</button>';
     document.body.appendChild(el);
     document.getElementById('gaza-news-close').onclick = () => {
@@ -14625,18 +14652,24 @@ function updateGazaNewsTicker() {
   // Push the main game container up by ticker height so it doesn't overlap the bottom-bar
   const gc = document.getElementById('game-container');
   if (gc && gc.style.paddingBottom !== '28px') gc.style.paddingBottom = '28px';
-  // Render headlines (most recent 6, separated by · ·)
-  const headlines = state.gaza.newsHeadlines.slice(-6);
+  // Render headlines (most recent 8, marquee-scrolled, doubled for seamless loop)
+  const headlines = state.gaza.newsHeadlines.slice(-8);
   const scroll = el.querySelector('#gaza-news-scroll');
   if (!scroll) return;
   if (headlines.length === 0) {
     scroll.innerHTML = '<span style="color:#666;">— awaiting wire reports —</span>';
+    scroll.style.animation = 'none';
     return;
   }
   const colors = { good: '#52be80', bad: '#ff6464', warn: '#ffaa44', info: '#dde' };
-  scroll.innerHTML = headlines.map(h =>
+  const oneLoop = headlines.map(h =>
     `<span style="color:#888;">[${h.source}]</span> <span style="color:${colors[h.type]||'#dde'};">${h.text}</span>`
   ).join(' <span style="color:#444;">·</span> ');
+  // Double the content for seamless marquee loop (when first copy goes off, second mid-screen)
+  scroll.innerHTML = oneLoop + ' <span style="color:#444;">·</span> ' + oneLoop;
+  // Adjust animation duration based on content length (longer text = slower scroll)
+  const dur = Math.max(40, Math.min(90, oneLoop.length / 12)) + 's';
+  scroll.style.animation = `news-marquee ${dur} linear infinite`;
 }
 
 // Returns true if the player may proceed with an offensive action; false if blocked by user.
@@ -14694,6 +14727,7 @@ function showCeasefireModal(actionLabel, onProceed) {
       g.pauseAttacksUntil = 0;
       g.ceasefireViolations = g.ceasefireViolations || { israel: 0, hamas: 0 };
       g.ceasefireViolations.israel++;
+      g.ceasefireViolationsByPlayer = (g.ceasefireViolationsByPlayer || 0) + 1;     // endgame stat
       showNotification('CEASEFIRE BROKEN BY ISRAEL', 'International condemnation. Pressure +30, escalation +15.', 'danger');
       logEvent('!!!! ISRAEL VIOLATES CEASEFIRE — ' + actionLabel + ' (pressure +30, escalation +15)', 'danger');
       // v2.9: re-execute the queued action (player wanted it after acknowledging the cost)
@@ -15044,7 +15078,16 @@ function tickGazaOperation(dt) {
     g.strikesLanded++;
     // Small ongoing pressure bleed for collateral
     g.pressure = Math.min(100, g.pressure + 0.6);
-    if (Math.random() < 0.18) g.civDeaths += 3 + Math.floor(Math.random() * 5);
+    if (Math.random() < 0.18) {
+      const dn = 3 + Math.floor(Math.random() * 5);
+      g.civDeaths += dn;
+      // Per-era breakdown
+      if (g.eraIndex != null && GAZA_ERAS[g.eraIndex]) {
+        const yr = GAZA_ERAS[g.eraIndex].year;
+        g.civDeathsByEra = g.civDeathsByEra || {};
+        g.civDeathsByEra[yr] = (g.civDeathsByEra[yr] || 0) + dn;
+      }
+    }
   }
   if (g.activeOp.sortiesLeft <= 0) {
     showNotification(`${op.label} COMPLETE`, `Operation concluded. Cooldown ${op.cooldownMs/1000}s.`, 'info');
@@ -15884,6 +15927,24 @@ function updateGazaHud() {
   if (g.hostagesHeld && g.hostagesHeld > 0) {
     hostagePill = '<span title="Hostages held in Gaza — tied to diplomatic deals" style="display:inline-flex;align-items:center;gap:4px;padding:2px 10px;background:rgba(255,180,40,0.18);border:1px solid #ffb000;border-radius:10px;color:#ffce5e;font-weight:bold;letter-spacing:1px;">★ HOSTAGES ' + g.hostagesHeld + '</span>';
   }
+  // === US PRESIDENT PILL (NEW v2.9.1) — shows current administration ===
+  let presPill = '';
+  if (typeof getUSPresident === 'function') {
+    const pres = getUSPresident();
+    const presNames = { bush: 'BUSH', obama: 'OBAMA', trump: 'TRUMP', biden: 'BIDEN' };
+    const presColors = { bush: '#9999cc', obama: '#80c0ff', trump: '#ff9966', biden: '#5dade2' };
+    const presBg = { bush: 'rgba(150,150,200,0.18)', obama: 'rgba(80,150,200,0.18)', trump: 'rgba(255,140,80,0.18)', biden: 'rgba(80,150,200,0.18)' };
+    presPill = '<span title="Current US Administration — affects aid events" style="display:inline-flex;align-items:center;gap:4px;padding:2px 10px;background:' + (presBg[pres]||'#222') + ';border:1px solid ' + (presColors[pres]||'#888') + ';border-radius:10px;color:' + (presColors[pres]||'#fff') + ';font-weight:bold;letter-spacing:1px;">🇺🇸 ' + (presNames[pres]||'?') + '</span>';
+  }
+  // === US SUPPORT BAR (NEW v2.9.1) — composite score 0-100 ===
+  let usBar = '';
+  if (typeof getUSSupportLevel === 'function') {
+    const usLvl = getUSSupportLevel();
+    const usCol = usLvl >= 70 ? '#52be80' : usLvl >= 40 ? '#ffaa44' : '#ff6464';
+    usBar = '<span title="US Support level (0-100) — drives event probability">US' +
+      bar(usLvl, usCol, false) +
+      '<span style="color:' + usCol + '">' + usLvl + '</span></span>';
+  }
   body.style.cssText = 'display:flex;gap:14px;align-items:center;padding:6px 10px;flex-wrap:wrap;';
   body.innerHTML =
     dateWidget +
@@ -15891,7 +15952,9 @@ function updateGazaHud() {
     '<span title="Era progress">PROG' + bar(yearProgress, '#5dade2', false) + '<span style="color:#888;">' + Math.round(yearProgress) + '%</span></span>' +
     '<span title="Escalation tier — ticks at 25/50/75 unlock TST tiers">ESC' + bar(g.escalation, escCol, true) + '<span style="color:' + escCol + '">' + Math.round(g.escalation) + '</span></span>' +
     '<span title="Diplomatic pressure (100% = defeat) — ticks at 25/50/75 mark warning thresholds">PRESS' + bar(g.pressure, presCol, true) + '<span style="color:' + presCol + '">' + Math.round(g.pressure) + '/100</span></span>' +
+    usBar +
     '<span>' + defenseStatus + '</span>' +
+    presPill +
     ceasefirePill +
     hostagePill;
 }
@@ -16208,6 +16271,29 @@ function endGazaCampaign(victory) {
     <div class="row"><span>Historical operations</span><span>${g.autoOpsTriggered || 0} auto-fired</span></div>
     <div class="row"><span>Ceasefire violations</span><span>Israel: ${dealsTaken.israel||0} · Hamas: ${dealsTaken.hamas||0}</span></div>
     <div class="row"><span>Operations budget spent</span><span>$${((g.moneySpentOnOps||0)/1000).toFixed(1)}K</span></div>
+    <!-- === EXTENDED STATS (NEW v2.9.1) === -->
+    <div class="row"><span>Historical ceasefires honored</span><span style="color:#5a5">${g.ceasefiresHonored || 0}</span></div>
+    <div class="row"><span>Hostages released</span><span style="color:#ffce5e">${g.hostagesReleased || 0}</span></div>
+    <div class="row"><span>Hostages still held</span><span style="color:${(g.hostagesHeld||0)>0?'#ff6464':'#888'}">${g.hostagesHeld || 0}</span></div>
+    <div class="row"><span>Total interceptors fired</span><span>${g.interceptsTotal || 0}</span></div>
+    ${(() => {
+      const eraBreakdown = g.civDeathsByEra || {};
+      const eraIL = g.israeliCasualtiesByEra || {};
+      const years = Object.keys(eraBreakdown).concat(Object.keys(eraIL))
+                         .filter((v,i,a) => a.indexOf(v) === i)
+                         .sort((a,b) => parseFloat(a) - parseFloat(b));
+      if (years.length === 0) return '';
+      let html = '<div style="margin-top:10px;border-top:1px solid #5dade2;padding-top:6px;font-size:11px;color:#aab;letter-spacing:1px;">CASUALTIES PER ERA</div>';
+      html += '<div style="display:grid;grid-template-columns:60px 1fr 1fr;gap:4px 10px;margin-top:4px;font-size:11px;">';
+      html += '<div style="color:#888;">YEAR</div><div style="color:#ff8888;">IL</div><div style="color:#ff8888;">PS</div>';
+      years.forEach(yr => {
+        html += `<div style="color:#5dade2;">${yr}</div>` +
+                `<div style="color:#ff8888;">${fmt(eraIL[yr]||0)}</div>` +
+                `<div style="color:#ff8888;">${fmt(eraBreakdown[yr]||0)}</div>`;
+      });
+      html += '</div>';
+      return html;
+    })()}
   `;
   screen.classList.remove('hidden');
 }
