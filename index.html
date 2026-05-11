@@ -1819,6 +1819,17 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.9.0 — MAJOR Phase 6: Gaza-only focus + audit bug fixes. 4 critical bugs squashed:
+//           (1) Final-era ceasefire (Trump Jan 2025) now fires before endGame. (2) Ceasefire
+//           modal cleaned up at scenario teardown + state.paused reset. (3) De-dup threshold
+//           3km→1km (was missing 2014/2021 TA cluster). (4) STRIKE-ANYWAY now accepts
+//           onProceed callback to re-run player's action. Gaza scenario now FULLY focused:
+//           11 non-Hamas events tagged excludeFromGaza (cyber_iran, commander_killed,
+//           iran_drone_swarm, houthi_hypersonic, second_front, turkey_intervention,
+//           saudi_airspace_closed, iran_nuclear_alarm, iaf_decap, shaba_clash,
+//           elite_long_strike, un_ceasefire_passed). Diplomacy button hidden in Gaza
+//           (only historical ceasefires). Polish: interceptsTotal tracking wired up;
+//           spawnTST('hamas') signature cleanup.
 //   2.8.2 — Historical battery deployment per era (Wikipedia-accurate). 2011: 1 ID at
 //           Hatzerim AB (Beersheba). 2012 Pillar of Defense: +4 ID (Ashkelon, Ashdod,
 //           Sderot, mobile Negev) = 5 total. 2014 Protective Edge: +4 ID (TA-S, TA-N,
@@ -1891,7 +1902,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.8.2';
+const GAME_VERSION = '2.9.0';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -3515,13 +3526,13 @@ const EVENT_POOL = [
   {
     id: 'cyber_iran', weight: 5, title: 'CYBERATTACK ON IRAN',
     desc: 'Mossad conducted a cyber operation — Iranian launches delayed 30s',
-    type: 'success',
+    type: 'success', excludeFromGaza: true,
     apply() { state.iranDelayUntil = state.gameTime + 30000; }
   },
   {
     id: 'commander_killed', weight: 4, title: 'COMMANDER ELIMINATED',
     desc: 'Strike on a senior Hezbollah commander. Expect a harsh response.',
-    type: 'warn',
+    type: 'warn', excludeFromGaza: true,
     apply() { state.retaliationWave = 'hezbollah'; }
   },
   {
@@ -3565,7 +3576,7 @@ const EVENT_POOL = [
   {
     id: 'iran_drone_swarm', weight: 4, title: 'IRANIAN DRONE SWARM',
     desc: 'Iran launched a swarm of "Shahed" drones',
-    type: 'danger',
+    type: 'danger', excludeFromGaza: true,
     apply() {
       const gen = state.scenarioGen;
       for (let i = 0; i < 8; i++) {
@@ -3579,7 +3590,7 @@ const EVENT_POOL = [
   {
     id: 'houthi_hypersonic', weight: 3, title: 'HOUTHI: HYPERSONIC',
     desc: 'Houthis claim a "hypersonic missile" launch on Eilat',
-    type: 'danger',
+    type: 'danger', excludeFromGaza: true,
     apply() {
       const gen = state.scenarioGen;
       setTimeout(() => {
@@ -3606,7 +3617,7 @@ const EVENT_POOL = [
   {
     id: 'second_front', weight: 4, title: 'SECOND FRONT OPENED',
     desc: 'Hezbollah joins Hamas — coordinated salvo from north and south',
-    type: 'danger',
+    type: 'danger', excludeFromGaza: true,
     apply() {
       const gen = state.scenarioGen;
       const guard = (fn) => () => {
@@ -3735,7 +3746,7 @@ const EVENT_POOL = [
   {
     id: 'un_ceasefire_passed', weight: 4, title: 'UN CEASEFIRE PASSED',
     desc: 'Emergency UN session — random factions pause attacks for 60-90 sec',
-    type: 'success',
+    type: 'success', excludeFromGaza: true,            // Gaza uses HISTORICAL ceasefires only
     apply() {
       const factions = ['hamas', 'hezbollah'];
       factions.forEach(fid => {
@@ -3768,7 +3779,7 @@ const EVENT_POOL = [
   {
     id: 'turkey_intervention', weight: 2, title: 'TURKISH SUPPLY LINE',
     desc: 'Turkey opens supply route to Hezbollah — +Hezbollah attack rate ×1.4 for 2 min',
-    type: 'danger',
+    type: 'danger', excludeFromGaza: true,
     apply() {
       state.diplomacy.activeSanctions.hezbollah = { until: Date.now() + 120000, level: -0.4 };  // negative = boost
       logDiplomacy('Turkey supplies Hezbollah: +40% attack rate 2min');
@@ -3777,7 +3788,7 @@ const EVENT_POOL = [
   {
     id: 'saudi_airspace_closed', weight: 2, title: 'SAUDI AIRSPACE CLOSED',
     desc: 'Saudi closes airspace to Iran — Iran spawn −40% for 4 min',
-    type: 'success',
+    type: 'success', excludeFromGaza: true,
     apply() {
       state.diplomacy.activeSanctions.iran = { until: Date.now() + 240000, level: 0.4 };
       logDiplomacy('Saudi airspace closed: Iran -40% for 4min');
@@ -3787,7 +3798,7 @@ const EVENT_POOL = [
     // === Rare elite long-range strike — Hamas/Hez fires 1-2 special heavies at a 10-star target ===
     id: 'elite_long_strike', weight: 3, title: 'ELITE LONG-RANGE STRIKE',
     desc: 'Hamas/Hezbollah claim successful strike with 1-2 special long-range rockets at a strategic target',
-    type: 'danger',
+    type: 'danger', excludeFromGaza: true,
     apply() {
       const eliteFactions = ['hamas', 'hezbollah'];
       const fid = eliteFactions[Math.floor(Math.random() * eliteFactions.length)];
@@ -3941,7 +3952,7 @@ const EVENT_POOL = [
   {
     id: 'shaba_clash', weight: 3, title: 'SHEBAA FARMS CLASH',
     desc: 'Border skirmish escalates — Hezbollah probing volley incoming',
-    type: 'warn',
+    type: 'warn', excludeFromGaza: true,
     apply() {
       const gen = state.scenarioGen;
       for (let i = 0; i < 5; i++) setTimeout(() => {
@@ -3972,7 +3983,7 @@ const EVENT_POOL = [
   {
     id: 'iran_nuclear_alarm', weight: 2, title: 'NATANZ ENRICHMENT ALARM',
     desc: 'Iran accelerates nuclear program — international pressure −10, US support +1 strike',
-    type: 'warn',
+    type: 'warn', excludeFromGaza: true,
     apply() {
       if (state.diplomacy) state.diplomacy.internationalPressure = Math.max(0, (state.diplomacy.internationalPressure || 30) - 10);
       state.usSupportLeft = (state.usSupportLeft || 0) + 1;
@@ -4006,7 +4017,7 @@ const EVENT_POOL = [
   {
     id: 'iaf_decap', weight: 3, title: 'IAF DECAPITATION STRIKE',
     desc: 'IAF F-35 hit a senior Hezbollah commander — expect harsh response within 60s',
-    type: 'warn',
+    type: 'warn', excludeFromGaza: true,
     apply() {
       state.retaliationWave = 'hezbollah';
       const gen = state.scenarioGen;
@@ -5124,10 +5135,17 @@ function drawAirStrikes() {
 }
 
 function pickWeightedEvent(pool) {
-  // Filter by requires() predicate (e.g., president-specific events skip if wrong administration)
+  // === GAZA-ONLY FILTER (NEW v2.9) ===
+  // In Gaza scenario only HAMAS-RELEVANT events fire — drop Iran/Hezbollah/Houthi events,
+  // diplomatic deal events (everything is historical now), and non-Gaza-themed events.
+  const isGaza = state.scenario && state.scenario.campaign === 'gaza';
   const filtered = pool.filter(e => {
-    if (typeof e.requires !== 'function') return true;
-    try { return !!e.requires(); } catch (err) { return false; }
+    if (typeof e.requires === 'function') {
+      try { if (!e.requires()) return false; } catch (err) { return false; }
+    }
+    // Gaza scenario: skip events explicitly tagged as non-Gaza
+    if (isGaza && e.excludeFromGaza) return false;
+    return true;
   });
   if (filtered.length === 0) return null;
   const total = filtered.reduce((s, e) => s + (e.weight || 1), 0);
@@ -10811,6 +10829,8 @@ function updateInterceptors(dt) {
       if (Math.random() < i.accuracy) {
         threat.intercepted = true;
         state.stats.intercepted++;
+        // === GAZA campaign tracker (FIX v2.9: was init but never written) ===
+        if (state.gaza) state.gaza.interceptsTotal = (state.gaza.interceptsTotal || 0) + 1;
         // === ATTACKER CAMPAIGN — record loss to Iron Dome ===
         if (state.attacker && state.attacker.factionId && state.playAs === 'attacker') {
           attackerRecordImpact(threat, false, 0);
@@ -12750,8 +12770,16 @@ function tickGazaCampaign(dt) {
   if (g.eraIndex >= GAZA_ERAS.length - 1) {
     const finalEraDuration = GAZA_ERAS[g.eraIndex].durationMs || 12 * 60 * 1000;
     if ((now - g.eraStartGameTime) >= finalEraDuration) {
+      // === FIX v2.9: fire FINAL era's historical ceasefire BEFORE end-game ===
+      // Was bug: 2024 era's "Trump Jan 2025 Phase 1 deal" ceasefire never executed because
+      // advanceGazaYear() is only called for non-final eras. Now: trigger it explicitly.
+      const finalEra = GAZA_ERAS[g.eraIndex];
+      if (finalEra && finalEra.historicalCeasefire && typeof triggerHistoricalCeasefire === 'function') {
+        triggerHistoricalCeasefire(finalEra);
+      }
       showNotification('CAMPAIGN ENDURED', 'You survived the entire 2007 -> 2024 timeline.', 'success');
-      endGame(true);
+      // Slight delay so the final ceasefire notification has time to be seen before end-game popup
+      setTimeout(() => { if (state.active && !state.ended) endGame(true); }, 1500);
       return;
     }
   }
@@ -12850,9 +12878,11 @@ function advanceGazaYear() {
 // Skips if a battery already exists very close to this location (avoids duplicates).
 function autoDeployHistoricalBattery(type, lat, lon, name) {
   if (!BATTERY_TYPES[type]) return;
-  // De-dup: skip if a battery of same type within 3km already exists
+  // De-dup: skip if a battery of same type within 1km already exists.
+  // FIX v2.9: was 3km — too wide; 2014 TA-South and 2021 TA-Cluster-2 (3.2km apart)
+  // were borderline. 1km is realistic Iron Dome co-location standoff.
   const exists = (state.batteries || []).some(b =>
-    b.type === type && haversineKm(b.lat, b.lon, lat, lon) < 3
+    b.type === type && haversineKm(b.lat, b.lon, lat, lon) < 1
   );
   if (exists) return;
   const num = state.nextBatteryNum++;
@@ -12933,12 +12963,21 @@ function applyGazaDefenseUI(canDeploy) {
   document.querySelectorAll('.mode-switch').forEach(el => { el.style.display = display; });
   // Force auto mode (manual is meaningless with no batteries)
   if (!canDeploy && state.mode === 'manual') state.mode = 'auto';
+  // === HIDE DIPLOMACY BUTTON IN GAZA (NEW v2.9) ===
+  // Gaza scenario uses ONLY historical ceasefires — no manual diplomacy ever.
+  // canDeploy parameter is set true outside Gaza, so we can use it as proxy.
+  const isGazaActive = !!(state.scenario && state.scenario.campaign === 'gaza');
+  const dipBtn = document.getElementById('btn-diplomacy');
+  if (dipBtn) dipBtn.style.display = isGazaActive ? 'none' : '';
 }
 
 // Spawn a time-sensitive Hamas target on the map (high-value strike opportunity).
 function spawnGazaTST() {
-  if (typeof spawnTST === 'function') {
-    try { spawnTST('hamas'); return; } catch(e) {}
+  // FIX v2.9: was spawnTST('hamas') — wrong signature (spawnTST takes templateId not faction).
+  // The Gaza scenario filter inside spawnRandomTST already restricts to faction='hamas'
+  // (which includes PIJ events tagged with factionTag:'PIJ'). So calling without args is correct.
+  if (typeof spawnRandomTST === 'function') {
+    try { spawnRandomTST(); return; } catch(e) {}
   }
   logEvent('Time-sensitive target appeared in Gaza', 'warn');
 }
@@ -14605,18 +14644,18 @@ function updateGazaNewsTicker() {
 // confirms violating it, applies a heavy pressure + escalation penalty (Israel as the violator
 // loses massive international standing). Returning true after confirm also breaks the ceasefire.
 // === CUSTOM CEASEFIRE MODAL (NEW v2.8) ===
-// Replaces blocking confirm() — pauses the game cleanly + non-blocking UI
-function checkGazaCeasefire(actionLabel) {
+// Replaces blocking confirm() — pauses the game cleanly + non-blocking UI.
+// v2.9: optional onProceed callback re-runs the original action so player doesn't re-click.
+function checkGazaCeasefire(actionLabel, onProceed) {
   const g = state.gaza;
   if (!g) return true;
   const now = state.gameTime;
   if (now >= g.pauseAttacksUntil) return true;   // no active ceasefire
-  // Show custom modal asynchronously — function returns FALSE always (action queued in modal)
-  showCeasefireModal(actionLabel);
+  showCeasefireModal(actionLabel, onProceed);
   return false;
 }
 
-function showCeasefireModal(actionLabel) {
+function showCeasefireModal(actionLabel, onProceed) {
   if (document.getElementById('ceasefire-modal')) return;   // already open
   const g = state.gaza;
   if (!g) return;
@@ -14657,8 +14696,10 @@ function showCeasefireModal(actionLabel) {
       g.ceasefireViolations.israel++;
       showNotification('CEASEFIRE BROKEN BY ISRAEL', 'International condemnation. Pressure +30, escalation +15.', 'danger');
       logEvent('!!!! ISRAEL VIOLATES CEASEFIRE — ' + actionLabel + ' (pressure +30, escalation +15)', 'danger');
-      // Re-execute the original action (player wanted it)
-      // Note: action already cancelled by checkGazaCeasefire returning false; player must re-click
+      // v2.9: re-execute the queued action (player wanted it after acknowledging the cost)
+      if (typeof onProceed === 'function') {
+        try { onProceed(); } catch (e) {}
+      }
     }
   };
   card.querySelector('#cf-cancel').onclick  = () => close(false);
@@ -17091,6 +17132,10 @@ function startScenario(name) {
     if (opsEl) opsEl.style.display = 'none';
     const newsEl = document.getElementById('gaza-news-ticker');
     if (newsEl) newsEl.style.display = 'none';
+    // FIX v2.9: ceasefire modal could be left open if user exits scenario mid-decision
+    const cfModal = document.getElementById('ceasefire-modal');
+    if (cfModal) cfModal.remove();
+    state.paused = false;     // ensure pause flag is cleared (modal might've left it true)
     // Restore default UI (BUILD/right-panel/mode switch) for non-Gaza scenarios
     if (typeof applyGazaDefenseUI === 'function') applyGazaDefenseUI(true);
   }
