@@ -1819,6 +1819,9 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.8.1 — patch: random diplomatic 3-min ceasefire deals removed (only historical
+//           ceasefires fire now). User feedback: 'random deals confused with historical
+//           ceasefires + Hamas bombed during them anyway'.
 //   2.8.0 — MAJOR Phase 4+5 Gaza overhaul. Audit fixes: resupply notification no longer
 //           fires when player has 0 batteries (pre-2011); notification HTML now built
 //           via DOM (escape-safe vs future titles). Phase 4: custom ceasefire modal
@@ -1880,7 +1883,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.8.0';
+const GAME_VERSION = '2.8.1';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -12635,22 +12638,15 @@ function tickGazaCampaign(dt) {
   // --- Hamas infrastructure rebuilds over time ---
   tickGazaInfrastructureRegen();
 
-  // --- Deal offers ---
-  if (!g.activeDeal && now > g.nextDealAt && g.pressure > 25) {
-    const candidates = GAZA_DEALS.filter(d => g.pressure >= d.gateMinPressure);
-    if (candidates.length > 0) {
-      const deal = candidates[candidates.length - 1];   // pick the most-impactful unlocked
-      gazaOfferDeal(deal);
-    }
-  }
-  // Auto-timeout active deal → ignore penalty
-  if (g.activeDeal && now > g.activeDeal.expiresAt) {
-    g.pressure = Math.min(100, g.pressure + 10);
-    logEvent(`Deal IGNORED: "${g.activeDeal.deal.title}" (+10 pressure)`, 'warn');
-    g.activeDeal = null;
-    closeGazaDealUI();
-    g.nextDealAt = now + 75000;
-  }
+  // === DIPLOMATIC DEALS DISABLED v2.8.1 ===
+  // User feedback: random 3-min "ceasefire" deals confused with historical ceasefires
+  // (and Hamas was bombing during them due to bug — that wasn't even a real pause).
+  // Now: ONLY historical ceasefires fire (at era transition). Random deals removed entirely.
+  // (Function gazaOfferDeal still exists for crisis events / future use, but no auto-offer.)
+  /*
+  if (!g.activeDeal && now > g.nextDealAt && g.pressure > 25) { ... }
+  if (g.activeDeal && now > g.activeDeal.expiresAt) { ... }
+  */
 
   // --- City HP regeneration (slow rebuild) — uses game-time so it scales with speed ---
   for (const c of state.cities) {
