@@ -1819,6 +1819,13 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.7.1 — Historical ceasefires: each operation era now has a real-world ceasefire
+//           that triggers at era end. 2008 Cast Lead → Jan 19 unilateral, 2012 Pillar
+//           → Egypt-brokered Nov 21, 2014 Protective Edge → Aug 26 indefinite, 2019
+//           Black Belt → Nov 14, 2021 Guardian → May 21, 2022 Breaking Dawn → Aug 7,
+//           2023 Iron Swords → Nov 24 hostage pause (105 hostages out), 2024 → Jan 19
+//           2025 Phase 1 deal (33 hostages out, Trump pressure). Each forces Hamas
+//           pause + pressure relief + state.world bumps + news headline.
 //   2.7.0 — MAJOR: Phase 2+3 Gaza overhaul. Era data fixes (heavyRocket range monotonic
 //           in 2018/2019/2024, removed leftover 'cruise' from 2023, +2015-16 'Quiet Rebuild'
 //           era + 2023b transitional 'Sustained Campaign' era so salvo cliff 45→14 becomes
@@ -1864,7 +1871,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.7.0';
+const GAME_VERSION = '2.7.1';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -2677,7 +2684,14 @@ const GAZA_ERAS = [
     },
     idf:   { canDeployDefenses: false, types: [], deltaStock: { ironDome: 0, davidsSling: 0, arrow3: 0 } },
     civPenalty: 1.1,
-    description: '22-day offensive (Dec 2008-Jan 2009). ~1,400 Palestinians, 13 Israelis killed. ~3,000+ launches/year. Improved Qassams + first Grad-122mm reach Ashkelon and edge of Ashdod. Defense: STRIKES ONLY.'
+    description: '22-day offensive (Dec 2008-Jan 2009). ~1,400 Palestinians, 13 Israelis killed. ~3,000+ launches/year. Improved Qassams + first Grad-122mm reach Ashkelon and edge of Ashdod. Defense: STRIKES ONLY.',
+    historicalCeasefire: {
+      name: 'Unilateral Israeli ceasefire — January 18, 2009',
+      brokeredBy: 'Israel (unilateral) + Egypt mediation',
+      durationMs: 35000,
+      pressureChange: -8,
+      description: '22-day Cast Lead ends. Israel declares unilateral ceasefire. Hamas accepts Egypt-brokered terms hours later.'
+    }
   },
   {
     year: 2010, label: '2010 — Mavi Marmara · Quiet rebuilding',
@@ -2717,7 +2731,14 @@ const GAZA_ERAS = [
     },
     idf:   { canDeployDefenses: true, types: ['ironDome'], deltaStock: { ironDome: 3, davidsSling: 0, arrow3: 0 } },
     civPenalty: 1.1,
-    description: '8-day campaign (Nov 2012). IDF kills Ahmed Jabari. Iranian Fajr-5 hits Tel Aviv first time since 1991 Gulf War. Iron Dome proves itself: ~85% interception. +3 batteries.'
+    description: '8-day campaign (Nov 2012). IDF kills Ahmed Jabari. Iranian Fajr-5 hits Tel Aviv first time since 1991 Gulf War. Iron Dome proves itself: ~85% interception. +3 batteries.',
+    historicalCeasefire: {
+      name: 'Egypt-brokered ceasefire — November 21, 2012',
+      brokeredBy: 'Egypt (Mohamed Morsi)',
+      durationMs: 35000,
+      pressureChange: -10,
+      description: '8-day Pillar of Defense ends. Egyptian mediation. Both sides claim victory.'
+    }
   },
   {
     year: 2014, label: '2014 — Operation Protective Edge',
@@ -2731,7 +2752,14 @@ const GAZA_ERAS = [
     },
     idf:   { canDeployDefenses: true, types: ['ironDome'], deltaStock: { ironDome: 4, davidsSling: 0, arrow3: 0 } },
     civPenalty: 1.2,
-    description: '50-day war (July-Aug 2014). 2,251 Palestinians, 73 Israelis killed. M-302/R-160 reaches Haifa. First Hamas drone (Ababil-1). Attack tunnels discovered. +4 batteries.'
+    description: '50-day war (July-Aug 2014). 2,251 Palestinians, 73 Israelis killed. M-302/R-160 reaches Haifa. First Hamas drone (Ababil-1). Attack tunnels discovered. +4 batteries.',
+    historicalCeasefire: {
+      name: 'Egypt-brokered open-ended ceasefire — August 26, 2014',
+      brokeredBy: 'Egypt',
+      durationMs: 50000,
+      pressureChange: -8,
+      description: 'After 50 days and 11 failed humanitarian pauses, indefinite ceasefire. Both sides exhausted.'
+    }
   },
   {
     year: 2017, label: '2017 — David\'s Sling enters service',
@@ -2770,7 +2798,14 @@ const GAZA_ERAS = [
     },
     idf:   { canDeployDefenses: true, types: ['ironDome','davidsSling'], deltaStock: { ironDome: 1, davidsSling: 0, arrow3: 0 } },
     civPenalty: 1.15,
-    description: '5-day air-only campaign (Nov 2019). IDF kills PIJ commander Baha Abu al-Ata. ~450 rockets fired by Islamic Jihad. +1 Iron Dome.'
+    description: '5-day air-only campaign (Nov 2019). IDF kills PIJ commander Baha Abu al-Ata. ~450 rockets fired by Islamic Jihad. +1 Iron Dome.',
+    historicalCeasefire: {
+      name: 'Egypt-brokered ceasefire — November 14, 2019',
+      brokeredBy: 'Egypt',
+      durationMs: 30000,
+      pressureChange: -6,
+      description: '5-day Operation Black Belt ends. PIJ accepts ceasefire after Hamas refused to join the fight.'
+    }
   },
   {
     year: 2021, label: '2021 — Operation Guardian of the Walls',
@@ -2784,7 +2819,14 @@ const GAZA_ERAS = [
     },
     idf:   { canDeployDefenses: true, types: ['ironDome','davidsSling'], deltaStock: { ironDome: 2, davidsSling: 1, arrow3: 0 } },
     civPenalty: 1.3,
-    description: '11-day war (May 2021). Hamas fires 4,360 rockets — record salvos saturate Iron Dome. New J-80 hits central Israel. 256 Palestinians, 13 Israelis killed. +2 ID, +1 DS.'
+    description: '11-day war (May 2021). Hamas fires 4,360 rockets — record salvos saturate Iron Dome. New J-80 hits central Israel. 256 Palestinians, 13 Israelis killed. +2 ID, +1 DS.',
+    historicalCeasefire: {
+      name: 'Egypt-brokered ceasefire — May 21, 2021',
+      brokeredBy: 'Egypt + UN',
+      durationMs: 40000,
+      pressureChange: -10,
+      description: '11-day Operation Guardian of the Walls ends. Both sides claim victory. Egypt + UN mediation. US restraint pressure on Israel.'
+    }
   },
   {
     year: 2022, label: '2022 — Operation Breaking Dawn (PIJ)',
@@ -2797,7 +2839,14 @@ const GAZA_ERAS = [
     },
     idf:   { canDeployDefenses: true, types: ['ironDome','davidsSling'], deltaStock: { ironDome: 1, davidsSling: 0, arrow3: 0 } },
     civPenalty: 1.2,
-    description: '3-day campaign (Aug 2022). IDF preempts PIJ commanders Tayseer Jabari + Khaled Mansour. ~1,100 rockets. +1 Iron Dome.'
+    description: '3-day campaign (Aug 2022). IDF preempts PIJ commanders Tayseer Jabari + Khaled Mansour. ~1,100 rockets. +1 Iron Dome.',
+    historicalCeasefire: {
+      name: 'Egypt-brokered ceasefire — August 7, 2022',
+      brokeredBy: 'Egypt',
+      durationMs: 25000,
+      pressureChange: -5,
+      description: '3-day Operation Breaking Dawn ends. Hamas stays out — only PIJ engaged. Quick ceasefire.'
+    }
   },
   {
     year: 2023, label: '2023 — OCT 7 · Operation Iron Swords begins',
@@ -2811,7 +2860,15 @@ const GAZA_ERAS = [
     },
     idf:   { canDeployDefenses: true, types: ['ironDome','davidsSling','arrow3'], deltaStock: { ironDome: 2, davidsSling: 1, arrow3: 1 } },
     civPenalty: 1.4,
-    description: 'Oct 7: Hamas breach of border barrier. ~1,200 Israelis killed, 250+ hostages taken. ~5,000 rockets in opening hour. Israel declares war. Arrow-3 unlocked. +2 ID, +1 DS, +1 Arrow-3.'
+    description: 'Oct 7: Hamas breach of border barrier. ~1,200 Israelis killed, 250+ hostages taken. ~5,000 rockets in opening hour. Israel declares war. Arrow-3 unlocked. +2 ID, +1 DS, +1 Arrow-3.',
+    historicalCeasefire: {
+      name: 'Hostage-deal pause — November 24, 2023 (4 days, extended to 7)',
+      brokeredBy: 'Qatar + Egypt + USA',
+      durationMs: 30000,
+      pressureChange: -5,
+      hostagesReleased: 105,                // historical: 105 hostages out for 240 Palestinian prisoners
+      description: 'Brief humanitarian pause. 105 Israeli hostages released for 240 Palestinian prisoners. Combat resumes after 7 days.'
+    }
   },
   {
     // === NEW v2.7: 2023b transitional era — taper Iron Swords intensity gradually ===
@@ -2837,7 +2894,15 @@ const GAZA_ERAS = [
     },
     idf:   { canDeployDefenses: true, types: ['ironDome','davidsSling','arrow3'], deltaStock: { ironDome: 2, davidsSling: 1, arrow3: 0 } },
     civPenalty: 1.6,
-    description: 'Hamas degraded but persistent. 40,000+ Palestinians killed by mid-2024 — international pressure surges. ICJ proceedings, hostage deals dominate diplomacy.'
+    description: 'Hamas degraded but persistent. 40,000+ Palestinians killed by mid-2024 — international pressure surges. ICJ proceedings, hostage deals dominate diplomacy.',
+    historicalCeasefire: {
+      name: 'Phase 1 ceasefire deal — January 19, 2025',
+      brokeredBy: 'USA + Qatar + Egypt (Trump pressure)',
+      durationMs: 60000,
+      pressureChange: -15,
+      hostagesReleased: 33,                // Phase 1: 33 hostages out for 1,900+ Palestinian prisoners
+      description: 'After 15 months of war, Phase 1 ceasefire takes effect. 33 Israeli hostages out for 1,900 Palestinian prisoners. Trump administration applies decisive pressure.'
+    }
   },
   {
     // === NEW v2.7: 2015-16 transitional era — quiet rebuild between Protective Edge and David's Sling ===
@@ -12598,8 +12663,53 @@ function tickGazaCampaign(dt) {
 }
 
 // Advance to next era — apply Hamas + IDF unlocks + operation triggers.
+// === HISTORICAL CEASEFIRES (NEW v2.7.1) ===
+// Each operation era has a real-world ceasefire that ended it. Trigger here:
+//   - News headline + notification with mediator name + duration
+//   - Forced pause: state.gaza.pauseAttacksUntil = now + durationMs
+//   - Pressure relief
+//   - Hostage release (for 2023 / 2024 deals specifically)
+function triggerHistoricalCeasefire(era) {
+  const g = state.gaza;
+  if (!g || !era.historicalCeasefire) return;
+  const cf = era.historicalCeasefire;
+  // Force pause Hamas attacks for the ceasefire window
+  g.pauseAttacksUntil = state.gameTime + cf.durationMs;
+  // Apply pressure change (typically negative — diplomatic relief)
+  if (typeof cf.pressureChange === 'number') {
+    g.pressure = Math.max(0, Math.min(100, g.pressure + cf.pressureChange));
+  }
+  // Hostage release (2023 Nov pause, 2024 Jan deal)
+  if (cf.hostagesReleased && g.hostagesHeld > 0) {
+    const released = Math.min(cf.hostagesReleased, g.hostagesHeld);
+    g.hostagesHeld -= released;
+    g.hostagesReleased = (g.hostagesReleased || 0) + released;
+    g.hostageDealsCompleted = (g.hostageDealsCompleted || 0) + 1;
+    addGazaNews(`★ HOSTAGE DEAL: ${released} Israelis released via ${cf.brokeredBy}`, 'good');
+  }
+  // News + notification
+  addGazaNews(`★★ CEASEFIRE: ${cf.name}`, 'good');
+  showNotification(`✋ ${cf.name}`,
+    `${cf.description} — Mediator: ${cf.brokeredBy}. Hamas paused ${(cf.durationMs/1000)|0}s.`,
+    'success');
+  logEvent(`◆ HISTORICAL CEASEFIRE: ${cf.name} — pressure ${cf.pressureChange}, ${(cf.durationMs/1000)|0}s pause`, 'success');
+  // State.world hooks — ceasefires generally improve US support + reduce intl pressure
+  if (state.world) {
+    state.world.usSupport = Math.min(100, (state.world.usSupport || 60) + 5);
+  }
+  if (state.diplomacy) {
+    state.diplomacy.internationalPressure = Math.max(0, (state.diplomacy.internationalPressure || 30) - 8);
+  }
+}
+
 function advanceGazaYear() {
   const g = state.gaza;
+  // === Trigger PREVIOUS era's historical ceasefire BEFORE moving on ===
+  // (Each operation era ends with a real-world ceasefire deal.)
+  const prevEra = GAZA_ERAS[g.eraIndex];
+  if (prevEra && prevEra.historicalCeasefire) {
+    triggerHistoricalCeasefire(prevEra);
+  }
   g.eraIndex++;
   g.eraStartGameTime = state.gameTime;
   const era = GAZA_ERAS[g.eraIndex];
