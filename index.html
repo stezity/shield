@@ -1819,6 +1819,14 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.8.2 — Historical battery deployment per era (Wikipedia-accurate). 2011: 1 ID at
+//           Hatzerim AB (Beersheba). 2012 Pillar of Defense: +4 ID (Ashkelon, Ashdod,
+//           Sderot, mobile Negev) = 5 total. 2014 Protective Edge: +4 ID (TA-S, TA-N,
+//           Haifa, Jerusalem) = 9 total. 2017: +2 DS (Tel Nof + Krayot). 2018 Great
+//           March: +1 mobile ID. 2021 Guardian Walls: +2 (Eilat + TA cluster) = 11.
+//           2023 Iron Swords: +1 Arrow-3 Negev, +1 ID Sharon, +1 DS Forward South.
+//           2024: +1 Arrow-3 Tel Aviv, +1 ID Galilee Forward. deltaStock reduced
+//           to 1-2 reserves per era (down from 2-4) — strategic placement only.
 //   2.8.1 — patch: random diplomatic 3-min ceasefire deals removed (only historical
 //           ceasefires fire now). User feedback: 'random deals confused with historical
 //           ceasefires + Hamas bombed during them anyway'.
@@ -1883,7 +1891,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.8.1';
+const GAME_VERSION = '2.8.2';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -2727,9 +2735,16 @@ const GAZA_ERAS = [
       // Grad mature (45 km) — Beersheba routine. First Iranian heavy rockets (75 km) trickle in.
       weaponRanges: { mortar: 8, rocket: 45, heavyRocket: 75 }
     },
-    idf:   { canDeployDefenses: true, types: ['ironDome'], deltaStock: { ironDome: 2, davidsSling: 0, arrow3: 0 } },
+    idf:   {
+      canDeployDefenses: true, types: ['ironDome'],
+      // Wikipedia: March 27, 2011 first battery at Hatzerim Airbase (Beersheba)
+      autoDeployBatteries: [
+        { type: 'ironDome', lat: 31.2330, lon: 34.6620, name: 'BEERSHEBA · Hatzerim AB (March 2011)' }
+      ],
+      deltaStock: { ironDome: 2, davidsSling: 0, arrow3: 0 }       // 1 reserve to place strategically
+    },
     civPenalty: 1.0,
-    description: 'March 2011: First Iron Dome battery deployed near Beersheba — Grad strikes on Beersheba now common. April 7: First successful interception. You can finally deploy interceptors. +2 Iron Dome.'
+    description: 'March 27, 2011: First Iron Dome battery deployed at Hatzerim Airbase (Beersheba). April 7: First successful interception (rocket toward Ashkelon). +1 reserve to place anywhere.'
   },
   {
     year: 2012, label: '2012 — Operation Pillar of Defense',
@@ -2741,9 +2756,20 @@ const GAZA_ERAS = [
       // Iranian Fajr-5 (75 km) hits Tel Aviv for the first time. Grad still 45 km.
       weaponRanges: { mortar: 8, rocket: 45, heavyRocket: 75 }
     },
-    idf:   { canDeployDefenses: true, types: ['ironDome'], deltaStock: { ironDome: 3, davidsSling: 0, arrow3: 0 } },
+    idf:   {
+      canDeployDefenses: true, types: ['ironDome'],
+      // By Pillar of Defense (Nov 2012) Israel had 5 Iron Dome batteries operational.
+      // First battery already deployed at Hatzerim (2011) — auto-deploy 4 more.
+      autoDeployBatteries: [
+        { type: 'ironDome', lat: 31.6688, lon: 34.5713, name: 'SOUTH · Ashkelon (April 2011)' },
+        { type: 'ironDome', lat: 31.7997, lon: 34.6500, name: 'SOUTH · Ashdod (Aug 2011)' },
+        { type: 'ironDome', lat: 31.5180, lon: 34.5950, name: 'SOUTH · Sderot/Gaza Envelope' },
+        { type: 'ironDome', lat: 31.0500, lon: 35.0500, name: 'SOUTH · Negev (mobile)' }
+      ],
+      deltaStock: { ironDome: 1, davidsSling: 0, arrow3: 0 }       // 1 reserve
+    },
     civPenalty: 1.1,
-    description: '8-day campaign (Nov 2012). IDF kills Ahmed Jabari. Iranian Fajr-5 hits Tel Aviv first time since 1991 Gulf War. Iron Dome proves itself: ~85% interception. +3 batteries.',
+    description: '8-day campaign (Nov 2012). IDF kills Ahmed Jabari. Iranian Fajr-5 hits Tel Aviv first time. 5 Iron Dome batteries deployed (Hatzerim, Ashkelon, Ashdod, Sderot, mobile Negev). +1 reserve.',
     historicalCeasefire: {
       name: 'Egypt-brokered ceasefire — November 21, 2012',
       brokeredBy: 'Egypt (Mohamed Morsi)',
@@ -2762,9 +2788,19 @@ const GAZA_ERAS = [
       // M-302 / R-160 (160 km) — first Haifa hits. Ababil-1 drone (~80 km).
       weaponRanges: { mortar: 8, rocket: 45, heavyRocket: 160, drone: 80 }
     },
-    idf:   { canDeployDefenses: true, types: ['ironDome'], deltaStock: { ironDome: 4, davidsSling: 0, arrow3: 0 } },
+    idf:   {
+      canDeployDefenses: true, types: ['ironDome'],
+      // By Protective Edge (July 2014) Israel had 9 Iron Dome batteries — central + northern coverage added
+      autoDeployBatteries: [
+        { type: 'ironDome', lat: 32.0420, lon: 34.7800, name: 'CENTRAL · Tel Aviv South' },
+        { type: 'ironDome', lat: 32.1500, lon: 34.8100, name: 'CENTRAL · Tel Aviv North' },
+        { type: 'ironDome', lat: 32.8100, lon: 35.0400, name: 'NORTH · Haifa Bay' },
+        { type: 'ironDome', lat: 31.7800, lon: 35.2100, name: 'CENTRAL · Jerusalem outskirts' }
+      ],
+      deltaStock: { ironDome: 1, davidsSling: 0, arrow3: 0 }
+    },
     civPenalty: 1.2,
-    description: '50-day war (July-Aug 2014). 2,251 Palestinians, 73 Israelis killed. M-302/R-160 reaches Haifa. First Hamas drone (Ababil-1). Attack tunnels discovered. +4 batteries.',
+    description: '50-day war (July-Aug 2014). 2,251 Palestinians, 73 Israelis killed. M-302/R-160 reaches Haifa. By now: 9 Iron Dome batteries cover all major cities. +1 reserve.',
     historicalCeasefire: {
       name: 'Egypt-brokered open-ended ceasefire — August 26, 2014',
       brokeredBy: 'Egypt',
@@ -2781,9 +2817,17 @@ const GAZA_ERAS = [
       tstChance: 0.08, autoEscalateChance: 0.030, maxLat: 32.8,
       weaponRanges: { mortar: 8, rocket: 45, heavyRocket: 160, drone: 100 }
     },
-    idf:   { canDeployDefenses: true, types: ['ironDome','davidsSling'], deltaStock: { ironDome: 1, davidsSling: 2, arrow3: 0 } },
+    idf:   {
+      canDeployDefenses: true, types: ['ironDome','davidsSling'],
+      // April 2017: David's Sling enters service. First DS battery deployed central Israel.
+      autoDeployBatteries: [
+        { type: 'davidsSling', lat: 31.9000, lon: 34.9000, name: 'CENTRAL · DS Tel Nof (April 2017)' },
+        { type: 'davidsSling', lat: 32.6500, lon: 35.1100, name: 'NORTH · DS Krayot' }
+      ],
+      deltaStock: { ironDome: 1, davidsSling: 1, arrow3: 0 }
+    },
     civPenalty: 1.1,
-    description: 'David\'s Sling operational — medium-range cover. Cruise missiles, large rockets at 40-300 km. +1 ID, +2 DS.'
+    description: 'April 2017: David\'s Sling enters service. Two DS batteries auto-deployed (Tel Nof + Krayot). Medium-range cover for cruise/heavy rockets. +1 ID, +1 DS reserve.'
   },
   {
     year: 2018, label: '2018-19 — Great March of Return',
@@ -2794,9 +2838,15 @@ const GAZA_ERAS = [
       // FIX v2.7: heavyRocket range 100→160 (was regression vs 2014's 160) — arsenal only grows
       weaponRanges: { mortar: 8, rocket: 45, heavyRocket: 160 }
     },
-    idf:   { canDeployDefenses: true, types: ['ironDome','davidsSling'], deltaStock: { ironDome: 1, davidsSling: 0, arrow3: 0 } },
+    idf:   {
+      canDeployDefenses: true, types: ['ironDome','davidsSling'],
+      autoDeployBatteries: [
+        { type: 'ironDome', lat: 31.4500, lon: 34.6500, name: 'SOUTH · Border Patrol (mobile)' }
+      ],
+      deltaStock: { ironDome: 1, davidsSling: 0, arrow3: 0 }
+    },
     civPenalty: 1.25,
-    description: 'Weekly border protests. Sniper fire kills 200+ Palestinians in 2018 alone — international pressure surges. Incendiary balloons set fire to Israeli farmland.'
+    description: 'Weekly border protests. Sniper fire kills 200+ Palestinians in 2018 alone — international pressure surges. Incendiary balloons set fire to Israeli farmland. +1 mobile Iron Dome.'
   },
   {
     year: 2019, label: '2019 — Operation Black Belt (PIJ)',
@@ -2829,9 +2879,17 @@ const GAZA_ERAS = [
       // J-80 + A-120 longer Grads. Heavy reaches Haifa (160 km).
       weaponRanges: { mortar: 8, rocket: 80, heavyRocket: 160, drone: 100 }
     },
-    idf:   { canDeployDefenses: true, types: ['ironDome','davidsSling'], deltaStock: { ironDome: 2, davidsSling: 1, arrow3: 0 } },
+    idf:   {
+      canDeployDefenses: true, types: ['ironDome','davidsSling'],
+      // 2021: 10 ID batteries operational. Add Eilat Iron Dome (against Houthi/Sinai threats).
+      autoDeployBatteries: [
+        { type: 'ironDome', lat: 29.5500, lon: 34.9500, name: 'EILAT · South Tip' },
+        { type: 'ironDome', lat: 32.0700, lon: 34.7900, name: 'CENTRAL · Tel Aviv Cluster-2' }
+      ],
+      deltaStock: { ironDome: 1, davidsSling: 1, arrow3: 0 }
+    },
     civPenalty: 1.3,
-    description: '11-day war (May 2021). Hamas fires 4,360 rockets — record salvos saturate Iron Dome. New J-80 hits central Israel. 256 Palestinians, 13 Israelis killed. +2 ID, +1 DS.',
+    description: '11-day war (May 2021). Hamas fires 4,360 rockets — record salvos saturate Iron Dome. 10 ID batteries operational + Eilat coverage added. +1 ID, +1 DS reserve.',
     historicalCeasefire: {
       name: 'Egypt-brokered ceasefire — May 21, 2021',
       brokeredBy: 'Egypt + UN',
@@ -2870,9 +2928,18 @@ const GAZA_ERAS = [
       tstChance: 0.14, autoEscalateChance: 0.075, maxLat: 32.8,
       weaponRanges: { mortar: 8, rocket: 80, heavyRocket: 160 }
     },
-    idf:   { canDeployDefenses: true, types: ['ironDome','davidsSling','arrow3'], deltaStock: { ironDome: 2, davidsSling: 1, arrow3: 1 } },
+    idf:   {
+      canDeployDefenses: true, types: ['ironDome','davidsSling','arrow3'],
+      // Oct 7: Arrow-3 enters Iron Swords war + maximum Iron Dome posture
+      autoDeployBatteries: [
+        { type: 'arrow3', lat: 31.6500, lon: 35.0500, name: 'NEGEV · Arrow-3 Battery (anti-ballistic)' },
+        { type: 'ironDome', lat: 32.4500, lon: 34.9000, name: 'CENTRAL · Sharon Coast' },
+        { type: 'davidsSling', lat: 31.5000, lon: 34.7500, name: 'SOUTH · DS Forward' }
+      ],
+      deltaStock: { ironDome: 2, davidsSling: 1, arrow3: 1 }
+    },
     civPenalty: 1.4,
-    description: 'Oct 7: Hamas breach of border barrier. ~1,200 Israelis killed, 250+ hostages taken. ~5,000 rockets in opening hour. Israel declares war. Arrow-3 unlocked. +2 ID, +1 DS, +1 Arrow-3.',
+    description: 'Oct 7: Hamas breach of border barrier. ~1,200 Israelis killed, 250+ hostages taken. ~5,000 rockets in opening hour. Israel declares war. Arrow-3 deployed (anti-ballistic, vs Iran/Houthi). +2 ID, +1 DS, +1 Arrow-3 reserves.',
     // === Iron Swords scale: 60 sorties (10× Cast Lead), longer suppression ===
     opOverrides: {
       large: { sorties: 60, suppressMs: 600000, pressureGain: 50, escalationGain: 35, cost: 250000 }
@@ -2908,9 +2975,17 @@ const GAZA_ERAS = [
       tstChance: 0.10, autoEscalateChance: 0.030, maxLat: 32.5,
       weaponRanges: { mortar: 8, rocket: 70, heavyRocket: 160 }
     },
-    idf:   { canDeployDefenses: true, types: ['ironDome','davidsSling','arrow3'], deltaStock: { ironDome: 2, davidsSling: 1, arrow3: 0 } },
+    idf:   {
+      canDeployDefenses: true, types: ['ironDome','davidsSling','arrow3'],
+      // 2024: deepest IDF posture — extra Iron Dome cluster + secondary Arrow-3
+      autoDeployBatteries: [
+        { type: 'arrow3', lat: 32.0500, lon: 34.8500, name: 'CENTRAL · Arrow-3 Tel Aviv (2024)' },
+        { type: 'ironDome', lat: 33.0000, lon: 35.1000, name: 'NORTH · Galilee Forward' }
+      ],
+      deltaStock: { ironDome: 1, davidsSling: 1, arrow3: 0 }
+    },
     civPenalty: 1.6,
-    description: 'Hamas degraded but persistent. 40,000+ Palestinians killed by mid-2024 — international pressure surges. ICJ proceedings, hostage deals dominate diplomacy.',
+    description: 'Hamas degraded but persistent. 40,000+ Palestinians killed by mid-2024 — international pressure surges. ICJ proceedings, hostage deals dominate diplomacy. 12+ Iron Dome batteries operational, Galilee posture vs Hezbollah.',
     historicalCeasefire: {
       name: 'Phase 1 ceasefire deal — January 19, 2025',
       brokeredBy: 'USA + Qatar + Egypt (Trump pressure)',
@@ -12770,10 +12845,51 @@ function advanceGazaYear() {
 }
 
 // Apply IDF unlocks for an era — additive battery stock + record allowed types.
+// === HISTORICAL AUTO-DEPLOYMENT (NEW v2.8.2) ===
+// Deploy a real-world Iron Dome / DS / Arrow battery at a fixed location at era start.
+// Skips if a battery already exists very close to this location (avoids duplicates).
+function autoDeployHistoricalBattery(type, lat, lon, name) {
+  if (!BATTERY_TYPES[type]) return;
+  // De-dup: skip if a battery of same type within 3km already exists
+  const exists = (state.batteries || []).some(b =>
+    b.type === type && haversineKm(b.lat, b.lon, lat, lon) < 3
+  );
+  if (exists) return;
+  const num = state.nextBatteryNum++;
+  state.batteries.push({
+    id: 'bat_hist_' + num,
+    type,
+    name: name || `${type.toUpperCase()} · Historical-${num}`,
+    lat, lon,
+    ammo: BATTERY_TYPES[type].capacity,
+    capacity: BATTERY_TYPES[type].capacity,
+    cooldown: 0, reloadTotal: 0, interceptions: 0,
+    priority: batteryRegion(lat),
+    isHistorical: true                                        // flag for UI
+  });
+}
+
 function applyGazaEraToIdf(era, isInitial) {
   const g = state.gaza;
   g.canDeployDefenses = !!era.idf.canDeployDefenses;
   g.idfTypes = era.idf.types.slice();
+  // === DEPLOY HISTORICAL BATTERIES at era transition ===
+  // (Auto-placed at real-world coords. Player keeps any extras placed previously.
+  // deltaStock now represents RESERVE batteries the player can place strategically.)
+  if (era.idf.autoDeployBatteries) {
+    let deployed = 0;
+    for (const b of era.idf.autoDeployBatteries) {
+      const before = state.batteries.length;
+      autoDeployHistoricalBattery(b.type, b.lat, b.lon, b.name);
+      if (state.batteries.length > before) deployed++;
+    }
+    if (deployed > 0 && !isInitial && typeof showNotification === 'function') {
+      showNotification('★ HISTORICAL DEPLOYMENT', `${deployed} battery/batteries auto-deployed at real-world coords for ${era.label}.`, 'success');
+    }
+    if (deployed > 0 && typeof logEvent === 'function') {
+      logEvent(`◆ Auto-deployed ${deployed} historical batteries: ${era.idf.autoDeployBatteries.map(b => b.name).join(', ')}`, 'success');
+    }
+  }
   // Additive stock unlock (player keeps existing batteries placed)
   if (era.idf.deltaStock) {
     state.batteryStock.ironDome    = (state.batteryStock.ironDome    || 0) + (era.idf.deltaStock.ironDome    || 0);
