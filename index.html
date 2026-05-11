@@ -1825,6 +1825,11 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.9.2 — patch: 2 audit fixes. (1) Final-era setTimeout now uses scenarioGen guard
+//           — if user exits + re-enters scenario within 1500ms, endGame won't fire on
+//           the new scenario (was: would crash on null state.gaza in generic endgame
+//           branch). (2) Endgame casualty breakdown formats fractional era years
+//           (2023.5 → '2023b') for cleaner display.
 //   2.9.1 — Phase 6 polish completion: NEWS MARQUEE animation (60s linear scroll,
 //           hover-to-pause, doubled content for seamless loop) replaces ellipsis truncation.
 //           HUD additions: 🇺🇸 PRESIDENT pill (Bush/Obama/Trump/Biden), US support bar
@@ -1915,7 +1920,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.9.1';
+const GAME_VERSION = '2.9.2';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -12801,8 +12806,13 @@ function tickGazaCampaign(dt) {
         triggerHistoricalCeasefire(finalEra);
       }
       showNotification('CAMPAIGN ENDURED', 'You survived the entire 2007 -> 2024 timeline.', 'success');
-      // Slight delay so the final ceasefire notification has time to be seen before end-game popup
-      setTimeout(() => { if (state.active && !state.ended) endGame(true); }, 1500);
+      // FIX v2.9.2: scenarioGen guard — if user exits + re-enters scenario within 1500ms,
+      // endGame should NOT fire on the new scenario (would crash on missing state.gaza).
+      const _gen = state.scenarioGen;
+      setTimeout(() => {
+        if (state.scenarioGen !== _gen) return;
+        if (state.active && !state.ended) endGame(true);
+      }, 1500);
       return;
     }
   }
@@ -16286,8 +16296,14 @@ function endGazaCampaign(victory) {
       let html = '<div style="margin-top:10px;border-top:1px solid #5dade2;padding-top:6px;font-size:11px;color:#aab;letter-spacing:1px;">CASUALTIES PER ERA</div>';
       html += '<div style="display:grid;grid-template-columns:60px 1fr 1fr;gap:4px 10px;margin-top:4px;font-size:11px;">';
       html += '<div style="color:#888;">YEAR</div><div style="color:#ff8888;">IL</div><div style="color:#ff8888;">PS</div>';
+      // FIX v2.9.2: format fractional era years (e.g., 2023.5 → "2023b")
+      const formatYear = y => {
+        const f = parseFloat(y);
+        if (Number.isInteger(f)) return String(f);
+        return Math.floor(f) + 'b';     // 2023.5 → '2023b'
+      };
       years.forEach(yr => {
-        html += `<div style="color:#5dade2;">${yr}</div>` +
+        html += `<div style="color:#5dade2;">${formatYear(yr)}</div>` +
                 `<div style="color:#ff8888;">${fmt(eraIL[yr]||0)}</div>` +
                 `<div style="color:#ff8888;">${fmt(eraBreakdown[yr]||0)}</div>`;
       });
