@@ -1819,6 +1819,15 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.8.0 — MAJOR Phase 4+5 Gaza overhaul. Audit fixes: resupply notification no longer
+//           fires when player has 0 batteries (pre-2011); notification HTML now built
+//           via DOM (escape-safe vs future titles). Phase 4: custom ceasefire modal
+//           replaces blocking confirm(); ceasefire pill in Gaza HUD ('✋ CEASEFIRE 47s');
+//           hostage counter pill ('★ HOSTAGES 245'); tick marks at 25/50/75 on
+//           escalation/pressure bars. Phase 5: era.opOverrides — Iron Swords 2023
+//           'large' op now 60 sorties (was 24, real war scale); brigade recall on
+//           natural op completion (was: only on ceasefire); era-gated TSTs (Sinwar/
+//           Haniyeh/Arouri = 2017+, Marwan Issa = 2014+).
 //   2.7.1 — Historical ceasefires: each operation era now has a real-world ceasefire
 //           that triggers at era end. 2008 Cast Lead → Jan 19 unilateral, 2012 Pillar
 //           → Egypt-brokered Nov 21, 2014 Protective Edge → Aug 26 indefinite, 2019
@@ -1871,7 +1880,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.7.1';
+const GAME_VERSION = '2.8.0';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -2861,6 +2870,10 @@ const GAZA_ERAS = [
     idf:   { canDeployDefenses: true, types: ['ironDome','davidsSling','arrow3'], deltaStock: { ironDome: 2, davidsSling: 1, arrow3: 1 } },
     civPenalty: 1.4,
     description: 'Oct 7: Hamas breach of border barrier. ~1,200 Israelis killed, 250+ hostages taken. ~5,000 rockets in opening hour. Israel declares war. Arrow-3 unlocked. +2 ID, +1 DS, +1 Arrow-3.',
+    // === Iron Swords scale: 60 sorties (10× Cast Lead), longer suppression ===
+    opOverrides: {
+      large: { sorties: 60, suppressMs: 600000, pressureGain: 50, escalationGain: 35, cost: 250000 }
+    },
     historicalCeasefire: {
       name: 'Hostage-deal pause — November 24, 2023 (4 days, extended to 7)',
       brokeredBy: 'Qatar + Egypt + USA',
@@ -11045,16 +11058,20 @@ const TST_TEMPLATES = [
     intelSource:'HUMINT', politicalLevel:1, chain:'hamas_safehouse_residue', reward:{ money:50000, panicReduce:18 } },
   { id:'hamas_sinwar', faction:'hamas', priority:10, baseReliability:55, windowMs:80000, unique:true,
     title:'YAHYA SINWAR · POLITICAL HEAD', desc:'SIGINT: Encrypted satphone uplink active, Rafah sub-tunnel',
-    intelSource:'SIGINT', politicalLevel:2, reward:{ money:65000, panicReduce:20 } },
+    intelSource:'SIGINT', politicalLevel:2, reward:{ money:65000, panicReduce:20 },
+    eraGate: { minYear: 2017 } },                       // Sinwar took political-head role in 2017
   { id:'hamas_haniyeh', faction:'hamas', priority:10, baseReliability:50, windowMs:60000, unique:true,
     title:'ISMAIL HANIYEH · POLITBURO', desc:'HUMINT: Visiting Doha→Damascus transit, brief layover compound',
-    intelSource:'HUMINT', politicalLevel:3, reward:{ money:70000, panicReduce:22 } },
+    intelSource:'HUMINT', politicalLevel:3, reward:{ money:70000, panicReduce:22 },
+    eraGate: { minYear: 2017 } },                       // Took over politburo from Mashal in 2017
   { id:'hamas_marwan_issa', faction:'hamas', priority:10, baseReliability:60, windowMs:75000, unique:true,
     title:'MARWAN ISSA · QASSAM #2', desc:'SIGINT: Fragmentary radio signature, central Gaza tunnel network',
-    intelSource:'SIGINT', politicalLevel:1, reward:{ money:55000, panicReduce:18 } },
+    intelSource:'SIGINT', politicalLevel:1, reward:{ money:55000, panicReduce:18 },
+    eraGate: { minYear: 2014 } },                       // Replaced Jabari (killed 2012)
   { id:'hamas_arouri', faction:'hamas', priority:9, baseReliability:65, windowMs:60000, unique:true,
     title:'SALEH AL-AROURI · DEPUTY POLITBURO', desc:'HUMINT: Beirut southern suburb, Hezbollah safehouse',
-    intelSource:'HUMINT', politicalLevel:2, reward:{ money:48000, panicReduce:15 } },
+    intelSource:'HUMINT', politicalLevel:2, reward:{ money:48000, panicReduce:15 },
+    eraGate: { minYear: 2017 } },                       // Deputy politburo from 2017
   { id:'hamas_zahar', faction:'hamas', priority:9, baseReliability:60, windowMs:60000, unique:true,
     title:'MAHMOUD AL-ZAHAR · CO-FOUNDER', desc:'HUMINT: Co-founder spotted at Gaza City compound, escorted convoy',
     intelSource:'HUMINT', politicalLevel:2, reward:{ money:40000, panicReduce:12 } },
@@ -11328,6 +11345,18 @@ function spawnRandomTST(forcedTemplateId) {
   // === ERA EXCLUSION: skip Hamas/PIJ TSTs in 2027 (Hamas destroyed) ===
   if (typeof isFactionExcludedInEra === 'function') {
     allowed = allowed.filter(t => !isFactionExcludedInEra(t.faction));
+  }
+  // === ERA-GATED TSTs (NEW v2.8) ===
+  // Some leaders only existed/held positions in certain years (Sinwar 2017+ as politburo
+  // chief, Haniyeh 2017+ as politburo head, etc.) — filter by current Gaza era year.
+  if (state.gaza && typeof GAZA_ERAS !== 'undefined') {
+    const currentYear = (GAZA_ERAS[state.gaza.eraIndex] || {}).year || 2024;
+    allowed = allowed.filter(t => {
+      if (!t.eraGate) return true;
+      if (t.eraGate.minYear && currentYear < t.eraGate.minYear) return false;
+      if (t.eraGate.maxYear && currentYear > t.eraGate.maxYear) return false;
+      return true;
+    });
   }
   // === DEDUPLICATION ===
   // 1. unique-marked templates that were already STRUCK → never appear again this scenario
@@ -12760,7 +12789,8 @@ function applyGazaEraToIdf(era, isInitial) {
   // Real-world: between operations IDF surges interceptor production / receives US shipments.
   // Each new era = "reset to full ammo" so player isn't stuck with depleted batteries from
   // previous war. Was: the persistent ammo deficit made Iron Dome feel useless from era 2014+.
-  if (!isInitial && state.batteries) {
+  // FIX v2.8: only fire resupply notification if player ACTUALLY has batteries (pre-2011 = none)
+  if (!isInitial && state.batteries && state.batteries.length > 0) {
     state.batteries.forEach(b => {
       const cap = (BATTERY_TYPES[b.type] && BATTERY_TYPES[b.type].capacity) || b.capacity || 60;
       b.ammo = cap;
@@ -14462,33 +14492,65 @@ function updateGazaNewsTicker() {
 // Called before launchAirStrike / startGazaOperation. If a ceasefire is active and the player
 // confirms violating it, applies a heavy pressure + escalation penalty (Israel as the violator
 // loses massive international standing). Returning true after confirm also breaks the ceasefire.
+// === CUSTOM CEASEFIRE MODAL (NEW v2.8) ===
+// Replaces blocking confirm() — pauses the game cleanly + non-blocking UI
 function checkGazaCeasefire(actionLabel) {
   const g = state.gaza;
   if (!g) return true;
   const now = state.gameTime;
   if (now >= g.pauseAttacksUntil) return true;   // no active ceasefire
-  const remaining = Math.ceil((g.pauseAttacksUntil - now) / 1000);
-  const proceed = confirm(
-    'CEASEFIRE VIOLATION WARNING\n\n' +
-    'You agreed to a ceasefire (' + remaining + 's remaining).\n\n' +
-    'Launching ' + actionLabel + ' will:\n' +
-    '   - Pressure +30 (international condemnation)\n' +
-    '   - Escalation +15 (Hamas claims propaganda victory)\n' +
-    '   - Cancel the ceasefire immediately\n' +
-    '   - Damage Israel\'s diplomatic standing for the rest of the campaign\n\n' +
-    'Israel maintains its agreements. Hamas may break theirs first --\n' +
-    'if you wait, a Hamas ceasefire violation gives YOU sympathy (-18 pressure).\n\n' +
-    'Proceed with the strike anyway?'
-  );
-  if (!proceed) return false;
-  g.pressure = Math.min(100, g.pressure + 30);
-  g.escalation = Math.min(100, g.escalation + 15);
-  g.pauseAttacksUntil = 0;
-  g.ceasefireViolations = g.ceasefireViolations || { israel: 0, hamas: 0 };
-  g.ceasefireViolations.israel++;
-  showNotification('CEASEFIRE BROKEN BY ISRAEL', 'International condemnation. Pressure +30, escalation +15. Hamas reaps a major propaganda victory.', 'danger');
-  logEvent('!!!! ISRAEL VIOLATES CEASEFIRE -- ' + actionLabel + ' (pressure +30, escalation +15)', 'danger');
-  return true;
+  // Show custom modal asynchronously — function returns FALSE always (action queued in modal)
+  showCeasefireModal(actionLabel);
+  return false;
+}
+
+function showCeasefireModal(actionLabel) {
+  if (document.getElementById('ceasefire-modal')) return;   // already open
+  const g = state.gaza;
+  if (!g) return;
+  const remaining = Math.ceil((g.pauseAttacksUntil - state.gameTime) / 1000);
+  // Pause game while modal open
+  const wasPaused = state.paused;
+  state.paused = true;
+  const modal = document.createElement('div');
+  modal.id = 'ceasefire-modal';
+  modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.85);z-index:9999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px);';
+  const card = document.createElement('div');
+  card.style.cssText = 'background:#1a0a0a;border:3px solid #ff5555;color:#fff;padding:24px 32px;max-width:520px;font-family:Consolas,monospace;box-shadow:0 0 30px rgba(255,80,80,0.6);border-radius:4px;';
+  card.innerHTML = `
+    <div style="font-size:18px;font-weight:bold;color:#ff5555;letter-spacing:3px;margin-bottom:14px;">⚠ CEASEFIRE VIOLATION WARNING</div>
+    <div style="font-size:13px;line-height:1.6;color:#f0d0c8;">
+      You agreed to a ceasefire (<b style="color:#fff">${remaining}s remaining</b>).<br><br>
+      Launching <b style="color:#ffaa55">${actionLabel}</b> will:<br>
+      • <span style="color:#ff8080">Pressure +30</span> (international condemnation)<br>
+      • <span style="color:#ff8080">Escalation +15</span> (Hamas propaganda victory)<br>
+      • Cancel the ceasefire immediately<br>
+      • Damage Israel's diplomatic standing<br><br>
+      <i style="color:#aaaaaa">Israel maintains its agreements. If Hamas breaks the ceasefire first, YOU gain sympathy (−18 pressure).</i>
+    </div>
+    <div style="display:flex;gap:10px;margin-top:20px;">
+      <button id="cf-cancel" style="flex:1;padding:10px 20px;background:#283a4a;color:#80c0ff;border:1px solid #5078a0;cursor:pointer;font-family:Consolas,monospace;font-size:12px;letter-spacing:2px;font-weight:bold;">↩ HOLD FIRE</button>
+      <button id="cf-confirm" style="flex:1;padding:10px 20px;background:#3a1a1a;color:#ff8080;border:1px solid #ff5555;cursor:pointer;font-family:Consolas,monospace;font-size:12px;letter-spacing:2px;font-weight:bold;">⚡ STRIKE ANYWAY</button>
+    </div>`;
+  modal.appendChild(card);
+  document.body.appendChild(modal);
+  const close = (proceed) => {
+    state.paused = wasPaused;
+    modal.remove();
+    if (proceed) {
+      g.pressure = Math.min(100, g.pressure + 30);
+      g.escalation = Math.min(100, g.escalation + 15);
+      g.pauseAttacksUntil = 0;
+      g.ceasefireViolations = g.ceasefireViolations || { israel: 0, hamas: 0 };
+      g.ceasefireViolations.israel++;
+      showNotification('CEASEFIRE BROKEN BY ISRAEL', 'International condemnation. Pressure +30, escalation +15.', 'danger');
+      logEvent('!!!! ISRAEL VIOLATES CEASEFIRE — ' + actionLabel + ' (pressure +30, escalation +15)', 'danger');
+      // Re-execute the original action (player wanted it)
+      // Note: action already cancelled by checkGazaCeasefire returning false; player must re-click
+    }
+  };
+  card.querySelector('#cf-cancel').onclick  = () => close(false);
+  card.querySelector('#cf-confirm').onclick = () => close(true);
 }
 
 // Apply effect of player counter-strike on Hamas to gaza state. Called from launchAirStrike on hit.
@@ -14735,7 +14797,14 @@ const _gazaPanelState = new Proxy({}, {
 function startGazaOperation(opType, isAuto) {
   const g = state.gaza;
   if (!g) return false;
-  const op = GAZA_OPS[opType];
+  // === ERA OP OVERRIDES (NEW v2.8) ===
+  // Apply per-era scaling so Iron Swords 2023 'large' = 60 sorties (10× Cast Lead),
+  // not the default 24. Cast Lead 2008 stays at default 24. Reflects real war scale.
+  const era = GAZA_ERAS[g.eraIndex];
+  let op = Object.assign({}, GAZA_OPS[opType]);
+  if (op && era && era.opOverrides && era.opOverrides[opType]) {
+    Object.assign(op, era.opOverrides[opType]);
+  }
   if (!op) return false;
   const now = state.gameTime;
   if (g.activeOp) {
@@ -14828,6 +14897,15 @@ function tickGazaOperation(dt) {
     showNotification(`${op.label} COMPLETE`, `Operation concluded. Cooldown ${op.cooldownMs/1000}s.`, 'info');
     logEvent(`Operation ${op.label} concluded`, 'success');
     g.activeOp = null;
+    // === BRIGADE RECALL on natural op end (NEW v2.8) ===
+    // Was: brigades only recalled on ceasefire — natural op completion left tank icons
+    // bombing forever. Now: clear invasionTokens + log withdrawal.
+    if (g.invasionTokens && g.invasionTokens.length > 0) {
+      const brigadeNames = g.invasionTokens.map(t => t.brigade).filter((v,i,a) => a.indexOf(v) === i).join(', ');
+      g.invasionTokens = [];
+      logEvent(`◆ Brigades withdraw from Gaza: ${brigadeNames}`, 'success');
+      addGazaNews(`IDF brigades withdraw — operation complete`, 'good');
+    }
   }
 }
 
@@ -15626,20 +15704,43 @@ function updateGazaHud() {
     '</div>';
   const escCol  = g.escalation >= 70 ? '#ff6464' : g.escalation >= 40 ? '#ffaa44' : '#5dade2';
   const presCol = g.pressure   >= 70 ? '#ff6464' : g.pressure   >= 40 ? '#ffaa44' : '#52be80';
-  const bar = (pct, color) =>
-    '<span style="display:inline-block;width:60px;height:8px;background:#222;border:1px solid #333;vertical-align:middle;margin:0 4px;">' +
-    '<span style="display:block;width:' + Math.max(0,Math.min(100,pct)) + '%;height:100%;background:' + color + ';"></span></span>';
+  // === BAR WITH TICK MARKS (NEW v2.8) — shows what unlocks at 25/50/75 ===
+  // Tick at 25/50/75: visual reminder that escalation milestones unlock new TST tiers.
+  const bar = (pct, color, withTicks) => {
+    const ticks = withTicks
+      ? '<span style="position:absolute;top:0;left:25%;width:1px;height:100%;background:#666;"></span>' +
+        '<span style="position:absolute;top:0;left:50%;width:1px;height:100%;background:#999;"></span>' +
+        '<span style="position:absolute;top:0;left:75%;width:1px;height:100%;background:#666;"></span>'
+      : '';
+    return '<span style="display:inline-block;position:relative;width:60px;height:8px;background:#222;border:1px solid #333;vertical-align:middle;margin:0 4px;">' +
+      '<span style="display:block;width:' + Math.max(0,Math.min(100,pct)) + '%;height:100%;background:' + color + ';"></span>' +
+      ticks +
+      '</span>';
+  };
   const defenseStatus = g.canDeployDefenses
     ? '<span style="color:#52be80;">SHIELD READY</span>'
     : '<span style="color:#ff6464;">NO ACTIVE DEFENSE</span>';
-  body.style.cssText = 'display:flex;gap:14px;align-items:center;padding:6px 10px;';
+  // === CEASEFIRE PILL — shown when Hamas attacks paused ===
+  let ceasefirePill = '';
+  if (g.pauseAttacksUntil > state.gameTime) {
+    const cfRemain = Math.ceil((g.pauseAttacksUntil - state.gameTime) / 1000);
+    ceasefirePill = '<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 10px;background:rgba(80,200,120,0.2);border:1px solid #52be80;border-radius:10px;color:#80f0a0;font-weight:bold;letter-spacing:1px;animation:pulse-alert 1.6s infinite;">✋ CEASEFIRE ' + cfRemain + 's</span>';
+  }
+  // === HOSTAGE COUNTER — visible only when hostages held ===
+  let hostagePill = '';
+  if (g.hostagesHeld && g.hostagesHeld > 0) {
+    hostagePill = '<span title="Hostages held in Gaza — tied to diplomatic deals" style="display:inline-flex;align-items:center;gap:4px;padding:2px 10px;background:rgba(255,180,40,0.18);border:1px solid #ffb000;border-radius:10px;color:#ffce5e;font-weight:bold;letter-spacing:1px;">★ HOSTAGES ' + g.hostagesHeld + '</span>';
+  }
+  body.style.cssText = 'display:flex;gap:14px;align-items:center;padding:6px 10px;flex-wrap:wrap;';
   body.innerHTML =
     dateWidget +
     '<span style="color:#888;max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;">' + era.label.replace(/^\d{4}\s*[\-—]\s*/, '') + '</span>' +
-    '<span title="Era progress">PROG' + bar(yearProgress, '#5dade2') + '<span style="color:#888;">' + Math.round(yearProgress) + '%</span></span>' +
-    '<span title="Escalation tier — unlocks higher-value strike targets">ESC' + bar(g.escalation, escCol) + '<span style="color:' + escCol + '">' + Math.round(g.escalation) + '</span></span>' +
-    '<span title="Diplomatic pressure (100% = defeat)">PRESS' + bar(g.pressure, presCol) + '<span style="color:' + presCol + '">' + Math.round(g.pressure) + '/100</span></span>' +
-    '<span>' + defenseStatus + '</span>';
+    '<span title="Era progress">PROG' + bar(yearProgress, '#5dade2', false) + '<span style="color:#888;">' + Math.round(yearProgress) + '%</span></span>' +
+    '<span title="Escalation tier — ticks at 25/50/75 unlock TST tiers">ESC' + bar(g.escalation, escCol, true) + '<span style="color:' + escCol + '">' + Math.round(g.escalation) + '</span></span>' +
+    '<span title="Diplomatic pressure (100% = defeat) — ticks at 25/50/75 mark warning thresholds">PRESS' + bar(g.pressure, presCol, true) + '<span style="color:' + presCol + '">' + Math.round(g.pressure) + '/100</span></span>' +
+    '<span>' + defenseStatus + '</span>' +
+    ceasefirePill +
+    hostagePill;
 }
 
 function checkEndConditions() {
@@ -16309,7 +16410,20 @@ function showNotification(title, message, type) {
   const cont = document.getElementById('notifications');
   const div = document.createElement('div');
   div.className = 'notification ' + (type || 'info');
-  div.innerHTML = `<button class="notif-close" title="Close" onclick="this.parentElement.remove()">×</button><div class="title">${title}</div><div>${message}</div>`;
+  // Build via DOM (not innerHTML) — defensive against future titles containing < > & quotes
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'notif-close';
+  closeBtn.title = 'Close';
+  closeBtn.textContent = '×';
+  closeBtn.onclick = () => div.remove();
+  const titleEl = document.createElement('div');
+  titleEl.className = 'title';
+  titleEl.textContent = title;
+  const msgEl = document.createElement('div');
+  msgEl.textContent = message;
+  div.appendChild(closeBtn);
+  div.appendChild(titleEl);
+  div.appendChild(msgEl);
   cont.appendChild(div);
   setTimeout(() => {
     if (!div.parentElement) return;        // already closed by user
