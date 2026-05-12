@@ -1389,6 +1389,13 @@ body.targeting-cursor #map-canvas {
         <div class="stat-row"><span>Cyber status</span><span class="v" id="stat-cyber" style="color:var(--green)">OK</span></div>
         <div class="stat-row"><span>Escalation</span><span class="v" id="stat-escalation" style="color:var(--green)">0/5</span></div>
         <div class="stat-row"><span>Political capital</span><span class="v" id="stat-political" style="color:var(--green)">100</span></div>
+        <!-- === GAZA-ONLY: Pre/Post-2011 IL casualty split (NEW v2.10.2) === -->
+        <div class="stat-row gaza-only" id="stat-gaza-pre2011" style="display:none;border-top:1px dashed var(--border);padding-top:6px;margin-top:6px;">
+          <span>Pre-2011 IL · PS</span><span class="v" id="stat-gaza-pre2011-val" style="color:#ff8888">0 · 0</span>
+        </div>
+        <div class="stat-row gaza-only" id="stat-gaza-post2011" style="display:none;">
+          <span>Post-2011 IL · PS</span><span class="v" id="stat-gaza-post2011-val" style="color:#ff8888">0 · 0</span>
+        </div>
       </div>
     </div>
   </div>
@@ -1825,6 +1832,12 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.10.2 — Pre/post-2011 impact split now also in LIVE statistics panel
+//            (right-side HUD), not just the endgame screen. User: 'именно
+//            statistics live'. Two new gaza-only stat-rows ('Pre-2011 IL · PS'
+//            and 'Post-2011 IL · PS') appear in real time during the Gaza
+//            campaign, formatted with K-suffix for thousands. Hidden in
+//            non-Gaza scenarios. Reads same per-era dicts as endgame screen.
 //   2.10.1 — Pre/post-2011 impact split in endgame stats. User: 'сделай разделение
 //            в статистике прилеты до 2011 и прилеты после 2011'.
 //            Reads from existing per-era casualty dicts (civDeathsByEra,
@@ -2004,7 +2017,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.10.1';
+const GAME_VERSION = '2.10.2';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -16722,6 +16735,30 @@ function updateStatsPanel() {
   document.getElementById('stat-eff').textContent = eff + '%';
   document.getElementById('stat-damage').textContent = state.stats.cityDamage;
   document.getElementById('stat-cost').textContent = '$' + (state.stats.defenseCost / 1000000).toFixed(2) + 'M';
+  // === GAZA-ONLY: pre/post-2011 split (NEW v2.10.2) ===
+  const isGaza = !!(state.scenario && state.scenario.campaign === 'gaza' && state.gaza);
+  const preEl = document.getElementById('stat-gaza-pre2011');
+  const postEl = document.getElementById('stat-gaza-post2011');
+  if (preEl) preEl.style.display = isGaza ? '' : 'none';
+  if (postEl) postEl.style.display = isGaza ? '' : 'none';
+  if (isGaza) {
+    const ilByEra = state.gaza.israeliCasualtiesByEra || {};
+    const psByEra = state.gaza.civDeathsByEra || {};
+    let ilPre=0, ilPost=0, psPre=0, psPost=0;
+    Object.keys(ilByEra).forEach(yr => {
+      if (parseFloat(yr) < 2011) ilPre += ilByEra[yr]||0;
+      else ilPost += ilByEra[yr]||0;
+    });
+    Object.keys(psByEra).forEach(yr => {
+      if (parseFloat(yr) < 2011) psPre += psByEra[yr]||0;
+      else psPost += psByEra[yr]||0;
+    });
+    const fmt = n => n >= 1000 ? (n/1000).toFixed(1) + 'K' : String(n);
+    const preVal = document.getElementById('stat-gaza-pre2011-val');
+    const postVal = document.getElementById('stat-gaza-post2011-val');
+    if (preVal)  preVal.textContent  = fmt(ilPre)  + ' · ' + fmt(psPre);
+    if (postVal) postVal.textContent = fmt(ilPost) + ' · ' + fmt(psPost);
+  }
   // === Gaza Campaign HUD + ops panel + news ticker ===
   updateGazaHud();
   updateGazaOpsPanel();
