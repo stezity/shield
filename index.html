@@ -1825,6 +1825,12 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.9.8 — patch: more leak fixes. User screenshot: 'Iran firing ballistics at Incirlik
+//           AB during Gaza scenario'. Tagged 4 more events excludeFromGaza:
+//           iran_us_strike (IRGC fires at US Gulf base — definitely not Gaza),
+//           cyber_battery_offline (Iranian APT), thaad_arrived (anti-Iran Arrow-3
+//           support), oil_crisis (Houthi tanker attack). Also: ally_support now
+//           requires() D.Sling to exist (no UK/France delivering DS in 2008).
 //   2.9.7 — patch: Hamas tactical pauses + post-salvo fatigue. User: 'небольшие
 //           перерывы у хамаса после бомбардировки и вообщем перерывы чтобы он
 //           не стрелял без причины чтобы иногда'. (1) Post-salvo fatigue:
@@ -1970,7 +1976,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.9.7';
+const GAME_VERSION = '2.9.8';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -3743,7 +3749,7 @@ const EVENT_POOL = [
   {
     id: 'thaad_arrived', weight: 4, title: 'US THAAD DEPLOYMENT',
     desc: 'CENTCOM moved a THAAD battery to Negev — Arrow-3 reload boost',
-    type: 'success',
+    type: 'success', excludeFromGaza: true,                  // FIX v2.9.8: THAAD = anti-Iran ballistic, not Gaza
     apply() {
       let added = 0;
       state.batteries.filter(b => b.type === 'arrow3').forEach(b => {
@@ -3758,13 +3764,13 @@ const EVENT_POOL = [
   {
     id: 'iran_us_strike', weight: 5, title: 'IRGC STRIKES US BASE',
     desc: 'IRGC ballistic + Houthi drone swarm against a US Gulf installation',
-    type: 'danger',
+    type: 'danger', excludeFromGaza: true,                  // FIX v2.9.8: Iran/US base, NOT Gaza
     apply() { fireIranUSStrike(); }
   },
   {
     id: 'cyber_battery_offline', weight: 4, title: 'CYBER ATTACK ON BATTERY',
     desc: 'Iranian APT group disabled a battery — offline for 30s',
-    type: 'danger',
+    type: 'danger', excludeFromGaza: true,                  // FIX v2.9.8: Iranian APT, not Gaza
     apply() {
       const targets = state.batteries.filter(b => !b.cyberOffline);
       if (targets.length === 0) return;
@@ -3796,7 +3802,7 @@ const EVENT_POOL = [
   {
     id: 'oil_crisis', weight: 3, title: 'OIL PRICE SPIKE',
     desc: 'Houthi attack on tanker fleet — oil supply crisis, budget −30% for 3 min',
-    type: 'warn',
+    type: 'warn', excludeFromGaza: true,                  // FIX v2.9.8: Houthi maritime, not Gaza
     apply() {
       state.diplomacy.oilCrisisUntil = Date.now() + 180000;
       state.money = Math.max(0, state.money - 80000);
@@ -3820,6 +3826,7 @@ const EVENT_POOL = [
     id: 'ally_support', weight: 5, title: 'NEW ALLY JOINS',
     desc: 'UK / France / Germany pledges support — +$300K aid + 6 D.Sling',
     type: 'success',
+    requires: () => (state.batteries || []).some(b => b.type === 'davidsSling'),  // FIX v2.9.8: needs DS to exist
     apply() {
       state.money += 300000;
       let added = 0;
