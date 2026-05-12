@@ -1825,6 +1825,17 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.9.3 — patch: Gaza scenario balance + leak fixes. User feedback: 'Mossad/Iran
+//           events still leaking, allies giving D.Sling in 2008, lost in 2008 doing
+//           nothing'. (1) Tagged 4 more events excludeFromGaza: mossad_op, us_intel_share,
+//           us_carrier_arrived, us_thaad_battery, unit8200_intercept (all Iran-themed).
+//           (2) us_arrow / patriot_arrived events now require respective batteries to
+//           exist (no D.Sling in 2008). (3) Pre-defense eras (canDeployDefenses=false):
+//           pressure baseline rate × 0.4, impact pressure × 0.51 (0.18/0.35), op start
+//           pressure burst 12→5, Cast Lead 'large' override (18 sorties, 14 pressure
+//           vs 32 default). (4) TST eraGates: hamas_atgm_team (Kornet) 2014+,
+//           hamas_naval_unit 2009+, hamas_hostage_holding 2023+, hamas_grad_pad 2008+
+//           — no more anachronistic Kornet ATGM in 2008.
 //   2.9.2 — patch: 2 audit fixes. (1) Final-era setTimeout now uses scenarioGen guard
 //           — if user exits + re-enters scenario within 1500ms, endGame won't fire on
 //           the new scenario (was: would crash on null state.gaza in generic endgame
@@ -1920,7 +1931,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.9.2';
+const GAME_VERSION = '2.9.3';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -2732,7 +2743,12 @@ const GAZA_ERAS = [
       weaponRanges: { mortar: 8, rocket: 25 }
     },
     idf:   { canDeployDefenses: false, types: [], deltaStock: { ironDome: 0, davidsSling: 0, arrow3: 0 } },
-    civPenalty: 1.1,
+    civPenalty: 0.7,
+    // FIX v2.9.3: Cast Lead op was MUCH smaller than Iron Swords (1/30 scale).
+    // Override default 'large' to match real-world 22-day operation scale.
+    opOverrides: {
+      large: { sorties: 18, suppressMs: 120000, pressureGain: 14, escalationGain: 12, cost: 40000 }
+    },
     description: '22-day offensive (Dec 2008-Jan 2009). ~1,400 Palestinians, 13 Israelis killed. ~3,000+ launches/year. Improved Qassams + first Grad-122mm reach Ashkelon and edge of Ashdod. Defense: STRIKES ONLY.',
     historicalCeasefire: {
       name: 'Unilateral Israeli ceasefire — January 18, 2009',
@@ -3531,6 +3547,8 @@ const EVENT_POOL = [
     id: 'us_arrow', weight: 6, title: 'ARROW-3 DELIVERY',
     desc: 'Boeing delivered a batch of Arrow-3 interceptors',
     type: 'success',
+    // FIX v2.9.3: only fires if Arrow-3 actually exists (operational 2017+)
+    requires: () => (state.batteries || []).some(b => b.type === 'arrow3'),
     apply() {
       let added = 0;
       state.batteries.filter(b => b.type === 'arrow3').forEach(b => {
@@ -3621,6 +3639,8 @@ const EVENT_POOL = [
     id: 'patriot_arrived', weight: 8, title: 'US PATRIOT DELIVERY',
     desc: 'US Patriot missiles arrived — D. Sling resupply',
     type: 'success',
+    // FIX v2.9.3: only fires if D.Sling actually exists (operational 2017+)
+    requires: () => (state.batteries || []).some(b => b.type === 'davidsSling'),
     apply() {
       let added = 0;
       state.batteries.filter(b => b.type === 'davidsSling').forEach(b => {
@@ -3898,7 +3918,7 @@ const EVENT_POOL = [
   {
     id: 'us_carrier_arrived', weight: 6, title: 'USS GERALD R. FORD ARRIVED',
     desc: 'US carrier strike group enters E. Mediterranean — deterrence boost, Iran throttled',
-    type: 'success',
+    type: 'success', excludeFromGaza: true,                  // FIX v2.9.3: Iran deterrence, not Gaza
     requires: () => (state.gaza ? state.gaza.escalation > 25 : true),
     apply() {
       state.iranDelayUntil = Math.max(state.iranDelayUntil || 0, state.gameTime + 90000);
@@ -3910,7 +3930,7 @@ const EVENT_POOL = [
   {
     id: 'us_thaad_battery', weight: 3, title: 'US DEPLOYS THAAD',
     desc: 'US deploys THAAD battery to Negev — instant strategic anti-missile capability',
-    type: 'success',
+    type: 'success', excludeFromGaza: true,                  // FIX v2.9.3: late-2024 only, not in Gaza era flow
     requires: () => (state.gaza ? state.gaza.escalation > 50 : false) || (state.escalationLevel || 0) >= 4,
     apply() {
       // Spawn a temporary THAAD battery near Negev
@@ -3930,7 +3950,7 @@ const EVENT_POOL = [
   {
     id: 'us_intel_share', weight: 5, title: 'US INTEL SHARE',
     desc: 'NSA shares Iranian launch intel — early-warning + reveals enemy launch sites for 2 min',
-    type: 'success',
+    type: 'success', excludeFromGaza: true,                  // FIX v2.9.3: Iran intel, not Gaza
     apply() {
       state.earlyWarningUntil = state.gameTime + 120000;
       state.intelRevealUntil = Date.now() + 120000;
@@ -3952,7 +3972,7 @@ const EVENT_POOL = [
   {
     id: 'mossad_op', weight: 4, title: 'MOSSAD OPERATION',
     desc: 'Covert sabotage hits Iranian assembly line — Iran throttle 5 min',
-    type: 'success',
+    type: 'success', excludeFromGaza: true,                  // FIX v2.9.3: Iran-related, not Gaza
     apply() {
       state.iranDelayUntil = Math.max(state.iranDelayUntil || 0, state.gameTime + 300000);
       logEvent('Mossad: Iran throttled 5min', 'success');
@@ -3961,7 +3981,7 @@ const EVENT_POOL = [
   {
     id: 'unit8200_intercept', weight: 4, title: 'UNIT 8200 INTERCEPT',
     desc: 'Signal intel reveals enemy launch coords — 90s satellite reveal',
-    type: 'success',
+    type: 'success', excludeFromGaza: true,                  // FIX v2.9.3: signal intel is general, Gaza uses tunnel intel via TSTs
     apply() {
       state.intelRevealUntil = Date.now() + 90000;
       logEvent('Unit 8200: launch sites revealed 90s', 'success');
@@ -9973,7 +9993,12 @@ function handleImpact(threat) {
       state.gaza.israeliCasualtiesByEra[yr] = (state.gaza.israeliCasualtiesByEra[yr] || 0) + israeliDeaths;
     }
     // Each impact on a populated city raises pressure proportionally
-    state.gaza.pressure = Math.min(100, state.gaza.pressure + damage * 0.35);
+    // FIX v2.9.3: pre-2011 eras (no Iron Dome possible) — pressure penalty halved.
+    // Player has ZERO defense agency → punishing them for impacts is unfair.
+    // Real-world 2007-2010: Israel WAS taking Qassam impacts and surviving politically.
+    const noDefenseEra = !state.gaza.canDeployDefenses;
+    const pressMul = noDefenseEra ? 0.18 : 0.35;
+    state.gaza.pressure = Math.min(100, state.gaza.pressure + damage * pressMul);
     // News headline for impacts on big cities (importance >= 5)
     if (city.importance >= 5 && Math.random() < 0.55) {
       addGazaNews(`${city.name} hit — ${israeliDeaths} casualties reported`, 'bad');
@@ -11212,7 +11237,8 @@ const TST_TEMPLATES = [
     intelSource:'INTEL_CHAIN', politicalLevel:0, reward:{ money:25000, threatRateReduce:0.5 } },
   { id:'hamas_atgm_team', faction:'hamas', priority:6, baseReliability:80, windowMs:25000, respawnCooldownMs:240000,
     title:'ANTI-TANK SQUAD · KORNET', desc:'UAV: 3-man team with Russian Kornet, prepping fire position',
-    intelSource:'UAV', politicalLevel:0, reward:{ money:9000, threatRateReduce:0.85 } },
+    intelSource:'UAV', politicalLevel:0, reward:{ money:9000, threatRateReduce:0.85 },
+    eraGate: { minYear: 2014 } },                         // FIX v2.9.3: Russian Kornet smuggled to Hamas via Sinai post-2014 only
   { id:'hamas_rocket_workshop', faction:'hamas', priority:7, baseReliability:78, windowMs:40000, respawnCooldownMs:360000,
     title:'ROCKET WORKSHOP · QASSAM ASSEMBLY', desc:'SIGINT: Welding/casting noises + propellant fumes, residential cover',
     intelSource:'SIGINT', politicalLevel:0, reward:{ money:14000, threatRateReduce:0.7 } },
@@ -11227,13 +11253,16 @@ const TST_TEMPLATES = [
     intelSource:'SIGINT', politicalLevel:1, reward:{ money:32000, panicReduce:8 } },
   { id:'hamas_naval_unit', faction:'hamas', priority:6, baseReliability:82, windowMs:30000, respawnCooldownMs:300000,
     title:'NAVAL COMMANDOS · GAZA COAST', desc:'SAT: Frogman team prepping for amphibious infiltration',
-    intelSource:'SAT', politicalLevel:0, reward:{ money:11000, threatRateReduce:0.85 } },
+    intelSource:'SAT', politicalLevel:0, reward:{ money:11000, threatRateReduce:0.85 },
+    eraGate: { minYear: 2009 } },                         // FIX v2.9.3: Hamas naval commando unit formed 2009
   { id:'hamas_hostage_holding', faction:'hamas', priority:9, baseReliability:55, windowMs:90000, respawnCooldownMs:600000,
     title:'POSSIBLE HOSTAGE HOLDING SITE', desc:'HUMINT: Civilian-style apartment with 24/7 armed guard rotation — confidence low',
-    intelSource:'HUMINT', politicalLevel:1, reward:{ money:25000, panicReduce:12 } },
+    intelSource:'HUMINT', politicalLevel:1, reward:{ money:25000, panicReduce:12 },
+    eraGate: { minYear: 2023 } },                         // FIX v2.9.3: Oct 7 hostages = 2023+ only
   { id:'hamas_grad_pad', faction:'hamas', priority:7, baseReliability:80, windowMs:25000, respawnCooldownMs:300000,
     title:'GRAD LAUNCH PAD · OPEN', desc:'UAV: Multi-tube Grad rack visible in olive grove, crew arming',
-    intelSource:'UAV', politicalLevel:0, reward:{ money:13000, threatRateReduce:0.7 } },
+    intelSource:'UAV', politicalLevel:0, reward:{ money:13000, threatRateReduce:0.7 },
+    eraGate: { minYear: 2008 } },                         // FIX v2.9.3: Grad-122mm smuggled to Hamas via Sinai 2008+
   { id:'hamas_workshop_lathe', faction:'hamas', priority:6, baseReliability:85, windowMs:35000, respawnCooldownMs:360000,
     title:'METAL WORKSHOP · ROCKET BODIES', desc:'FIELD: Industrial lathe + machining equipment for rocket casings',
     intelSource:'FIELD', politicalLevel:0, reward:{ money:11000 } },
@@ -12628,7 +12657,10 @@ function tickGazaCampaign(dt) {
 
   // --- Pressure baseline drift + escalation slow decay ---
   // Higher era = higher baseline pressure (international fatigue grows over time).
-  const eraPressureRate = g.pressureBaselineRate * (era.civPenalty || 1.0);
+  // FIX v2.9.3: in pre-Iron-Dome eras (no defenses possible), pressure drift halved
+  // (player has no agency over defense — historical baseline pressure was lower then).
+  let eraPressureRate = g.pressureBaselineRate * (era.civPenalty || 1.0);
+  if (!g.canDeployDefenses) eraPressureRate *= 0.4;
   g.pressure = Math.min(100, g.pressure + eraPressureRate * (dt / 1000));
   g.escalation = Math.max(0, g.escalation - 0.012 * (dt / 1000));
 
@@ -12882,9 +12914,12 @@ function advanceGazaYear() {
   // Operation eras: spike attack volume + jump escalation/pressure
   if (era.isOperation) {
     g.escalation = Math.min(100, g.escalation + 25);
-    g.pressure = Math.min(100, g.pressure + 12);
+    // FIX v2.9.3: pre-defense era (no Iron Dome) gets HALVED start-pressure (otherwise
+    // player loses immediately in 2008 Cast Lead because of cascading no-defense pressure).
+    const startPressBump = g.canDeployDefenses ? 12 : 5;
+    g.pressure = Math.min(100, g.pressure + startPressBump);
     g.spawnTimer = 1500;   // immediate volley
-    logEvent(`!!!! ${era.operationName.toUpperCase()} BEGINS — escalation +25, pressure +12`, 'danger');
+    logEvent(`!!!! ${era.operationName.toUpperCase()} BEGINS — escalation +25, pressure +${startPressBump}`, 'danger');
     showNotification(era.operationName, 'Major military operation under way. Expect heavy attack volume.', 'danger');
     // Auto-launch the matching IDF operation (small/medium/large) — this is the historical IDF response.
     // Free of charge (isAuto=true bypasses cost check), bypasses cooldowns.
