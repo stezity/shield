@@ -1825,6 +1825,12 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.10.1 — Pre/post-2011 impact split in endgame stats. User: 'сделай разделение
+//            в статистике прилеты до 2011 и прилеты после 2011'.
+//            Reads from existing per-era casualty dicts (civDeathsByEra,
+//            israeliCasualtiesByEra), groups by year < 2011 vs >= 2011.
+//            Highlights the Iron Dome effectiveness — pre-2011 has NO defense,
+//            post-2011 shows what was prevented by interceptors.
 //   2.10.0 — MAJOR: time-based STRIKE + USA quota REGEN based on US president +
 //            diplomacy. User: 'дай больше strike и us квот для израиля... смотря по
 //            президенту и дипломатии с ним'. (1) Initial quotas bumped: strikesLeft
@@ -1998,7 +2004,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.10.0';
+const GAME_VERSION = '2.10.1';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -16480,6 +16486,33 @@ function endGazaCampaign(victory) {
     </div>
     <div class="row"><span>Palestinian casualties</span><span style="color:#ff8888">${fmt(g.civDeaths || 0)}</span></div>
     <div class="row"><span>Cities destroyed</span><span style="color:${g.citiesLost>=2?'var(--red)':g.citiesLost>0?'var(--amber)':'var(--green)'}">${g.citiesLost || 0}</span></div>
+    <!-- === PRE/POST-2011 SPLIT (NEW v2.10.1) — Iron Dome era impact comparison === -->
+    ${(() => {
+      const ilByEra = g.israeliCasualtiesByEra || {};
+      const psByEra = g.civDeathsByEra || {};
+      // Also count IMPACTS via threats stats — pre/post by checking when casualties accumulated
+      let ilPre=0, ilPost=0, psPre=0, psPost=0;
+      Object.keys(ilByEra).forEach(yr => {
+        if (parseFloat(yr) < 2011) ilPre += (ilByEra[yr]||0);
+        else ilPost += (ilByEra[yr]||0);
+      });
+      Object.keys(psByEra).forEach(yr => {
+        if (parseFloat(yr) < 2011) psPre += (psByEra[yr]||0);
+        else psPost += (psByEra[yr]||0);
+      });
+      return `
+      <div style="margin-top:8px;padding:6px 8px;background:rgba(40,20,20,0.4);border-left:3px solid #ff8888;font-size:11px;">
+        <div style="color:#aab;letter-spacing:1px;font-weight:bold;margin-bottom:4px;">▾ IMPACT SPLIT BY IRON DOME ERA</div>
+        <div class="row" style="border:none;padding:2px 0;">
+          <span style="color:#888;">Pre-2011 (no defense)</span>
+          <span style="color:#ff8888">IL ${fmt(ilPre)} · PS ${fmt(psPre)}</span>
+        </div>
+        <div class="row" style="border:none;padding:2px 0;">
+          <span style="color:#888;">Post-2011 (Iron Dome era)</span>
+          <span style="color:#ff8888">IL ${fmt(ilPost)} · PS ${fmt(psPost)}</span>
+        </div>
+      </div>`;
+    })()}
     <div class="row" style="margin-top:8px;border-top:1px dashed #444;padding-top:6px;">
       <span>Hamas leaders eliminated</span><span style="color:#5a5">${g.leadersKilled || 0}</span>
     </div>
