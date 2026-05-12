@@ -1825,6 +1825,15 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.9.7 — patch: Hamas tactical pauses + post-salvo fatigue. User: 'небольшие
+//           перерывы у хамаса после бомбардировки и вообщем перерывы чтобы он
+//           не стрелял без причины чтобы иногда'. (1) Post-salvo fatigue:
+//           each rocket adds 1-3 sec extra cooldown beyond base interval (large
+//           salvos = longer break). (2) 20% chance per salvo cycle to enter
+//           tactical-quiet for 1-3 minutes (logged as 'Hamas tactical quiet'
+//           + news headline 'sources cite logistics/leadership decision').
+//           (3) Suppression factor 2.0× → 3.5× when player strikes during the
+//           cooldown window — IDF action has more deterrent effect.
 //   2.9.6 — patch: Hamas now honors historical ceasefires (was breaking ~30-50% of them).
 //           User: 'расширь чтобы прекращение огня хамас соблюдал'.
 //           Removed: per-frame Hamas violation chance (0.000005 × dt). Removed: 3-7 rocket
@@ -1961,7 +1970,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.9.6';
+const GAME_VERSION = '2.9.7';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -12819,8 +12828,25 @@ function tickGazaCampaign(dt) {
       // Optional TST (high-priority surface target appears briefly)
       if (Math.random() < era.hamas.tstChance) spawnGazaTST();
       // Suppression from counter-strikes slows the next salvo
-      const suppressionFactor = (now < g.suppressionUntil) ? 2.0 : 1.0;
-      g.spawnTimer = era.hamas.intervalMs * (0.7 + Math.random() * 0.6) * suppressionFactor;
+      // FIX v2.9.7: 2.0×→3.5× during suppression (player strikes have bigger pacification effect)
+      const suppressionFactor = (now < g.suppressionUntil) ? 3.5 : 1.0;
+      // === POST-SALVO FATIGUE (NEW v2.9.7) ===
+      // Real-world Hamas didn't fire 24/7 — needed time to reload, redeploy launchers,
+      // change positions. Add fatigue scaled by salvo size: each rocket adds ~1-3 sec
+      // of cooldown beyond the base interval.
+      const salvoFatigue = salvoSize * (1000 + Math.random() * 2000);
+      g.spawnTimer = era.hamas.intervalMs * (0.7 + Math.random() * 0.6) * suppressionFactor + salvoFatigue;
+      // === RANDOM TACTICAL QUIET (NEW v2.9.7) ===
+      // 20% chance Hamas observes quiet for 1-3 minutes (intel-protection, propaganda
+      // optics, weather, leadership decision). Real-world: long lulls between flareups.
+      if (Math.random() < 0.20) {
+        const quietDuration = 60000 + Math.random() * 120000;        // 1-3 min extra
+        g.spawnTimer += quietDuration;
+        logEvent(`◷ Hamas tactical quiet — no fire for ${(quietDuration/1000)|0}s`, 'info');
+        if (typeof addGazaNews === 'function') {
+          addGazaNews('Hamas operations paused — sources cite logistics / leadership decision', 'info');
+        }
+      }
     }
   }
 
