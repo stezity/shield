@@ -1825,6 +1825,12 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.9.6 — patch: Hamas now honors historical ceasefires (was breaking ~30-50% of them).
+//           User: 'расширь чтобы прекращение огня хамас соблюдал'.
+//           Removed: per-frame Hamas violation chance (0.000005 × dt). Removed: 3-7 rocket
+//           burst on violation. Removed: Hamas provocation escalation bumps during pauses.
+//           Real-world: 2009/2012/2014/2021/2023/2025 ceasefires were respected. Player
+//           STRIKE during ceasefire still breaks it (meaningful choice).
 //   2.9.5 — patch: Gaza intensity drastically reduced + win-ability buffs. User lost
 //           in 2012 (era 5/15) at pressure 100 doing nothing. Multiple compounding fixes:
 //           (1) Salvo intensity 0.5..1.5× → 0.3..1.0× (-30% global). (2) Baseline
@@ -1955,7 +1961,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.9.5';
+const GAME_VERSION = '2.9.6';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -12706,34 +12712,24 @@ function tickGazaCampaign(dt) {
 
   // --- Hamas auto-escalation (rare provocation spike) ---
   // FIX v2.9.5: provocation escalation 2-6 → 1-3 (was compounding too fast)
-  if (Math.random() < era.hamas.autoEscalateChance * 0.5 * (dt / 1000)) {
+  // FIX v2.9.6: Hamas doesn't provoke during ceasefires (ceasefires now honored)
+  if (now >= g.pauseAttacksUntil && Math.random() < era.hamas.autoEscalateChance * 0.5 * (dt / 1000)) {
     g.escalation = Math.min(100, g.escalation + 1 + Math.random() * 2);
     logEvent('Hamas conducted a provocation - escalation rises', 'warn');
   }
 
-  // --- Ceasefire active? Check for Hamas violation (gives Israel sympathy bonus) ---
+  // === HAMAS HONORS CEASEFIRES (FIX v2.9.6) ===
+  // User feedback: 'расширь чтобы прекращение огня хамас соблюдал'.
+  // Real-world: most ceasefires (2009 Cast Lead end, 2012 Pillar end, 2014 Aug 26 indef.,
+  // 2021 May 21, 2023 Nov hostage deal, 2025 Jan deal) were RESPECTED for their durations.
+  // Was: Hamas had ~30-50% chance to break ceasefire mid-pause. Removed entirely.
+  // (Player can still break a ceasefire via STRIKE — that's the meaningful choice.)
+  // The OLD violation block is preserved here as commented reference:
+  /*
   if (now < g.pauseAttacksUntil) {
-    // Per-frame chance of Hamas breaking the ceasefire. Calibrated to ~30-50% chance over 60-180s ceasefire.
-    if (Math.random() < 0.000005 * dt) {
-      g.pauseAttacksUntil = 0;          // ceasefire broken
-      g.pressure = Math.max(0, g.pressure - 18);   // intl sympathy for Israel
-      g.escalation = Math.min(100, g.escalation + 5);
-      g.ceasefireViolations = g.ceasefireViolations || { israel: 0, hamas: 0 };
-      g.ceasefireViolations.hamas++;
-      showNotification('HAMAS VIOLATES CEASEFIRE', 'Hamas fires rockets despite the agreement. International support shifts to Israel. Pressure -18.', 'success');
-      logEvent('!!!! HAMAS VIOLATES CEASEFIRE -- pressure -18 (intl sympathy), escalation +5', 'success');
-      addGazaNews('CEASEFIRE COLLAPSE: Hamas resumes rocket fire — Israel granted increased Western support', 'good');
-      // Spawn an immediate small violation salvo
-      const gen = state.scenarioGen;
-      const burst = 3 + Math.floor(Math.random() * 4);
-      for (let i = 0; i < burst; i++) {
-        setTimeout(() => {
-          if (state.scenarioGen !== gen || !state.active) return;
-          spawnGazaHamasThreat('rocket');
-        }, i * 600 + Math.random() * 200);
-      }
-    }
+    if (Math.random() < 0.000005 * dt) { ... HAMAS VIOLATES ... }
   }
+  */
 
   // === Sync state.escalationLevel from gaza escalation (so leader-class TSTs unlock) ===
   // Was: state.escalationLevel never updated in Gaza, so Sinwar (politicalLevel 2) etc. never appeared.
