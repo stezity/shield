@@ -1825,6 +1825,19 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.9.4 — patch: CRISIS_EVENTS leaking + historical accuracy overhaul.
+//           User: 'Mossad IRGC + Hezbollah Convoy events appear in Gaza, Hamas attacks
+//           Ashdod in 2009, Cast Lead too brutal, lost 2008 doing nothing'.
+//           Used agent for deep historical research (Wikipedia, ToI, Reuters, B'Tselem).
+//           Findings: 2009 was a 90% rocket DROP after Cast Lead (Hamas observed unofficial
+//           ceasefire); Mavi Marmara raid was the major 2010 event; real Cast Lead was
+//           ~50 rockets/day not 165+ per game era; pre-2011 political pressure was modest.
+//           Fixes: (1) 5 CRISIS_EVENTS tagged excludeFromGaza (hezb_leader, irgc_commander,
+//           cyber, us_sead, enrichment). (2) spawnCrisis filters by excludeFromGaza in Gaza.
+//           (3) 2010 era REWRITTEN: salvoMax 4→2, intervalMs 14k→22k, range 40km→25km
+//           (Sderot only, NO Ashdod), maxLat 31.85→31.65, civPenalty 1.05→0.5. Renamed
+//           '2009-10 — POST-CAST-LEAD QUIET'. (4) 2008 Cast Lead salvoMax 6→4, intervalMs
+//           11k→13k, duration 5min→4min — historically pacing.
 //   2.9.3 — patch: Gaza scenario balance + leak fixes. User feedback: 'Mossad/Iran
 //           events still leaking, allies giving D.Sling in 2008, lost in 2008 doing
 //           nothing'. (1) Tagged 4 more events excludeFromGaza: mossad_op, us_intel_share,
@@ -1931,7 +1944,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.9.3';
+const GAME_VERSION = '2.9.4';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -2734,11 +2747,13 @@ const GAZA_ERAS = [
   },
   {
     year: 2008, label: '2008–09 — Operation Cast Lead',
-    durationMs: 5 * 60 * 1000,
+    durationMs: 4 * 60 * 1000,                              // FIX v2.9.4: 5min → 4min (less punishing)
     isOperation: true, operationName: 'Operation Cast Lead', autoOpScale: 'large',
     hamas: {
-      weapons: ['rocket','mortar'], salvoMax: 6, intervalMs: 11000, accuracy: 0.35,
-      tstChance: 0.07, autoEscalateChance: 0.035, maxLat: 31.85,
+      // FIX v2.9.4: salvoMax 6→4, intervalMs 11000→13000 (less brutal — historically Cast Lead
+      // pace was ~50 rockets/day for Hamas, our 5min era was 165+ rockets which is overscaled)
+      weapons: ['rocket','mortar'], salvoMax: 4, intervalMs: 13000, accuracy: 0.32,
+      tstChance: 0.06, autoEscalateChance: 0.025, maxLat: 31.85,
       // Improved Qassam-3 + first Grad-122 trickle in late 2008 (~20-30 km). Ashkelon ✓, Ashdod borderline.
       weaponRanges: { mortar: 8, rocket: 25 }
     },
@@ -2759,17 +2774,21 @@ const GAZA_ERAS = [
     }
   },
   {
-    year: 2010, label: '2010 — Mavi Marmara · Quiet rebuilding',
+    // FIX v2.9.4: was rocket-heavy 'Mavi Marmara' year. Historical reality (per Wikipedia/B'Tselem):
+    // 2009 = ~280 rockets total (90% DROP from 2008's ~3,000). 2010 = ~150 rockets total.
+    // Hamas observed an unofficial ceasefire after Cast Lead. Most fire was sporadic PIJ Qassams
+    // hitting Sderot only (NOT Ashdod). Mavi Marmara raid was the major political event.
+    year: 2010, label: '2009-10 — POST-CAST-LEAD QUIET · Mavi Marmara',
     durationMs: 3 * 60 * 1000,
     hamas: {
-      weapons: ['rocket','mortar'], salvoMax: 4, intervalMs: 14000, accuracy: 0.35,
-      tstChance: 0.05, autoEscalateChance: 0.025, maxLat: 31.85,
-      // More Grad-122mm smuggled via Sinai tunnels. Range up to 40 km — Beersheba on edge.
-      weaponRanges: { mortar: 8, rocket: 40 }
+      weapons: ['rocket','mortar'], salvoMax: 2, intervalMs: 22000, accuracy: 0.30,
+      tstChance: 0.04, autoEscalateChance: 0.015, maxLat: 31.65,        // Sderot only — NO Ashdod
+      // Most fire was sporadic Qassams. Hamas was REBUILDING tunnels, not attacking.
+      weaponRanges: { mortar: 8, rocket: 25 }                             // Qassam-3 only, no Grad
     },
     idf:   { canDeployDefenses: false, types: [], deltaStock: { ironDome: 0, davidsSling: 0, arrow3: 0 } },
-    civPenalty: 1.05,
-    description: 'May 2010: IDF raids Gaza-bound flotilla, 10 activists killed — international outrage. Smuggled Grad-122mm now occasionally reaches Beersheba. Iron Dome still in testing.'
+    civPenalty: 0.5,                                                      // Goldstone Report later, but real-time pressure was modest
+    description: 'Hamas observed unofficial ceasefire after Cast Lead — 90% drop in rocket fire (2009: ~280, 2010: ~150). Tunnel rebuilding phase. May 2010: IDF Mavi Marmara raid (9 Turkish activists killed) — diplomatic crisis with Turkey. Iron Dome still in testing at Hatzerim.'
   },
   {
     year: 2011, label: '2011 — IRON DOME ENTERS SERVICE',
@@ -3161,6 +3180,7 @@ const CRISIS_EVENTS = [
     id: 'hezb_leader',
     title: '🛰 INTEL: Hezbollah Convoy Spotted',
     desc: 'A senior Hezbollah commander\'s convoy is moving through the Bekaa Valley. Strike window: 30 seconds.',
+    excludeFromGaza: true,                                    // FIX v2.9.4: Hezbollah, not Gaza
     options: [
       { label: '🎯 STRIKE NOW', tooltip: 'High-value kill, but +18 escalation', apply(s){ s.escalation = Math.min(100, (s.escalation||0) + 18); s.gazaPressure = Math.min(100, (s.gazaPressure||0) + 5); s.intelBoost = 0; logEvent('★ STRIKE: Hezbollah commander eliminated', 'success'); showNotification('TARGET ELIMINATED', 'Senior Hezbollah commander killed.', 'success'); } },
       { label: '🛰 TRACK', tooltip: 'Intel +20, no kill', apply(s){ if(state.world) state.world.intelQuality = Math.min(100, (state.world.intelQuality||50) + 20); logEvent('Tracked Hezbollah convoy — intel quality boosted', 'info'); } },
@@ -3181,6 +3201,7 @@ const CRISIS_EVENTS = [
     id: 'us_sead',
     title: '🇺🇸 US OFFER: SEAD Support',
     desc: 'A USAF carrier group offers Suppression of Enemy Air Defense — destroys 3 enemy radar sites.',
+    excludeFromGaza: true,                                    // FIX v2.9.4: Hamas has no radar sites
     options: [
       { label: '✓ ACCEPT', tooltip: '+US Support, +10 escalation (US enters)', apply(s){ if(state.world) state.world.usSupport = Math.min(100, (state.world.usSupport||50) + 25); logEvent('✓ US SEAD: 3 enemy radars destroyed', 'success'); showNotification('US SEAD STRIKE', 'F-15Es from CVN-78 destroyed 3 radar sites.', 'success'); } },
       { label: '✗ DECLINE', tooltip: 'Independence preserved', apply(s){ if(state.world) state.world.usSupport = Math.max(0, (state.world.usSupport||50) - 5); logEvent('Declined US assistance', 'info'); } }
@@ -3190,6 +3211,7 @@ const CRISIS_EVENTS = [
     id: 'cyber',
     title: '💻 CYBER ATTACK ATTEMPT',
     desc: 'Iranian APT34 attempting to penetrate Iron Dome control network. Decision needed.',
+    excludeFromGaza: true,                                    // FIX v2.9.4: Iranian APT, not Gaza
     options: [
       { label: '🛡 BLOCK', tooltip: 'Costs 1 strike token', apply(s){ if (state.strikesLeft) state.strikesLeft--; logEvent('Cyber attack blocked (-1 strike token)', 'success'); } },
       { label: '🕵 TRACE', tooltip: 'Intel +15, but 30% chance of breach', apply(s){
@@ -3222,6 +3244,7 @@ const CRISIS_EVENTS = [
     id: 'irgc_commander',
     title: '🕵 MOSSAD: IRGC Commander in Damascus',
     desc: 'A Quds Force general visiting embassy. Strike option but escalation risk.',
+    excludeFromGaza: true,                                    // FIX v2.9.4: Iran/IRGC, not Gaza
     options: [
       { label: '⚡ STRIKE', tooltip: 'High prestige, +25 international pressure', apply(s){ if(state.gaza) { state.gaza.leadersKilled++; state.gaza.pressure = Math.min(100, state.gaza.pressure + 25); state.gaza.escalation = Math.min(100, state.gaza.escalation + 15); } logEvent('★★★ STRIKE: IRGC general eliminated', 'success'); showNotification('LEADER ELIMINATED', 'IRGC Quds Force general killed in Damascus strike.', 'success'); } },
       { label: '⏳ WAIT', tooltip: 'No action', apply(s){ logEvent('Target left embassy without strike', 'warn'); } }
@@ -3249,6 +3272,7 @@ const CRISIS_EVENTS = [
     id: 'enrichment',
     title: '☢ INTEL: Iran Enrichment Centrifuges Relocating',
     desc: 'Natanz centrifuges in transit. Strike now eliminates program but massive escalation.',
+    excludeFromGaza: true,                                    // FIX v2.9.4: Iran nuclear, not Gaza
     options: [
       { label: '⚡ STRIKE', tooltip: 'Major prestige, but +40 pressure +25 escalation', apply(s){ if(state.gaza){ state.gaza.pressure = Math.min(100, state.gaza.pressure + 40); state.gaza.escalation = Math.min(100, state.gaza.escalation + 25); } logEvent('★★★★ STRIKE: Iran nuclear program crippled', 'success'); showNotification('NATANZ STRIKE', 'Iranian centrifuge convoy destroyed mid-transit.', 'danger'); } },
       { label: '⏳ MONITOR', tooltip: 'Intel boost, target survives', apply(s){ if(state.world) state.world.intelQuality = Math.min(100, (state.world.intelQuality||50)+15); logEvent('Convoy monitored — relocated successfully', 'info'); } }
@@ -13304,7 +13328,11 @@ function spawnCrisis() {
   if (state.playAs === 'attacker') return;   // crises = IDF-defender mechanic only
   ensureWorldState();
   if (state.world.activeCrisis) return;   // already active
-  const ev = CRISIS_EVENTS[Math.floor(Math.random() * CRISIS_EVENTS.length)];
+  // === GAZA FILTER (NEW v2.9.4): exclude Iran/Hezbollah-themed crises in Gaza scenario ===
+  const isGaza = state.scenario && state.scenario.campaign === 'gaza';
+  const allowed = isGaza ? CRISIS_EVENTS.filter(c => !c.excludeFromGaza) : CRISIS_EVENTS;
+  if (allowed.length === 0) return;
+  const ev = allowed[Math.floor(Math.random() * allowed.length)];
   state.world.activeCrisis = {
     event: ev,
     expiresAtGameTime: state.gameTime + 30000
