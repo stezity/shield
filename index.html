@@ -1832,6 +1832,16 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.10.3 — Real historical month/day dates per era. User: 'сделай события по
+//            месяцу а не по году в 2023 оно началось не в январе а 7 октября'.
+//            Each Gaza era now declares startDate/endDate (ISO YYYY-MM-DD) with
+//            actual historical dates. New getEraDisplayDate() helper interpolates
+//            the displayed date linearly across the era duration.
+//            Examples: 2023 Iron Swords now shows OCT 7, 2023 → NOV 24, 2023 (was:
+//            Jan→Dec). 2008 Cast Lead shows DEC 27, 2008 → JAN 18, 2009. 2011 Iron
+//            Dome era shows MAR 27, 2011 (deployment day) at start. Updates HUD
+//            date widget, era-start news/notification banners, situation reports,
+//            stats-panel Era row, and endgame 'Final era reached' line.
 //   2.10.2 — Pre/post-2011 impact split now also in LIVE statistics panel
 //            (right-side HUD), not just the endgame screen. User: 'именно
 //            statistics live'. Two new gaza-only stat-rows ('Pre-2011 IL · PS'
@@ -2017,7 +2027,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.10.2';
+const GAME_VERSION = '2.10.3';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -2807,6 +2817,9 @@ const SCENARIOS = {
 const GAZA_ERAS = [
   {
     year: 2007, label: '2007 — Hamas takes Gaza · Blockade begins',
+    // === HISTORICAL DATE SPAN (NEW v2.10.3) — drives HUD month/day display ===
+    startDate: '2007-06-14',                                 // Hamas seizes Gaza after Fatah split
+    endDate:   '2007-12-31',
     durationMs: 3 * 60 * 1000,
     hamas: {
       weapons: ['rocket','mortar'], salvoMax: 3, intervalMs: 16000, accuracy: 0.30,
@@ -2820,6 +2833,8 @@ const GAZA_ERAS = [
   },
   {
     year: 2008, label: '2008–09 — Operation Cast Lead',
+    startDate: '2008-12-27',                                 // Cast Lead opening airstrikes
+    endDate:   '2009-01-18',                                 // Israeli unilateral ceasefire
     durationMs: 4 * 60 * 1000,                              // FIX v2.9.4: 5min → 4min (less punishing)
     isOperation: true, operationName: 'Operation Cast Lead', autoOpScale: 'large',
     hamas: {
@@ -2852,6 +2867,8 @@ const GAZA_ERAS = [
     // Hamas observed an unofficial ceasefire after Cast Lead. Most fire was sporadic PIJ Qassams
     // hitting Sderot only (NOT Ashdod). Mavi Marmara raid was the major political event.
     year: 2010, label: '2009-10 — POST-CAST-LEAD QUIET · Mavi Marmara',
+    startDate: '2009-01-19',                                 // Day after Cast Lead ceasefire
+    endDate:   '2010-12-31',
     durationMs: 3 * 60 * 1000,
     hamas: {
       weapons: ['rocket','mortar'], salvoMax: 2, intervalMs: 22000, accuracy: 0.30,
@@ -2865,6 +2882,8 @@ const GAZA_ERAS = [
   },
   {
     year: 2011, label: '2011 — IRON DOME ENTERS SERVICE',
+    startDate: '2011-03-27',                                 // First Iron Dome battery deployed Hatzerim
+    endDate:   '2011-12-31',
     durationMs: 4 * 60 * 1000,
     hamas: {
       weapons: ['rocket','mortar','heavyRocket'], salvoMax: 5, intervalMs: 12000, accuracy: 0.40,
@@ -2885,6 +2904,8 @@ const GAZA_ERAS = [
   },
   {
     year: 2012, label: '2012 — Operation Pillar of Defense',
+    startDate: '2012-11-14',                                 // Op opens with Jabari assassination
+    endDate:   '2012-11-21',                                 // Egypt-brokered ceasefire
     durationMs: 5 * 60 * 1000,
     isOperation: true, operationName: 'Operation Pillar of Defense', autoOpScale: 'medium',
     hamas: {
@@ -2917,6 +2938,8 @@ const GAZA_ERAS = [
   },
   {
     year: 2014, label: '2014 — Operation Protective Edge',
+    startDate: '2014-07-08',                                 // Op begins
+    endDate:   '2014-08-26',                                 // Egypt open-ended ceasefire
     durationMs: 5 * 60 * 1000,
     isOperation: true, operationName: 'Operation Protective Edge', autoOpScale: 'large',
     hamas: {
@@ -2948,6 +2971,8 @@ const GAZA_ERAS = [
   },
   {
     year: 2017, label: '2017 — David\'s Sling enters service',
+    startDate: '2017-04-02',                                 // DS entered service April 2017
+    endDate:   '2017-12-31',
     durationMs: 3 * 60 * 1000,
     hamas: {
       weapons: ['rocket','mortar','heavyRocket'], salvoMax: 11, intervalMs: 8500, accuracy: 0.52,
@@ -2968,6 +2993,8 @@ const GAZA_ERAS = [
   },
   {
     year: 2018, label: '2018-19 — Great March of Return',
+    startDate: '2018-03-30',                                 // Land Day — first border protest
+    endDate:   '2019-10-31',                                 // Up to eve of Black Belt
     durationMs: 3 * 60 * 1000,
     hamas: {
       weapons: ['rocket','mortar','heavyRocket'], salvoMax: 8, intervalMs: 9500, accuracy: 0.50,
@@ -2987,6 +3014,8 @@ const GAZA_ERAS = [
   },
   {
     year: 2019, label: '2019 — Operation Black Belt (PIJ)',
+    startDate: '2019-11-12',                                 // PIJ commander al-Ata killed
+    endDate:   '2019-11-14',                                 // Egypt-brokered ceasefire
     durationMs: 4 * 60 * 1000,
     isOperation: true, operationName: 'Operation Black Belt', autoOpScale: 'small',
     hamas: {
@@ -3008,6 +3037,8 @@ const GAZA_ERAS = [
   },
   {
     year: 2021, label: '2021 — Operation Guardian of the Walls',
+    startDate: '2021-05-10',                                 // Op begins with Sheikh Jarrah escalation
+    endDate:   '2021-05-21',                                 // Egypt+UN ceasefire
     durationMs: 5 * 60 * 1000,
     isOperation: true, operationName: 'Operation Guardian of the Walls', autoOpScale: 'medium',
     hamas: {
@@ -3037,6 +3068,8 @@ const GAZA_ERAS = [
   },
   {
     year: 2022, label: '2022 — Operation Breaking Dawn (PIJ)',
+    startDate: '2022-08-05',                                 // Preemptive strike on Tayseer Jabari
+    endDate:   '2022-08-07',                                 // Egypt ceasefire
     durationMs: 3 * 60 * 1000,
     isOperation: true, operationName: 'Operation Breaking Dawn', autoOpScale: 'small',
     hamas: {
@@ -3057,6 +3090,8 @@ const GAZA_ERAS = [
   },
   {
     year: 2023, label: '2023 — OCT 7 · Operation Iron Swords begins',
+    startDate: '2023-10-07',                                 // Hamas border breach
+    endDate:   '2023-11-24',                                 // Hostage-deal humanitarian pause
     durationMs: 5 * 60 * 1000,
     isOperation: true, operationName: 'October 7 · Iron Swords', autoOpScale: 'large',
     hamas: {
@@ -3093,6 +3128,8 @@ const GAZA_ERAS = [
   {
     // === NEW v2.7: 2023b transitional era — taper Iron Swords intensity gradually ===
     year: 2023.5, label: '2023b — Iron Swords · Sustained Campaign (Nov-Dec)',
+    startDate: '2023-11-24',                                 // After hostage-deal pause begins
+    endDate:   '2023-12-31',
     durationMs: 4 * 60 * 1000,
     hamas: {
       weapons: ['rocket','mortar','heavyRocket'], salvoMax: 28, intervalMs: 5500, accuracy: 0.58,
@@ -3105,6 +3142,8 @@ const GAZA_ERAS = [
   },
   {
     year: 2024, label: '2024 — Iron Swords · Protracted war',
+    startDate: '2024-01-01',
+    endDate:   '2025-01-19',                                 // Trump Phase 1 deal
     durationMs: 5 * 60 * 1000,
     hamas: {
       // FIX v2.7: heavyRocket range 130→160 (no decrease vs prior eras), removed drone leftover
@@ -3135,6 +3174,8 @@ const GAZA_ERAS = [
   {
     // === NEW v2.7: 2015-16 transitional era — quiet rebuild between Protective Edge and David's Sling ===
     year: 2015, label: '2015-16 — Quiet Rebuild',
+    startDate: '2015-01-01',
+    endDate:   '2016-12-31',
     durationMs: 3 * 60 * 1000,
     hamas: {
       weapons: ['rocket','mortar'], salvoMax: 4, intervalMs: 13000, accuracy: 0.42,
@@ -3149,6 +3190,58 @@ const GAZA_ERAS = [
 
 // === SORT ERAS BY YEAR (so transitional inserts are placed correctly in timeline) ===
 GAZA_ERAS.sort((a, b) => (a.year || 0) - (b.year || 0));
+
+// === ERA DATE HELPERS (NEW v2.10.3) ============================================
+// Each Gaza era has real historical startDate / endDate (ISO 'YYYY-MM-DD').
+// We linearly interpolate the displayed date across the era's in-game duration so
+// the HUD shows e.g. 'October 7, 2023' on Iron Swords day-1 (not 'January 2023').
+const _MONTH_NAMES = ['January','February','March','April','May','June',
+                      'July','August','September','October','November','December'];
+function _parseEraISO(s, fallbackYear, fallbackMonth, fallbackDay) {
+  // Defensive: returns a UTC Date. ISO 'YYYY-MM-DD' assumed.
+  if (typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    const [y, m, d] = s.split('-').map(Number);
+    return new Date(Date.UTC(y, m - 1, d));
+  }
+  return new Date(Date.UTC(fallbackYear, fallbackMonth, fallbackDay));
+}
+function getEraDisplayDate(era, eraStartGameTime, currentGameTime) {
+  if (!era) return { year: 2007, month: 1, day: 1, monthName: 'January' };
+  const elapsedMs = Math.max(0, (currentGameTime || 0) - (eraStartGameTime || 0));
+  const eraDuration = era.durationMs || 60000;
+  const progress = Math.max(0, Math.min(1, elapsedMs / eraDuration));
+  const yr = Math.floor(era.year || 2007);
+  const startDate = _parseEraISO(era.startDate, yr, 0, 1);
+  const endDate   = _parseEraISO(era.endDate,   yr, 11, 31);
+  const cur = new Date(startDate.getTime() + (endDate.getTime() - startDate.getTime()) * progress);
+  return {
+    year:  cur.getUTCFullYear(),
+    month: cur.getUTCMonth() + 1,
+    day:   cur.getUTCDate(),
+    monthName: _MONTH_NAMES[cur.getUTCMonth()]
+  };
+}
+// Format a Date-like {year,month,day,monthName} object.
+//  withDay=true  → 'OCT 7, 2023'
+//  withDay=false → 'October 2023'
+function formatEraDate(d, withDay) {
+  if (!d) return '—';
+  return withDay
+    ? `${d.monthName.slice(0, 3).toUpperCase()} ${d.day}, ${d.year}`
+    : `${d.monthName} ${d.year}`;
+}
+// Convenience: get the era's start date (for era-opening news).
+function getEraStartDate(era) {
+  if (!era) return { year: 2007, month: 1, day: 1, monthName: 'January' };
+  const yr = Math.floor(era.year || 2007);
+  const d = _parseEraISO(era.startDate, yr, 0, 1);
+  return {
+    year: d.getUTCFullYear(),
+    month: d.getUTCMonth() + 1,
+    day: d.getUTCDate(),
+    monthName: _MONTH_NAMES[d.getUTCMonth()]
+  };
+}
 
 /* =========================================================
    SANDBOX · DEFEND — DATA TABLES
@@ -13039,7 +13132,10 @@ function tickGazaCampaign(dt) {
   // --- Periodic state-of-the-war news headline ---
   if (now >= g.nextStateOfWarAt) {
     g.nextStateOfWarAt = now + 4 * 60 * 1000;
-    addGazaNews(`SITUATION REPORT: ${era.year} -- ${Math.round(g.pressure)} press / ${Math.round(g.escalation)} esc / ${(g.israeliCasualties||0)} IL casualties / ${(g.civDeaths||0)} PS casualties`, 'info');
+    // FIX v2.10.3: situation report now uses interpolated month/year (e.g. 'NOV 2023')
+    const _sitDate = getEraDisplayDate(era, g.eraStartGameTime, state.gameTime);
+    const _sitLabel = formatEraDate(_sitDate, false).toUpperCase();
+    addGazaNews(`SITUATION REPORT: ${_sitLabel} -- ${Math.round(g.pressure)} press / ${Math.round(g.escalation)} esc / ${(g.israeliCasualties||0)} IL casualties / ${(g.civDeaths||0)} PS casualties`, 'info');
   }
 }
 
@@ -13097,8 +13193,13 @@ function advanceGazaYear() {
   const era = GAZA_ERAS[g.eraIndex];
   applyGazaEraToIdf(era, false);
   logEvent(`==== ${era.label} ====`, 'alert');
-  showNotification(`YEAR ${era.year}`, era.description, era.isOperation ? 'danger' : 'info');
-  addGazaNews(`${era.year} BEGINS — ${era.label.replace(/^\d{4}\s*[\-—]\s*/, '')}`, era.isOperation ? 'bad' : 'info');
+  // === FIX v2.10.3: era-start banners now show real historical start date (e.g. 'OCT 7, 2023') ===
+  const _startDate = getEraStartDate(era);
+  const _startTitle = formatEraDate(_startDate, true);          // 'OCT 7, 2023'
+  showNotification(_startTitle, era.description, era.isOperation ? 'danger' : 'info');
+  // Strip leading 'YYYY' or 'YYYY–YY' / 'YYYY-YY' / 'YYYYb' year prefix + separator from era.label
+  const _labelTail = era.label.replace(/^\d{4}([a-z]|[\-–][\d]{2,4})?\s*[\-—]\s*/, '');
+  addGazaNews(`${_startTitle} — ${_labelTail}`, era.isOperation ? 'bad' : 'info');
   // Operation eras: spike attack volume + jump escalation/pressure
   if (era.isOperation) {
     // FIX v2.9.5: era-start escalation 25→12 (was building too fast)
@@ -15785,7 +15886,7 @@ function updateGazaOpsPanel() {
     `<div style="background:rgba(0,0,0,0.4);border-top:1px solid #333;padding:8px 10px;margin-top:5px;font-size:10px;">` +
     `<div style="color:#5dade2;font-weight:bold;font-size:11px;margin-bottom:5px;">▣ CAMPAIGN STATISTICS</div>` +
     `<div style="display:grid;grid-template-columns:auto 1fr;gap:2px 8px;color:#aaa;">` +
-      `<span>Era:</span>            <span style="color:#fff;">${era.year} (${g.eraIndex+1}/${GAZA_ERAS.length})</span>` +
+      `<span>Era:</span>            <span style="color:#fff;">${(() => { const _d = getEraDisplayDate(era, g.eraStartGameTime, state.gameTime); return formatEraDate(_d, false); })()} (${g.eraIndex+1}/${GAZA_ERAS.length})</span>` +
       `<span>Strikes landed:</span> <span style="color:#fff;">${g.strikesLanded || 0}</span>` +
       `<span>Player ops:</span>     <span style="color:#fff;">${totalOps} (S:${g.opsConducted.small || 0} M:${g.opsConducted.medium || 0} L:${g.opsConducted.large || 0})</span>` +
       `<span>Auto ops:</span>       <span style="color:#fff;">${g.autoOpsTriggered || 0}</span>` +
@@ -16120,19 +16221,19 @@ function updateGazaHud() {
   // Use game-time so the date timer accelerates with the speed multiplier.
   const elapsedMs = Math.max(0, state.gameTime - (g.eraStartGameTime || 0));
   const yearProgress = Math.min(100, (elapsedMs / eraDuration) * 100);
-  // === Dynamic date widget: year (big) / month (mid) / countdown to next era (small) ===
-  // Each era spans real-time durationMs; we map that linearly to 12 in-game months.
-  const MONTHS = ['january','february','march','april','may','june','july','august','september','october','november','december'];
-  const monthIdx = Math.min(11, Math.max(0, Math.floor((elapsedMs / eraDuration) * 12)));
+  // === Dynamic date widget (v2.10.3): real historical dates per era ===
+  // getEraDisplayDate interpolates between era.startDate and era.endDate
+  // (e.g. Iron Swords shows OCT 7, 2023 → NOV 24, 2023 across the era).
+  const dt = getEraDisplayDate(era, g.eraStartGameTime, state.gameTime);
   const remainingSec = Math.max(0, Math.floor((eraDuration - elapsedMs) / 1000));
   const mm = String(Math.floor(remainingSec / 60)).padStart(2, '0');
   const ss = String(remainingSec % 60).padStart(2, '0');
   const isLastEra = g.eraIndex >= GAZA_ERAS.length - 1;
   const timerLine = isLastEra ? '— end —' : (mm + ':' + ss);
   const dateWidget =
-    '<div style="display:flex;flex-direction:column;align-items:center;line-height:1.05;padding-right:14px;border-right:1px solid #333;min-width:78px;">' +
-      '<span style="font-size:18px;font-weight:bold;color:#5dade2;letter-spacing:1px;">' + era.year + '</span>' +
-      '<span style="font-size:11px;color:#aab;text-transform:capitalize;">' + MONTHS[monthIdx] + '</span>' +
+    '<div style="display:flex;flex-direction:column;align-items:center;line-height:1.05;padding-right:14px;border-right:1px solid #333;min-width:96px;">' +
+      '<span style="font-size:18px;font-weight:bold;color:#5dade2;letter-spacing:1px;">' + dt.year + '</span>' +
+      '<span style="font-size:11px;color:#aab;">' + dt.monthName + ' ' + dt.day + '</span>' +
       '<span style="font-size:10px;color:#888;font-family:monospace;">' + timerLine + '</span>' +
     '</div>';
   const escCol  = g.escalation >= 70 ? '#ff6464' : g.escalation >= 40 ? '#ffaa44' : '#5dade2';
@@ -16185,7 +16286,7 @@ function updateGazaHud() {
   body.style.cssText = 'display:flex;gap:14px;align-items:center;padding:6px 10px;flex-wrap:wrap;';
   body.innerHTML =
     dateWidget +
-    '<span style="color:#888;max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;">' + era.label.replace(/^\d{4}\s*[\-—]\s*/, '') + '</span>' +
+    '<span style="color:#888;max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;">' + era.label.replace(/^\d{4}([a-z]|[\-–][\d]{2,4})?\s*[\-—]\s*/, '') + '</span>' +
     '<span title="Era progress">PROG' + bar(yearProgress, '#5dade2', false) + '<span style="color:#888;">' + Math.round(yearProgress) + '%</span></span>' +
     '<span title="Escalation tier — ticks at 25/50/75 unlock TST tiers">ESC' + bar(g.escalation, escCol, true) + '<span style="color:' + escCol + '">' + Math.round(g.escalation) + '</span></span>' +
     '<span title="Diplomatic pressure (100% = defeat) — ticks at 25/50/75 mark warning thresholds">PRESS' + bar(g.pressure, presCol, true) + '<span style="color:' + presCol + '">' + Math.round(g.pressure) + '/100</span></span>' +
@@ -16491,7 +16592,7 @@ function endGazaCampaign(victory) {
       <div style="font-size:11px;color:#888;text-transform:uppercase;">Cause of end</div>
       <div style="color:#fff;margin-top:3px;">${cause}</div>
     </div>
-    <div class="row"><span>Final era reached</span><span style="color:#5dade2">${era.year} (${g.eraIndex+1}/${GAZA_ERAS.length})</span></div>
+    <div class="row"><span>Final era reached</span><span style="color:#5dade2">${(() => { const _d = getEraDisplayDate(era, g.eraStartGameTime, state.gameTime); return formatEraDate(_d, true); })()} (${g.eraIndex+1}/${GAZA_ERAS.length})</span></div>
     <div class="row"><span>International pressure</span><span style="color:${g.pressure>=70?'var(--red)':g.pressure>=40?'var(--amber)':'var(--green)'}">${Math.round(g.pressure)}/100</span></div>
     <div class="row"><span>Conflict escalation</span><span>${Math.round(g.escalation)}/100</span></div>
     <div class="row" style="margin-top:8px;border-top:1px dashed #444;padding-top:6px;">
