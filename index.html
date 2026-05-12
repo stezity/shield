@@ -1825,6 +1825,17 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.9.5 — patch: Gaza intensity drastically reduced + win-ability buffs. User lost
+//           in 2012 (era 5/15) at pressure 100 doing nothing. Multiple compounding fixes:
+//           (1) Salvo intensity 0.5..1.5× → 0.3..1.0× (-30% global). (2) Baseline
+//           pressure rate 0.018→0.008 (>50% reduction). (3) Impact pressure penalty
+//           0.18/0.35 → 0.08/0.18 (>50% reduction). (4) PRESSURE REGEN −0.025/s when
+//           not in active op or during ceasefire (~1.5/min recovery — international
+//           news cycle moves on). (5) Escalation decay 0.012/s → 0.04/s (3× faster).
+//           (6) Era-start escalation 25→12, pressure burst 12/5→8/3. (7) Auto-escalate
+//           random spike chance ×0.5 + reduced amount 2-6 → 1-3. (8) PRESSURE 100% NO
+//           LONGER INSTANT-LOSS — must sustain 30 sec at 100 to trigger collapse.
+//           Warning at first 100% touch ('30 sec to recover').
 //   2.9.4 — patch: CRISIS_EVENTS leaking + historical accuracy overhaul.
 //           User: 'Mossad IRGC + Hezbollah Convoy events appear in Gaza, Hamas attacks
 //           Ashdod in 2009, Cast Lead too brutal, lost 2008 doing nothing'.
@@ -1944,7 +1955,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.9.4';
+const GAME_VERSION = '2.9.5';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -10017,11 +10028,10 @@ function handleImpact(threat) {
       state.gaza.israeliCasualtiesByEra[yr] = (state.gaza.israeliCasualtiesByEra[yr] || 0) + israeliDeaths;
     }
     // Each impact on a populated city raises pressure proportionally
-    // FIX v2.9.3: pre-2011 eras (no Iron Dome possible) — pressure penalty halved.
-    // Player has ZERO defense agency → punishing them for impacts is unfair.
+    // FIX v2.9.5: further halved penalties — was building too fast over 50min campaign.
     // Real-world 2007-2010: Israel WAS taking Qassam impacts and surviving politically.
     const noDefenseEra = !state.gaza.canDeployDefenses;
-    const pressMul = noDefenseEra ? 0.18 : 0.35;
+    const pressMul = noDefenseEra ? 0.08 : 0.18;          // was 0.18 / 0.35
     state.gaza.pressure = Math.min(100, state.gaza.pressure + damage * pressMul);
     // News headline for impacts on big cities (importance >= 5)
     if (city.importance >= 5 && Math.random() < 0.55) {
@@ -12610,7 +12620,7 @@ function initGazaCampaign() {
     eraStartGameTime: gnow,                      // game-time ms when current era began
     escalation: 5,                               // 0-100 (5 = baseline tension at scenario start in 2007)
     pressure: 0,                                 // 0-100 (100 = political defeat)
-    pressureBaselineRate: 0.018,                 // pressure gain per second (war fatigue)
+    pressureBaselineRate: 0.008,                 // FIX v2.9.5: 0.018→0.008 (was building too fast over 50min campaign)
     damageMul: 0.15,                             // global incoming-damage scale -> ~40 mortar hits to destroy a city
     cityRegenRate: 0.45,                         // damage units repaired per sec when city not hit recently
     spawnTimer: 8000,                            // ms until next Hamas salvo
@@ -12681,16 +12691,23 @@ function tickGazaCampaign(dt) {
 
   // --- Pressure baseline drift + escalation slow decay ---
   // Higher era = higher baseline pressure (international fatigue grows over time).
-  // FIX v2.9.3: in pre-Iron-Dome eras (no defenses possible), pressure drift halved
-  // (player has no agency over defense — historical baseline pressure was lower then).
+  // FIX v2.9.3: in pre-Iron-Dome eras pressure drift halved (no agency = less blame).
   let eraPressureRate = g.pressureBaselineRate * (era.civPenalty || 1.0);
   if (!g.canDeployDefenses) eraPressureRate *= 0.4;
   g.pressure = Math.min(100, g.pressure + eraPressureRate * (dt / 1000));
-  g.escalation = Math.max(0, g.escalation - 0.012 * (dt / 1000));
+  // FIX v2.9.5: PRESSURE REGEN when not at war + during ceasefire pauses
+  // (real-world: international pressure FALLS between operations as news cycle moves on)
+  const isOperationActive = era.isOperation && (state.gameTime - g.eraStartGameTime) < (era.durationMs * 0.5);
+  const isCeasefireActive = now < (g.pauseAttacksUntil || 0);
+  if ((!isOperationActive || isCeasefireActive) && g.pressure > 0) {
+    g.pressure = Math.max(0, g.pressure - 0.025 * (dt / 1000));   // ~1.5/min recovery in calm
+  }
+  g.escalation = Math.max(0, g.escalation - 0.04 * (dt / 1000));   // FIX v2.9.5: 0.012→0.04 (3x faster decay)
 
   // --- Hamas auto-escalation (rare provocation spike) ---
-  if (Math.random() < era.hamas.autoEscalateChance * (dt / 1000)) {
-    g.escalation = Math.min(100, g.escalation + 2 + Math.random() * 4);
+  // FIX v2.9.5: provocation escalation 2-6 → 1-3 (was compounding too fast)
+  if (Math.random() < era.hamas.autoEscalateChance * 0.5 * (dt / 1000)) {
+    g.escalation = Math.min(100, g.escalation + 1 + Math.random() * 2);
     logEvent('Hamas conducted a provocation - escalation rises', 'warn');
   }
 
@@ -12790,8 +12807,9 @@ function tickGazaCampaign(dt) {
   if (now > g.pauseAttacksUntil) {
     g.spawnTimer -= dt;
     if (g.spawnTimer <= 0) {
-      const intensity = 0.5 + g.escalation / 100;          // 0.5..1.5 multiplier
-      const salvoSize = Math.max(1, Math.round(era.hamas.salvoMax * (0.4 + Math.random() * intensity) * salvoSizeMul));
+      // FIX v2.9.5: intensity 0.5..1.5 → 0.3..1.0 (reduced 30% globally)
+      const intensity = 0.3 + g.escalation / 150;          // 0.3..0.97 multiplier
+      const salvoSize = Math.max(1, Math.round(era.hamas.salvoMax * (0.3 + Math.random() * intensity) * salvoSizeMul));
       const weapons = era.hamas.weapons;
       const gen = state.scenarioGen;
       for (let i = 0; i < salvoSize; i++) {
@@ -12837,10 +12855,23 @@ function tickGazaCampaign(dt) {
   }
 
   // --- Lose conditions ---
+  // FIX v2.9.5: pressure must STAY at 100 for sustained period to trigger loss
+  // (was: instant loss as soon as it touched 100). Real-world: governments survive
+  // brief pressure spikes if pressure drops back. Track sustained-100 timer.
   if (g.pressure >= 100) {
-    showNotification('POLITICAL COLLAPSE', 'International pressure reached 100%. Government falls. Campaign lost.', 'danger');
-    endGame(false);
-    return;
+    g._pressureMaxedSince = g._pressureMaxedSince || now;
+    const sustainedMs = now - g._pressureMaxedSince;
+    if (sustainedMs > 30000) {                          // 30 sec at 100% = collapse
+      showNotification('POLITICAL COLLAPSE', 'International pressure sustained at 100% for 30 sec. Government falls.', 'danger');
+      endGame(false);
+      return;
+    } else if (!g._pressureWarningShown) {
+      g._pressureWarningShown = true;
+      showNotification('★ POLITICAL CRISIS', 'Pressure 100% — 30 sec to recover or government falls. Pause Hamas attacks (ceasefire) or wait for news cycle.', 'danger');
+    }
+  } else {
+    g._pressureMaxedSince = null;                      // reset if pressure drops below 100
+    if (g.pressure < 90) g._pressureWarningShown = false;
   }
   // 3+ major cities (importance >= 7) destroyed = lose
   const majorDead = state.cities.filter(c => !c.alive && c.importance >= 7).length;
@@ -12937,10 +12968,9 @@ function advanceGazaYear() {
   addGazaNews(`${era.year} BEGINS — ${era.label.replace(/^\d{4}\s*[\-—]\s*/, '')}`, era.isOperation ? 'bad' : 'info');
   // Operation eras: spike attack volume + jump escalation/pressure
   if (era.isOperation) {
-    g.escalation = Math.min(100, g.escalation + 25);
-    // FIX v2.9.3: pre-defense era (no Iron Dome) gets HALVED start-pressure (otherwise
-    // player loses immediately in 2008 Cast Lead because of cascading no-defense pressure).
-    const startPressBump = g.canDeployDefenses ? 12 : 5;
+    // FIX v2.9.5: era-start escalation 25→12 (was building too fast)
+    g.escalation = Math.min(100, g.escalation + 12);
+    const startPressBump = g.canDeployDefenses ? 8 : 3;            // FIX: 12/5 → 8/3
     g.pressure = Math.min(100, g.pressure + startPressBump);
     g.spawnTimer = 1500;   // immediate volley
     logEvent(`!!!! ${era.operationName.toUpperCase()} BEGINS — escalation +25, pressure +${startPressBump}`, 'danger');
