@@ -1825,6 +1825,13 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.9.9 — patch: ARMS EMBARGO crisis tagged + Hamas no fire during pause.
+//           User: 'убери эту хуйню и сделай чтобы когда игра на паузе хамас не
+//           стрелял еще ракет'.
+//           (1) arms_embargo CRISIS_EVENT excludeFromGaza=true. (2) state.paused
+//           guard added at top of spawnThreat AND spawnGazaHamasThreat — covers all
+//           queued setTimeout-based spawns from prior salvos. Pre-queued salvo also
+//           checks state.gaza.pauseAttacksUntil so ceasefire mid-salvo cancels rest.
 //   2.9.8 — patch: more leak fixes. User screenshot: 'Iran firing ballistics at Incirlik
 //           AB during Gaza scenario'. Tagged 4 more events excludeFromGaza:
 //           iran_us_strike (IRGC fires at US Gulf base — definitely not Gaza),
@@ -1976,7 +1983,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.9.8';
+const GAME_VERSION = '2.9.9';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -3314,6 +3321,7 @@ const CRISIS_EVENTS = [
     id: 'arms_embargo',
     title: '🚫 ARMS EMBARGO THREATENED',
     desc: 'EU considers freezing weapons exports if escalation continues. Mitigation options:',
+    excludeFromGaza: true,                                    // FIX v2.9.9: too generic for Gaza scenario
     options: [
       { label: '🤝 LOBBYING', tooltip: 'Costs $50K, prevents embargo', apply(s){ if (state.money >= 50000) { state.money -= 50000; logEvent('EU lobbying successful — embargo prevented', 'success'); } else { logEvent('No lobbying funds — embargo imposed', 'warn'); if(state.world) state.world.sanctions = Math.min(100, (state.world.sanctions||0)+30); } } },
       { label: '🛡 ACCEPT', tooltip: 'Sanctions +30', apply(s){ if(state.world) state.world.sanctions = Math.min(100, (state.world.sanctions||0)+30); logEvent('Arms embargo imposed: sanctions +30', 'danger'); } },
@@ -9271,6 +9279,10 @@ function spawnThreat(typeId, enemyId, targetCityId, explicitLat, explicitLon, ex
   const e = ENEMIES[enemyId];
   const tType = THREAT_TYPES[typeId];
   if (!e || !tType) return;
+  // === FIX v2.9.9: PAUSE GUARD — wall-clock setTimeout calls fire during pause.
+  // No threat spawns when game is paused. Player-initiated explicit launches OK
+  // (those go through launchAttackerStrike which already respects pause).
+  if (state.paused) return;
   // === ERA EXCLUSION (e.g., Hamas in 2027 sandbox = destroyed faction) ===
   if (typeof isFactionExcludedInEra === 'function' && isFactionExcludedInEra(enemyId)) return;
   // Hezbollah: route random spawns through realistic launcher-target pairing.
@@ -12828,7 +12840,10 @@ function tickGazaCampaign(dt) {
         // Use doctrinal weighted pick — drones stay rare even though they're "in the era list"
         const w = pickWeightedWeaponFrom('hamas', weapons) || weapons[Math.floor(Math.random() * weapons.length)];
         setTimeout(() => {
-          if (state.scenarioGen !== gen || !state.active) return;
+          // FIX v2.9.9: also bail if game paused — wall-clock timers fire during pause otherwise
+          if (state.scenarioGen !== gen || !state.active || state.paused) return;
+          // Also: if a ceasefire started between scheduling and firing, skip
+          if (state.gaza && state.gameTime < (state.gaza.pauseAttacksUntil || 0)) return;
           spawnGazaHamasThreat(w);
         }, i * 450 + Math.random() * 200);
       }
@@ -13937,6 +13952,7 @@ function spawnHezbollahThreat(weaponType) {
 //   2. Find the nearest Hamas launch site to that target
 //   3. Spawn from that specific site (overrides the random-site pick in spawnThreat)
 function spawnGazaHamasThreat(weaponType) {
+  if (state.paused) return;                    // FIX v2.9.9: no spawn when paused
   const era = GAZA_ERAS[state.gaza.eraIndex];
   const sites = ENEMIES.hamas.launchSites;
   // Per-era weapon range overrides global default. In 2007 rocket = 15 km (Sderot only).
