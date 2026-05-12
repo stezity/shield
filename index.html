@@ -1825,6 +1825,14 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.10.0 — MAJOR: time-based STRIKE + USA quota REGEN based on US president +
+//            diplomacy. User: 'дай больше strike и us квот для израиля... смотря по
+//            президенту и дипломатии с ним'. (1) Initial quotas bumped: strikesLeft
+//            12→24, usSupportLeft 3→8. (2) NEW: per-second regen scaled by president —
+//            Trump 1/25s, Biden 1/40s, Obama 1/60s, Bush 1/50s. (3) US support level
+//            ≥70 = 1.5× regen, ≥90 = 2× regen. Hard cap 99 strikes / 20 USA tokens
+//            (effectively unlimited). USA tokens regen at 20% rate of strikes (slower
+//            but still continuous).
 //   2.9.10 — patch: TST cards no longer get stuck on screen. User: 'тут еще одно событие
 //            зависает и остается на месте исправь это'. Two redundant fixes:
 //            (1) × close button on every TST card — manual dismiss anytime.
@@ -1990,7 +1998,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.9.10';
+const GAME_VERSION = '2.10.0';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -5202,6 +5210,37 @@ function updateAirStrikes(dt) {
   if (state.massStrikeCooldown > 0) state.massStrikeCooldown -= dt;
   if (state.usSupportCooldown > 0) state.usSupportCooldown -= dt;
   if (state.moneyRequestCooldown > 0) state.moneyRequestCooldown -= dt;
+  // === TIME-BASED STRIKE REGEN (NEW v2.10.0) — based on US president + US support level ===
+  // Regen rate scales with diplomacy: Trump = fast, Biden = medium, Obama = slow.
+  // High US support level (post-leader-kill etc.) gives bonus regen.
+  // Hard cap at 99 strikes / 20 USA tokens — effectively unlimited but no integer overflow.
+  if (typeof getUSPresident === 'function') {
+    const pres = getUSPresident();
+    // Base regen: 1 strike per X seconds
+    let strikeRegenPerSec;
+    if      (pres === 'trump') strikeRegenPerSec = 1 / 25;     // 1 strike per 25s
+    else if (pres === 'biden') strikeRegenPerSec = 1 / 40;     // 1 strike per 40s
+    else if (pres === 'bush')  strikeRegenPerSec = 1 / 50;
+    else if (pres === 'obama') strikeRegenPerSec = 1 / 60;     // 1 strike per 60s
+    else                       strikeRegenPerSec = 1 / 45;
+    // US support boost: at 70+ support, regen 1.5×; at 90+, 2×
+    const usLvl = (typeof getUSSupportLevel === 'function') ? getUSSupportLevel() : 60;
+    if (usLvl >= 90)      strikeRegenPerSec *= 2.0;
+    else if (usLvl >= 70) strikeRegenPerSec *= 1.5;
+    state._strikeRegenAccum = (state._strikeRegenAccum || 0) + strikeRegenPerSec * (dt / 1000);
+    if (state._strikeRegenAccum >= 1) {
+      const grant = Math.floor(state._strikeRegenAccum);
+      state._strikeRegenAccum -= grant;
+      // Strikes regen up to 99 (effectively unlimited)
+      if (state.strikesLeft < 99) {
+        state.strikesLeft = Math.min(99, state.strikesLeft + grant);
+      }
+      // US tokens regen 1 per 5 strike-regens (slower)
+      if (Math.random() < 0.2 && state.usSupportLeft < 20) {
+        state.usSupportLeft = Math.min(20, state.usSupportLeft + 1);
+      }
+    }
+  }
 }
 
 function drawAirStrikes() {
@@ -17227,11 +17266,12 @@ function startScenario(name) {
   state.depotHitNext = false;
   state.retaliationWave = null;
   state.strikeCooldown = 0;
-  state.strikesLeft = 12;
+  state.strikesLeft = 24;                                  // FIX v2.10.0: 12→24 (real campaigns last hours, not minutes)
   state.strikeMode = false;
   state.massStrikeCooldown = 0;
   state.usSupportCooldown = 0;
-  state.usSupportLeft = 3;
+  state.usSupportLeft = 8;                                 // FIX v2.10.0: 3→8 (more US tokens for varied playthrough)
+  state._strikeRegenAccum = 0;                             // for time-based regen (NEW v2.10.0)
   state.money = 100000;
   state.moneyRequestCooldown = 0;
   state.orefAlerts = [];          // active OREF alert zones
