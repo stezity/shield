@@ -1825,6 +1825,13 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.9.10 — patch: TST cards no longer get stuck on screen. User: 'тут еще одно событие
+//            зависает и остается на месте исправь это'. Two redundant fixes:
+//            (1) × close button on every TST card — manual dismiss anytime.
+//            (2) setTimeout-based auto-cleanup at 3.6s — fires regardless of game
+//                pause/end state (game-tick GC could fail to fire if paused mid-expiry).
+//            Together: cards always disappear, even if user paused the game right when
+//            the TST expired.
 //   2.9.9 — patch: ARMS EMBARGO crisis tagged + Hamas no fire during pause.
 //           User: 'убери эту хуйню и сделай чтобы когда игра на паузе хамас не
 //           стрелял еще ракет'.
@@ -1983,7 +1990,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.9.9';
+const GAME_VERSION = '2.9.10';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -11685,6 +11692,7 @@ function buildTSTCard(t) {
   const riskDots = '●'.repeat(riskScore) + '○'.repeat(5 - riskScore);
 
   card.innerHTML = `
+    <button class="tst-close-x" title="Dismiss card" style="position:absolute;top:4px;right:6px;width:18px;height:18px;line-height:14px;font-size:14px;background:transparent;border:1px solid rgba(255,255,255,0.25);color:#aaa;cursor:pointer;padding:0;font-weight:bold;border-radius:2px;font-family:Consolas,monospace;z-index:5;">×</button>
     <div class="tst-timer"></div>
     <div class="tst-row1">
       <span class="tst-faction"></span>
@@ -11704,6 +11712,16 @@ function buildTSTCard(t) {
       <button class="tst-btn ignore" data-action="ignore">✕ IGNORE</button>
     </div>
     <div class="tst-outcome" style="display:none"></div>`;
+  // FIX v2.9.10: ensure positioning context for close-X
+  card.style.position = card.style.position || 'relative';
+  // Wire × close button — manually dismiss the card from state + DOM
+  const closeBtn = card.querySelector('.tst-close-x');
+  if (closeBtn) closeBtn.onclick = (ev) => {
+    ev.stopPropagation();
+    // Remove from state.tsts so future ticks don't try to re-render it
+    if (state.tsts) state.tsts = state.tsts.filter(x => x.id !== t.id);
+    card.remove();
+  };
   // Static content — set once
   const factionEl = card.querySelector('.tst-faction');
   factionEl.textContent = t.factionTag || (t.faction || '').toUpperCase();
@@ -11726,6 +11744,19 @@ function buildTSTCard(t) {
 
 function updateTSTCard(card, t) {
   const now = Date.now();
+  // === FIX v2.9.10: setTimeout-based auto-cleanup as backup to game-tick GC ===
+  // Game-tick GC can fail to fire if game is paused or ended at moment of expiry,
+  // leaving 'TARGET RELOCATED' cards stuck on screen forever. Schedule a wall-clock
+  // 3.5s removal once when the card first enters a closed state.
+  if ((t.struck || t.expired || t.ignored) && !card._cleanupScheduled) {
+    card._cleanupScheduled = true;
+    const tstId = t.id;
+    setTimeout(() => {
+      // Remove from state.tsts + DOM
+      if (state.tsts) state.tsts = state.tsts.filter(x => x.id !== tstId);
+      if (card.parentElement) card.remove();
+    }, 3600);    // 100ms after game-tick GC threshold
+  }
   // Timer
   const timerEl = card.querySelector('.tst-timer');
   if (t.struck || t.expired || t.ignored) {
