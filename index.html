@@ -1832,6 +1832,16 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.12.1 — Hamas-only lockdown — final gaps from the full event/TST/mechanic audit.
+//            (1) TST faction filter (spawnRandomTST) was gaza-only → October 7 could
+//            spawn Hezbollah/Iran/Houthi time-sensitive targets. Now both gaza AND
+//            october7 are locked to faction==='hamas' (the one real remaining leak).
+//            (2) Belt-and-suspenders: Iran proxy-activation (Hezbollah+Houthi multi-front)
+//            and F-16 anti-UAV scrambles now hard-skip in gaza/october7 even if a non-Hamas
+//            target/drone ever leaked in. (3) Tagged two ahistorical-for-Gaza aid events
+//            excludeFromGaza: patriot_arrived (Patriot = anti-air/ballistic, not a Gaza
+//            counter-rocket system) and ally_support (random foreign battery grant). US-aid
+//            + embargo events kept — those are historically real during the Gaza wars.
 //   2.12.0 — HAMAS-ONLY LOCKDOWN for both historical scenarios + October 7 uses the
 //            sandbox-defender IDF grid. User: 'ВСЕ СВЯЗАНО С ХАМАСОМ ... сделай
 //            расположения пво из сэндбокса дефендеров ... всё по историческому, игрок
@@ -2064,7 +2074,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.12.0';
+const GAME_VERSION = '2.12.1';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -11770,8 +11780,10 @@ function spawnRandomTST(forcedTemplateId) {
   if (state.playAs === 'attacker') return null;
   // Filter templates by escalation gating (politicalLevel)
   let allowed = TST_TEMPLATES.filter(t => (t.politicalLevel || 0) <= (state.escalationLevel || 0) + 1);
-  // Gaza scenario: only Hamas/PIJ targets (PIJ events use faction:'hamas' so they pass naturally)
-  if (state.scenario && state.scenario.campaign === 'gaza') {
+  // Gaza + October 7: only Hamas/PIJ targets (PIJ events use faction:'hamas' so they pass naturally)
+  // FIX v2.12.1: was gaza-only — october7 must be Hamas-only too (the one TST gap the audit found).
+  const _tstCamp = state.scenario && state.scenario.campaign;
+  if (_tstCamp === 'gaza' || _tstCamp === 'october7') {
     allowed = allowed.filter(t => t.faction === 'hamas');
   }
   // === ERA EXCLUSION: skip Hamas/PIJ TSTs in 2027 (Hamas destroyed) ===
@@ -13523,7 +13535,11 @@ function fireDoctrinalLeaderRetaliation(target) {
       }, i * stagger + Math.random() * 200);
     }
     // Iran proxy activation (random chance)
-    if (fid === 'iran' && Math.random() < d.proxyActivationChance) {
+    // FIX v2.12.1: hard belt-and-suspenders block in the Hamas-only historical scenarios
+    // (Iran proxies must never activate in Gaza / October 7, even if an Iran target leaked in).
+    const _proxyCamp = state.scenario && state.scenario.campaign;
+    if (_proxyCamp === 'gaza' || _proxyCamp === 'october7') { /* no proxy war in historical Hamas scenarios */ }
+    else if (fid === 'iran' && Math.random() < d.proxyActivationChance) {
       setTimeout(() => {
         if (state.scenarioGen !== gen || !state.active) return;
         showNotification('PROXY ACTIVATION', 'Iran activates Hezbollah and Houthi — multi-front attack incoming.', 'danger');
@@ -13842,6 +13858,10 @@ function showDoctrinesPanel() {
 function scrambleFighterAtThreat(threat) {
   if (!threat || threat.intercepted || threat.impacted) return false;
   if (threat.scrambledAgainst) return false;          // already chasing
+  // FIX v2.12.1: no F-16 anti-UAV scrambles in the Hamas-only historical scenarios.
+  // (Hamas has no drones, so this is normally unreachable — but belt-and-suspenders if one leaks.)
+  const _scrCamp = state.scenario && state.scenario.campaign;
+  if (_scrCamp === 'gaza' || _scrCamp === 'october7') return false;
   // Pick nearest IDF airbase
   const bases = (typeof IL_AIRBASES !== 'undefined') ? IL_AIRBASES : [];
   if (bases.length === 0) return false;
