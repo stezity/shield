@@ -1832,6 +1832,19 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.12.0 — HAMAS-ONLY LOCKDOWN for both historical scenarios + October 7 uses the
+//            sandbox-defender IDF grid. User: 'ВСЕ СВЯЗАНО С ХАМАСОМ ... сделай
+//            расположения пво из сэндбокса дефендеров ... всё по историческому, игрок
+//            мог просто наблюдать иногда принимать свои решения'.
+//            (1) October 7 (campaign==='october7') was UNPROTECTED by the Gaza event
+//            filters (those gate on campaign==='gaza' only) — Iran/Hezbollah/Houthi/US/
+//            cyber random events AND world crises could fire mid-massacre. Now October 7
+//            is fully scripted: pickWeightedEvent + spawnCrisis hard-return for october7
+//            (zero random events / crises). (2) Faction retaliation guard extended to block
+//            non-Hamas retaliation in October 7 too. (3) October 7 deploys the full
+//            sandbox-defender battery grid (BATTERY_LAYOUT) via the new shared helper
+//            deployFullIDFGrid(excludeTypes), minus US THAAD (ahistorical for 2023).
+//            (4) updateIntel satellite-spam suppressed in October 7 (no log noise).
 //   2.11.1 — Bug-fix pass (from a parallel core-engine + Gaza audit). (1) CRITICAL:
 //            updateThreats div-by-zero when a threat's launch site == its target →
 //            NaN progress → permanently stuck, un-GC'able threat (could hang wave
@@ -2051,7 +2064,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.11.6';
+const GAME_VERSION = '2.12.0';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -4625,8 +4638,10 @@ function scheduleFactionRetaliation(target) {
   const enemyId = target.faction;
   if (!enemyId || !ENEMIES[enemyId]) return;
   if (state.playAs === 'attacker') return;          // player IS the attacker — IDF strikes shouldn't trigger
-  // Gaza campaign: only Hamas can retaliate (other factions don't exist in this scenario)
-  if (state.scenario && state.scenario.campaign === 'gaza' && enemyId !== 'hamas') return;
+  // Gaza + October 7 campaigns: only Hamas can retaliate (other factions don't exist here)
+  // FIX v2.12.0: was gaza-only; october7 must be Hamas-only too.
+  const _camp = state.scenario && state.scenario.campaign;
+  if ((_camp === 'gaza' || _camp === 'october7') && enemyId !== 'hamas') return;
   // Per-faction profile
   let immediateChance, delayedChance, delayMin, delayMax;
   if (enemyId === 'hamas')     { immediateChance = 0.80; delayedChance = 0.15; delayMin = 30000;  delayMax = 90000; }
@@ -5432,6 +5447,10 @@ function drawAirStrikes() {
 }
 
 function pickWeightedEvent(pool) {
+  // === OCTOBER 7 — fully scripted single day: NO random events at all (NEW v2.12.0) ===
+  // The October 7 scenario is a historical re-enactment; the player only triages QRF.
+  // Random Iran/Hezbollah/US/diplomatic events would be ahistorical noise — block them all.
+  if (state.scenario && state.scenario.campaign === 'october7') return null;
   // === GAZA-ONLY FILTER (NEW v2.9) ===
   // In Gaza scenario only HAMAS-RELEVANT events fire — drop Iran/Hezbollah/Houthi events,
   // diplomatic deal events (everything is historical now), and non-Gaza-themed events.
@@ -12725,6 +12744,8 @@ function updateCivilian(dt) {
    INTELLIGENCE — periodic satellite scans (auto + event-triggered)
    ========================================================= */
 function updateIntel(dt) {
+  // FIX v2.12.0: October 7 is a scripted single day — no satellite-pass log spam.
+  if (state.scenario && state.scenario.campaign === 'october7') return;
   if (state.intelTimer == null) state.intelTimer = 90000;
   state.intelTimer -= dt;
   if (state.intelTimer <= 0) {
@@ -13633,6 +13654,8 @@ function ensureWorldState() {
 // Pop a random crisis (weighted random with cooldown)
 function spawnCrisis() {
   if (state.playAs === 'attacker') return;   // crises = IDF-defender mechanic only
+  // === OCTOBER 7 — scripted scenario: no world crises (NEW v2.12.0) ===
+  if (state.scenario && state.scenario.campaign === 'october7') return;
   ensureWorldState();
   if (state.world.activeCrisis) return;   // already active
   // === GAZA FILTER (NEW v2.9.4): exclude Iran/Hezbollah-themed crises in Gaza scenario ===
