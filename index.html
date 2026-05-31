@@ -2051,7 +2051,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.11.3';
+const GAME_VERSION = '2.11.4';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -17677,7 +17677,7 @@ function updateOct7Panel() {
   if (!el) {
     el = document.createElement('div');
     el.id = 'oct7-panel';
-    el.style.cssText = 'position:fixed;top:74px;right:12px;width:330px;max-height:76vh;overflow:auto;background:rgba(12,15,24,0.96);border:1px solid #c0392b;border-radius:8px;color:#dde;font-family:monospace;font-size:11px;z-index:9996;box-shadow:0 4px 20px rgba(0,0,0,0.6);';
+    el.style.cssText = 'position:fixed;top:74px;left:12px;width:330px;max-height:76vh;overflow:auto;background:rgba(12,15,24,0.96);border:1px solid #c0392b;border-radius:8px;color:#dde;font-family:monospace;font-size:11px;z-index:9996;box-shadow:0 4px 20px rgba(0,0,0,0.6);';
     document.body.appendChild(el);
     if (typeof installPanelChrome === 'function') installPanelChrome(el, { title: '⚔ OCT 7 · SOUTHERN COMMAND' });
   }
