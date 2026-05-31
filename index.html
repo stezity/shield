@@ -2051,7 +2051,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.11.5';
+const GAME_VERSION = '2.11.6';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -17489,20 +17489,38 @@ const OCT7_QRF_TYPES = {
   inf:  { name:'Infantry company',            icon:'🪖', power:48, speedKmMin:3.2, color:'#5dade2' }
 };
 
-function initOctober7Campaign() {
-  // Fresh full Oct-2023 interception posture (Iron Dome saturated this day, but it held the skies).
+// === SHARED IDF GRID DEPLOYMENT (NEW v2.12.0) ===
+// Deploy the full sandbox-defender battery grid (BATTERY_LAYOUT). Shared by the
+// sandbox/attacker init AND the October 7 scenario so every auto-deploy uses ONE
+// well-tuned, consistent placement. excludeTypes = optional list of types to skip.
+function deployFullIDFGrid(excludeTypes) {
+  const skip = excludeTypes || [];
   state.batteries = [];
-  const POSTURE = [
-    ['ironDome',   31.5180, 34.5950, 'Gaza Envelope · Iron Dome'],
-    ['ironDome',   31.6688, 34.5713, 'Ashkelon · Iron Dome'],
-    ['ironDome',   31.7997, 34.6500, 'Ashdod · Iron Dome'],
-    ['ironDome',   31.2530, 34.7990, "Be'er Sheva · Iron Dome"],
-    ['ironDome',   32.0700, 34.7900, 'Tel Aviv · Iron Dome'],
-    ['ironDome',   31.8900, 34.8100, 'Rehovot · Iron Dome'],
-    ['davidsSling',31.9000, 34.9000, 'Central · David\'s Sling'],
-    ['arrow3',     31.6500, 35.0500, 'Negev · Arrow-3']
-  ];
-  POSTURE.forEach(p => { try { autoDeployHistoricalBattery(p[0], p[1], p[2], p[3]); } catch(e){} });
+  state.nextBatteryNum = 1;
+  BATTERY_LAYOUT.forEach(layout => {
+    if (skip.indexOf(layout.type) >= 0) return;
+    if (!BATTERY_TYPES[layout.type]) return;
+    const num = state.nextBatteryNum++;
+    const prefix = layout.type === 'ironDome' ? 'IRON'
+                 : layout.type === 'davidsSling' ? 'DS'
+                 : layout.type === 'thaad' ? 'THAAD' : 'A3';
+    state.batteries.push({
+      id: 'bat_' + num, type: layout.type,
+      name: layout.name || `${prefix}-${num}`,
+      lat: layout.lat, lon: layout.lon,
+      ammo: BATTERY_TYPES[layout.type].capacity,
+      capacity: BATTERY_TYPES[layout.type].capacity,
+      cooldown: 0, reloadTotal: 0, interceptions: 0,
+      priority: layout.region || 'auto', sea: !!layout.sea
+    });
+  });
+}
+
+function initOctober7Campaign() {
+  // FIX v2.12.0: use the sandbox-defender IDF grid (BATTERY_LAYOUT) for placement, minus
+  // US THAAD (not deployed to Israel until Oct 2024 — ahistorical for Oct 7 2023, and
+  // irrelevant to Hamas rockets anyway). Was: 8 ad-hoc hardcoded batteries.
+  deployFullIDFGrid(['thaad']);
   state.mode = 'auto';
   // FIX v2.11.5: ENABLE a 30s deployment phase. Previously this set buildPhase=false,
   // which overrode startScenario's buildPhase=true → the assault began instantly with no
@@ -17929,30 +17947,7 @@ function startScenario(name) {
   const isSandbox = !!state.scenario.sandbox;
   const isAttacker = state.playAs === 'attacker';
   if (isSandbox || isAttacker) {
-    state.batteries = [];
-    state.nextBatteryNum = 1;
-    BATTERY_LAYOUT.forEach(layout => {
-      const num = state.nextBatteryNum++;
-      const prefix = layout.type === 'ironDome' ? 'IRON'
-                   : layout.type === 'davidsSling' ? 'DS'
-                   : layout.type === 'thaad' ? 'THAAD'
-                   : 'A3';
-      state.batteries.push({
-        id: 'bat_' + num,
-        type: layout.type,
-        name: layout.name || `${prefix}-${num}`,
-        lat: layout.lat, lon: layout.lon,
-        ammo: BATTERY_TYPES[layout.type].capacity,
-        capacity: BATTERY_TYPES[layout.type].capacity,
-        cooldown: 0, reloadTotal: 0, interceptions: 0,
-        // Region priority from layout — N/C/S/E button highlights to match deployment area.
-        // Cross-region threats are still handled correctly: findBestBattery's fallback
-        // ignores priority when no in-region battery is in range, AND isInProtectionZone()
-        // geometrically prevents distant batteries from "stealing" engagements either way.
-        priority: layout.region || 'auto',
-        sea: !!layout.sea
-      });
-    });
+    deployFullIDFGrid();                 // FIX v2.12.0: shared helper (same grid October 7 uses)
     state.buildPhase = false;
     state.placeMode = null;
     // Sandbox stock: huge spare reserve so player can buy more later
