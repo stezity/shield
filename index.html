@@ -2051,7 +2051,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.11.2';
+const GAME_VERSION = '2.11.3';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -5362,7 +5362,7 @@ function updateAirStrikes(dt) {
   // Regen rate scales with diplomacy: Trump = fast, Biden = medium, Obama = slow.
   // High US support level (post-leader-kill etc.) gives bonus regen.
   // Hard cap at 99 strikes / 20 USA tokens — effectively unlimited but no integer overflow.
-  if (typeof getUSPresident === 'function') {
+  if (typeof getUSPresident === 'function' && state.scenario && state.scenario.campaign === 'gaza') {  // FIX v2.11.3: regen only in Gaza
     const pres = getUSPresident();
     // Base regen: 1 strike per X seconds
     let strikeRegenPerSec;
@@ -10105,7 +10105,7 @@ function updateThreats(dt) {
     if (t.intercepted || t.impacted) return;
     const dLat = t.targetLat - t.startLat;
     const dLon = t.targetLon - t.startLon;
-    const dist = Math.hypot(dLat, dLon);
+    const dist = Math.max(1e-6, Math.hypot(dLat, dLon));   // FIX v2.11.3: clamp div-by-0 -> NaN stuck-threat
     t.progress += (t.speed * dt / 1000) / dist;
 
     // Fire OREF alert when threat enters detection range (per type)
@@ -13255,6 +13255,7 @@ function advanceGazaYear() {
     // Free of charge (isAuto=true bypasses cost check), bypasses cooldowns.
     if (era.autoOpScale) {
       setTimeout(() => {
+        if (!state.active || !state.scenario || state.scenario.campaign !== 'gaza') return;  // FIX v2.11.3: auto-op teardown guard
         if (state.gaza) {
           state.gaza.opCooldowns[era.autoOpScale] = 0;   // clear cooldown
           state.gaza.activeOp = null;                     // clear any pending op
@@ -13507,8 +13508,8 @@ function fireDoctrinalLeaderRetaliation(target) {
         showNotification('PROXY ACTIVATION', 'Iran activates Hezbollah and Houthi — multi-front attack incoming.', 'danger');
         logEvent('!!!! IRAN PROXY ACTIVATION: Hezbollah + Houthi triggered', 'danger');
         for (let i = 0; i < 8; i++) {
-          setTimeout(() => { if (typeof spawnHezbollahThreat === 'function') spawnHezbollahThreat(Math.random() < 0.5 ? 'rocket' : 'heavyRocket'); }, i * 400);
-          setTimeout(() => spawnThreat('drone', 'houthi', 'eilat'), i * 600);
+          setTimeout(() => { if (state.scenarioGen !== gen || !state.active) return; if (typeof spawnHezbollahThreat === 'function') spawnHezbollahThreat(Math.random() < 0.5 ? 'rocket' : 'heavyRocket'); }, i * 400);
+          setTimeout(() => { if (state.scenarioGen !== gen || !state.active) return; spawnThreat('drone', 'houthi', 'eilat'); }, i * 600);
         }
       }, 8000);
     }
