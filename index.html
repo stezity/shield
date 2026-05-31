@@ -1832,6 +1832,15 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.11.1 — Bug-fix pass (from a parallel core-engine + Gaza audit). (1) CRITICAL:
+//            updateThreats div-by-zero when a threat's launch site == its target →
+//            NaN progress → permanently stuck, un-GC'able threat (could hang wave
+//            scenarios forever). Clamped dist to ≥1e-6. (2) MAJOR: strike + US-token
+//            REGEN (v2.10.0) was running in EVERY scenario, not just Gaza — silently
+//            refilling strikes up to the cap in normal/sandbox modes. Now gated to the
+//            Gaza campaign only. (3) MAJOR: shockwaves/pings/airIntercepts/activeRevenge
+//            were never reset in startScenario → visual fx + scrambled F-16s + queued
+//            revenge salvos leaked across scenarios. Now cleared on every scenario start.
 //   2.11.0 — MAJOR: NEW scenario "October 7 · Black Saturday" — the ground-assault
 //            catastrophe. User: 'сделай новый сценарий 7 октября, наземное вторжение
 //            хамаса'. Two layers: (1) AIR — the opening rocket barrage (reuses
@@ -2042,7 +2051,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.11.0';
+const GAME_VERSION = '2.11.1';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -17811,6 +17820,10 @@ function startScenario(name) {
   state.interceptors = [];
   state.explosions = [];
   state.particles = [];
+  state.shockwaves = [];          // FIX v2.11.1: visual fx leaked across scenarios (never reset)
+  state.pings = [];
+  state.airIntercepts = [];       // FIX v2.11.1: scrambled F-16s leaked into next scenario (ghost fighters)
+  state.activeRevenge = [];       // FIX v2.11.1: queued revenge salvos leaked into next scenario
   state.alerts = {};
   state.events = [];
   state.gameTime = 0;
