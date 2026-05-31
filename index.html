@@ -2051,7 +2051,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.11.1';
+const GAME_VERSION = '2.11.2';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -9552,7 +9552,7 @@ function spawnThreat(typeId, enemyId, targetCityId, explicitLat, explicitLon, ex
       targetCity = nearest;          // snap to real city if within radius
     } else {
       // virtual target — open desert / sea, no OREF alert
-      targetCity = { id: 'virtual_' + (nextId), name: 'Open area', lat: explicitLat, lon: explicitLon, importance: 1, population: 0, alive: true, type: 'virtual' };
+      targetCity = { id: 'virtual_' + (nextId++), name: 'Open area', lat: explicitLat, lon: explicitLon, importance: 1, population: 0, alive: true, type: 'virtual' };
     }
   }
   if (targetCityId) {
