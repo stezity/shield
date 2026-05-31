@@ -1832,6 +1832,13 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.12.2 — Correctly land the patriot_arrived + ally_support excludeFromGaza flags
+//            (their v2.12.1 Edits matched stale desc text and silently failed — the flags
+//            were claimed in the commit msg but never applied). Verified by id-anchor +
+//            vm.Script parse. Also confirmed (real-time browser test, NOT synchronous eval):
+//            Gaza casualty tracking works — israeliCasualties + israeliCasualtiesByEra
+//            increment on every Hamas rocket impact; the earlier '0 casualties' reading
+//            was a test artifact (setTimeout salvos don't fire inside a synchronous eval).
 //   2.12.1 — Hamas-only lockdown — final gaps from the full event/TST/mechanic audit.
 //            (1) TST faction filter (spawnRandomTST) was gaza-only → October 7 could
 //            spawn Hezbollah/Iran/Houthi time-sensitive targets. Now both gaza AND
@@ -2074,7 +2081,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.12.1';
+const GAME_VERSION = '2.12.2';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -3889,6 +3896,7 @@ const EVENT_POOL = [
     id: 'patriot_arrived', weight: 8, title: 'US PATRIOT DELIVERY',
     desc: 'US Patriot missiles arrived — D. Sling resupply',
     type: 'success',
+    excludeFromGaza: true,                  // FIX v2.12.2: Patriot is anti-aircraft/ballistic, not a Gaza counter-rocket system
     // FIX v2.9.3: only fires if D.Sling actually exists (operational 2017+)
     requires: () => (state.batteries || []).some(b => b.type === 'davidsSling'),
     apply() {
@@ -4020,6 +4028,7 @@ const EVENT_POOL = [
     id: 'ally_support', weight: 5, title: 'NEW ALLY JOINS',
     desc: 'UK / France / Germany pledges support — +$300K aid + 6 D.Sling',
     type: 'success',
+    excludeFromGaza: true,                  // FIX v2.12.2: ahistorical — no foreign ally gifted Israel David's Sling batteries
     requires: () => (state.batteries || []).some(b => b.type === 'davidsSling'),  // FIX v2.9.8: needs DS to exist
     apply() {
       state.money += 300000;
