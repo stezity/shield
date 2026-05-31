@@ -2051,7 +2051,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.11.4';
+const GAME_VERSION = '2.11.5';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -17504,8 +17504,17 @@ function initOctober7Campaign() {
   ];
   POSTURE.forEach(p => { try { autoDeployHistoricalBattery(p[0], p[1], p[2], p[3]); } catch(e){} });
   state.mode = 'auto';
-  state.buildPhase = false;
+  // FIX v2.11.5: ENABLE a 30s deployment phase. Previously this set buildPhase=false,
+  // which overrode startScenario's buildPhase=true → the assault began instantly with no
+  // deploy window ('нету время на deploy'). Now the player gets prep time to position the
+  // reserve batteries; the gameLoop freezes the sim during buildPhase so startGT stays at
+  // H-hour and the community timeline isn't fast-forwarded.
+  state.buildPhase = true;
+  state.buildTimer = 30;
   state.placeMode = null;
+  state.batteryStock = { ironDome: 3, davidsSling: 1, arrow3: 0 };   // reserves to place (8 batteries already auto-deployed)
+  const _o7bp = document.getElementById('build-panel'); if (_o7bp) _o7bp.style.display = 'block';
+  if (typeof updateBuildPanel === 'function') updateBuildPanel();
   // QRF pool — a couple ready at H-hour, the rest mobilize through the morning.
   let qid = 0;
   const qrf = [];
@@ -17673,6 +17682,9 @@ function oct7Clock(frac) {
 function updateOct7Panel() {
   let el = document.getElementById('oct7-panel');
   if (!state.oct7 || state.scenarioId !== 'october7') { if (el) el.style.display = 'none'; return; }
+  // FIX v2.11.5: hide the Southern-Command panel during the deployment phase so it can't
+  // cover the build/deploy UI; it appears the moment the assault starts.
+  if (state.buildPhase) { if (el) el.style.display = 'none'; return; }
   const o = state.oct7;
   if (!el) {
     el = document.createElement('div');
@@ -17777,12 +17789,14 @@ function endOctober7Campaign(victory) {
   const host = o.tally.hostages;
   const saved = o.tally.saved;
   const total = o.communities.length;
-  // Rating vs the real toll.
+  // Rating (v2.11.5: rescaled to THIS scenario's range — the 14 modelled communities
+  // cap at ~823 killed / 201 hostages, so grading against the national 1,195 made
+  // "do nothing" score a B and "D" unreachable. Now do-nothing ≈ D; active triage climbs.)
   let rating, rcol, verdict;
-  if (killed <= 300 && host <= 60)       { rating='S'; rcol='#ffd34d'; verdict='UNPRECEDENTED DEFENSE — the envelope held.'; }
-  else if (killed <= 600 && host <= 120) { rating='A'; rcol='#7fd6a0'; verdict='HISTORY ALTERED — thousands of lives saved.'; }
-  else if (killed <= 900 && host <= 180) { rating='B'; rcol='#5dade2'; verdict='COSTLY STAND — but far better than reality.'; }
-  else if (killed < 1195)                { rating='C'; rcol='#ffaa44'; verdict='BLOODY SATURDAY — marginally better than history.'; }
+  if (killed <= 150 && host <= 40)       { rating='S'; rcol='#ffd34d'; verdict='UNPRECEDENTED DEFENSE — the envelope held.'; }
+  else if (killed <= 320 && host <= 90)  { rating='A'; rcol='#7fd6a0'; verdict='HISTORY ALTERED — thousands of lives saved.'; }
+  else if (killed <= 500 && host <= 140) { rating='B'; rcol='#5dade2'; verdict='COSTLY STAND — but far better than reality.'; }
+  else if (killed <= 680)                { rating='C'; rcol='#ffaa44'; verdict='BLOODY SATURDAY — only a little better than history.'; }
   else                                   { rating='D'; rcol='#ff5544'; verdict='AS DARK AS HISTORY — the catastrophe repeated.'; }
 
   let ov = document.getElementById('oct7-end');
