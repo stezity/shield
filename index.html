@@ -1832,6 +1832,21 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.11.0 — MAJOR: NEW scenario "October 7 · Black Saturday" — the ground-assault
+//            catastrophe. User: 'сделай новый сценарий 7 октября, наземное вторжение
+//            хамаса'. Two layers: (1) AIR — the opening rocket barrage (reuses
+//            spawnThreat + a pre-deployed Oct-2023 Iron Dome/D.Sling/Arrow posture);
+//            (2) GROUND (new mechanic) — 14 real Gaza-envelope communities (real
+//            coords) come under direct assault in historically-timed waves; each has
+//            a local security squad, a control/hold meter, and civilian + hostage
+//            caps ≈ the real toll. Player commands a slowly-mobilizing QRF (heli/
+//            armor/infantry) and must TRIAGE who to relieve before they fall. Fallen
+//            communities accrue casualties toward their caps unless relieved. Endgame
+//            grades you (S–D) vs the real Oct 7 toll (1,195 killed · 251 hostages).
+//            New: OCT7_COMMUNITIES + OCT7_QRF_TYPES data, initOctober7Campaign,
+//            tickOctober7Campaign, oct7Dispatch, updateOct7Panel (Southern Command
+//            DOM panel), endOctober7Campaign. Wired into startScenario/updateScenario/
+//            endGame/checkEndConditions + auto-rendered scenario card (cardInfo field).
 //   2.10.3 — Real historical month/day dates per era. User: 'сделай события по
 //            месяцу а не по году в 2023 оно началось не в январе а 7 октября'.
 //            Each Gaza era now declares startDate/endDate (ISO YYYY-MM-DD) with
@@ -2027,7 +2042,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.10.3';
+const GAME_VERSION = '2.11.0';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -2774,6 +2789,18 @@ const SCENARIOS = {
     difficulty: 4,
     waves: [{ delay: 999999, threats: [] }],   // never use fixed waves; tickGazaCampaign spawns dynamically
     campaign: 'gaza',                           // marker — picked up by updateScenario
+    sandbox: false,
+    requiredSafety: 0
+  },
+
+  // === OCTOBER 7 — "Black Saturday" ground-assault scenario (NEW v2.11.0) ===
+  october7: {
+    name: 'October 7 · Black Saturday',
+    description: 'Oct 7, 2023, 06:29. A massive rocket barrage masks a ground breach at 30+ points. Hamas Nukhba storm the Gaza-envelope kibbutzim. Command your Quick Reaction Force, triage who to save, and beat the real toll: 1,195 killed · 251 hostages. This day cannot be won — only made less terrible.',
+    difficulty: 5,
+    waves: [{ delay: 999999, threats: [] }],   // dynamic — tickOctober7Campaign drives everything
+    campaign: 'october7',
+    cardInfo: 'Single day · ground assault',
     sandbox: false,
     requiredSafety: 0
   },
@@ -12753,6 +12780,12 @@ function updateScenario(dt) {
     return;
   }
 
+  // === OCTOBER 7 — ground-assault campaign tick ===
+  if (state.scenario.campaign === 'october7') {
+    tickOctober7Campaign(dt);
+    return;
+  }
+
   // === Sandbox · Defend — wave-intensity campaign tick ===
   if (state.scenarioId === 'sandbox') {
     tickSandboxDefender(dt);
@@ -16302,6 +16335,8 @@ function checkEndConditions() {
   if (state.scenario && state.scenario.sandbox) return;
   // === Gaza campaign — end conditions handled inside tickGazaCampaign (pressure ≥ 100 OR ≥3 major cities lost) ===
   if (state.scenario && state.scenario.campaign === 'gaza') return;
+  // === October 7 — end conditions handled inside tickOctober7Campaign (day elapsed / all resolved) ===
+  if (state.scenario && state.scenario.campaign === 'october7') return;
   // === Resistance Axis non-sandbox — flip the conditions (attacker wins on Israeli collapse) ===
   if (state.playAs === 'attacker') {
     if (state.stats.civilianSafety <= 5) { endGame(true); return; }
@@ -16322,6 +16357,10 @@ function endGame(victory) {
   // === GAZA CAMPAIGN — special end-game summary with rating ===
   if (state.gaza && state.scenario && state.scenario.campaign === 'gaza') {
     return endGazaCampaign(victory);
+  }
+  // === OCTOBER 7 — special end-game summary (vs historical toll) ===
+  if (state.oct7 && state.scenario && state.scenario.campaign === 'october7') {
+    return endOctober7Campaign(victory);
   }
   // === ATTACKER (Resistance Axis) — special end-game summary ===
   if (state.playAs === 'attacker' && state.attacker && state.attacker.factionId) {
@@ -16868,6 +16907,8 @@ function updateStatsPanel() {
   updateAttackerHud();
   // === Sandbox · Defend HUD ===
   updateSandboxHud();
+  // === October 7 · Southern Command panel === (guarded — never break the shared UI loop)
+  try { updateOct7Panel(); } catch (e) {}
   // === World Modifiers HUD (always visible during active scenario) ===
   updateWorldHud();
   // === New stats: panic, evacuations, intel, cyber ===
@@ -17390,6 +17431,378 @@ function cityTypeName(t) {
 /* =========================================================
    СТАРТ СЦЕНАРИЯ
    ========================================================= */
+/* ===========================================================================
+   OCTOBER 7 · 2023 — "BLACK SATURDAY" GROUND-ASSAULT SCENARIO   (NEW v2.11.0)
+   ---------------------------------------------------------------------------
+   A single-day catastrophe scenario with TWO layers:
+     (1) AIR    — the ~2,200-rocket opening barrage (reuses spawnThreat + a
+                  pre-deployed Oct-2023 Iron Dome / D.Sling / Arrow posture).
+     (2) GROUND — Hamas Nukhba breach the border fence; the Gaza-envelope
+                  communities come under direct assault in historically-timed
+                  waves. You command a limited, slowly-mobilizing QRF (Quick
+                  Reaction Force) and must triage who to relieve. Communities
+                  that fall accrue civilian deaths + hostages toward their real
+                  historical caps.
+   Goal: MITIGATE the catastrophe — beat the real toll (1,195 killed / 251
+   hostages). It can't be "won"; it can only be made less terrible.
+   Coordinates + casualty caps are real (en.wikipedia.org/wiki/Gaza_war).
+   =========================================================================== */
+
+// Gaza-envelope communities attacked on Oct 7, north→south. Casualty caps ≈ historical.
+//  squad   = local security-team defenders (kitat konenut)
+//  force   = attacker strength that reaches the community
+//  arriveSec = game-seconds after H-hour (06:29) the ground assault arrives
+//  maxCiv / maxHostage = caps if the community is fully overrun and never relieved
+//  distKm  = travel distance proxy for QRF ETA
+const OCT7_COMMUNITIES = [
+  { id:'netiv',    name:'Netiv HaAsara',  lat:31.5708, lon:34.5394, pop:900,   squad:8,  force:30,  arriveSec:12, maxCiv:17,  maxHostage:0,  distKm:14 },
+  { id:'zikim',    name:'Zikim',          lat:31.6072, lon:34.5210, pop:300,   squad:11, force:38,  arriveSec:14, maxCiv:17,  maxHostage:0,  distKm:16 },
+  { id:'sderot',   name:'Sderot (city)',  lat:31.5273, lon:34.5929, pop:30000, squad:14, force:40,  arriveSec:29, maxCiv:53,  maxHostage:0,  distKm:13 },
+  { id:'kfaraza',  name:'Kfar Aza',       lat:31.4834, lon:34.5339, pop:950,   squad:10, force:80,  arriveSec:20, maxCiv:62,  maxHostage:19, distKm:9 },
+  { id:'nahaloz',  name:'Nahal Oz',       lat:31.4725, lon:34.4972, pop:480,   squad:9,  force:60,  arriveSec:22, maxCiv:15,  maxHostage:8,  distKm:8 },
+  { id:'alumim',   name:'Alumim',         lat:31.4517, lon:34.5136, pop:500,   squad:10, force:50,  arriveSec:30, maxCiv:22,  maxHostage:4,  distKm:7 },
+  { id:'beeri',    name:"Be'eri",         lat:31.4239, lon:34.4897, pop:1100,  squad:12, force:90,  arriveSec:27, maxCiv:101, maxHostage:32, distKm:6 },
+  { id:'reim',     name:"Re'im · Nova",   lat:31.3961, lon:34.4603, pop:3500,  squad:6,  force:75,  arriveSec:32, maxCiv:344, maxHostage:44, distKm:11 },
+  { id:'kissufim', name:'Kissufim',       lat:31.3742, lon:34.3994, pop:300,   squad:8,  force:70,  arriveSec:31, maxCiv:14,  maxHostage:4,  distKm:12 },
+  { id:'nirim',    name:'Nirim',          lat:31.3350, lon:34.3958, pop:430,   squad:8,  force:40,  arriveSec:34, maxCiv:5,   maxHostage:5,  distKm:14 },
+  { id:'niroz',    name:'Nir Oz',         lat:31.3103, lon:34.4022, pop:420,   squad:6,  force:60,  arriveSec:33, maxCiv:43,  maxHostage:76, distKm:15 },
+  { id:'holit',    name:'Holit',          lat:31.2300, lon:34.3267, pop:200,   squad:6,  force:60,  arriveSec:36, maxCiv:13,  maxHostage:9,  distKm:18 },
+  { id:'keremsh',  name:'Kerem Shalom',   lat:31.2283, lon:34.2846, pop:180,   squad:11, force:100, arriveSec:38, maxCiv:6,   maxHostage:0,  distKm:20 },
+  { id:'ofakim',   name:'Ofakim (city)',  lat:31.3113, lon:34.6228, pop:41000, squad:10, force:22,  arriveSec:36, maxCiv:47,  maxHostage:0,  distKm:24 }
+];
+
+// QRF assets. power = combat weight, speedKmMin = travel speed (km per game-minute),
+// readySec = when it finishes mobilizing (reservists arrive over the morning).
+const OCT7_QRF_TYPES = {
+  heli: { name:'Heli QRF · Unit 669/Shaldag', icon:'🚁', power:55, speedKmMin:6.0, color:'#5dde9e' },
+  tank: { name:'Armor platoon',               icon:'🛡', power:75, speedKmMin:2.2, color:'#e2c15d' },
+  inf:  { name:'Infantry company',            icon:'🪖', power:48, speedKmMin:3.2, color:'#5dade2' }
+};
+
+function initOctober7Campaign() {
+  // Fresh full Oct-2023 interception posture (Iron Dome saturated this day, but it held the skies).
+  state.batteries = [];
+  const POSTURE = [
+    ['ironDome',   31.5180, 34.5950, 'Gaza Envelope · Iron Dome'],
+    ['ironDome',   31.6688, 34.5713, 'Ashkelon · Iron Dome'],
+    ['ironDome',   31.7997, 34.6500, 'Ashdod · Iron Dome'],
+    ['ironDome',   31.2530, 34.7990, "Be'er Sheva · Iron Dome"],
+    ['ironDome',   32.0700, 34.7900, 'Tel Aviv · Iron Dome'],
+    ['ironDome',   31.8900, 34.8100, 'Rehovot · Iron Dome'],
+    ['davidsSling',31.9000, 34.9000, 'Central · David\'s Sling'],
+    ['arrow3',     31.6500, 35.0500, 'Negev · Arrow-3']
+  ];
+  POSTURE.forEach(p => { try { autoDeployHistoricalBattery(p[0], p[1], p[2], p[3]); } catch(e){} });
+  state.mode = 'auto';
+  state.buildPhase = false;
+  state.placeMode = null;
+  // QRF pool — a couple ready at H-hour, the rest mobilize through the morning.
+  let qid = 0;
+  const qrf = [];
+  const addUnit = (type, readySec) => {
+    const t = OCT7_QRF_TYPES[type];
+    qrf.push({ id:'q'+(qid++), type, name:t.name, icon:t.icon, power:t.power,
+               speedKmMin:t.speedKmMin, color:t.color,
+               status: readySec<=0 ? 'ready' : 'mob', readySec, target:null, etaMs:0 });
+  };
+  addUnit('heli',0); addUnit('inf',0);
+  addUnit('inf',25); addUnit('tank',35); addUnit('heli',45);
+  addUnit('inf',60); addUnit('tank',70); addUnit('heli',95);
+  state.oct7 = {
+    startGT: state.gameTime,
+    lastGT:  state.gameTime,
+    dayDurationMs: 6 * 60 * 1000,           // compressed "day" (06:29 → ~Oct 10) in game-time
+    communities: OCT7_COMMUNITIES.map(c => ({ ...c,
+      status:'secure', control:100, attackersPresent:0,
+      civKilled:0, soldiersKilled:0, hostages:0,
+      overrun:false, relieved:false, resolved:false })),
+    qrf,
+    tally:{ civKilled:0, soldiersKilled:0, hostages:0, attackersKilled:0, saved:0, lost:0 },
+    barrageAccum:0,
+    ended:false
+  };
+  logEvent('★★★ OCTOBER 7, 2023 · 06:29 — MASS SURPRISE ASSAULT ON THE GAZA ENVELOPE ★★★', 'danger');
+  showNotification('OCT 7 · 06:29 — AL-AQSA FLOOD',
+    'Rocket barrage + ground breach at 30+ points. Triage your QRF — relieve the kibbutzim before they fall. Beat the real toll: 1,195 killed · 251 hostages.', 'danger');
+}
+
+// Spawn one rocket salvo (air layer). Intensity tapers across the morning.
+function oct7FireBarrage(inten) {
+  const gen = state.scenarioGen;
+  const n = Math.max(2, Math.round((4 + Math.random()*6) * inten));
+  // Weighted impact zones: envelope hammered, Ashkelon/Ashdod heavy, occasional Gush Dan reach.
+  const POOL = ['sderot','sderot','ashkelon','ashkelon','ashdod','ashdod','gedera','kiryat_gat','rishon','telaviv'];
+  for (let i = 0; i < n; i++) {
+    setTimeout(() => {
+      if (state.scenarioGen !== gen || !state.active || state.paused) return;
+      const roll = Math.random();
+      const w = roll < 0.12 ? 'heavyRocket' : (roll < 0.30 ? 'mortar' : 'rocket');
+      const t = POOL[Math.floor(Math.random()*POOL.length)];
+      try { spawnThreat(w, 'hamas', t); } catch(e){}
+    }, i * 180);
+  }
+}
+
+// Player dispatches the fastest available QRF unit to a community.
+function oct7Dispatch(id) {
+  const o = state.oct7; if (!o || o.ended) return;
+  const c = o.communities.find(x => x.id === id);
+  if (!c || c.resolved) return;
+  const ready = o.qrf.filter(u => u.status === 'ready').sort((a,b) => b.speedKmMin - a.speedKmMin);
+  if (!ready.length) {
+    showNotification('NO QRF AVAILABLE', 'Every unit is committed or still mobilizing. Reinforcements arrive through the morning.', 'warn');
+    return;
+  }
+  const u = ready[0];
+  u.status = 'enroute'; u.target = id;
+  u.etaMs = Math.max(6000, (c.distKm / u.speedKmMin) * 60 * 1000);
+  if (typeof audio !== 'undefined' && audio.click) audio.click();
+  logEvent(`${u.icon} ${u.name} → ${c.name} (ETA ${Math.round(u.etaMs/1000)}s)`, 'info');
+}
+
+function tickOctober7Campaign(dt) {
+  const o = state.oct7;
+  if (!o || o.ended) return;
+  if (state.paused) return;
+  const gt = state.gameTime;
+  const gdt = Math.max(0, gt - o.lastGT); o.lastGT = gt;
+  const gdtSec = gdt / 1000;
+  const elapsed = gt - o.startGT;
+  const elapsedSec = elapsed / 1000;
+
+  // --- QRF mobilization (reservists arrive over the morning) ---
+  o.qrf.forEach(u => {
+    if (u.status === 'mob' && elapsedSec >= u.readySec) {
+      u.status = 'ready';
+      logEvent(`◆ QRF mobilized: ${u.name}`, 'success');
+    }
+    if (u.status === 'enroute') {
+      u.etaMs -= gdt;
+      if (u.etaMs <= 0) {
+        u.status = 'engaged';
+        const c = o.communities.find(x => x.id === u.target);
+        logEvent(`${u.icon} ${u.name} engaging at ${c ? c.name : '?'}`, 'info');
+      }
+    }
+  });
+
+  // --- Air barrage (tapering) ---
+  o.barrageAccum += gdt;
+  const inten = elapsedSec < 60 ? 1 : elapsedSec < 150 ? 0.6 : elapsedSec < 300 ? 0.3 : 0.15;
+  if (o.barrageAccum >= 2500 / inten) { o.barrageAccum = 0; oct7FireBarrage(inten); }
+
+  // --- Ground layer ---
+  o.communities.forEach(c => {
+    if (c.status === 'secure' && elapsedSec >= c.arriveSec) {
+      c.status = 'under_attack'; c.attackersPresent = c.force;
+      logEvent(`⚠ ${c.name} — infiltrators inside the perimeter`, 'danger');
+    }
+    if (c.resolved || c.status === 'secure') return;
+
+    let engg = 0;
+    o.qrf.forEach(u => { if (u.status === 'engaged' && u.target === c.id) engg += u.power; });
+
+    if (c.attackersPresent > 0) {
+      if (engg > 0) {
+        // Relief in progress: attackers killed, perimeter stabilizes, casualties stop.
+        const kill = Math.min(c.attackersPresent, engg * 0.10 * gdtSec);
+        c.attackersPresent -= kill; o.tally.attackersKilled += kill;
+        c.relieved = true;
+        c.control = Math.min(100, c.control + 4 * gdtSec);
+      } else {
+        // No relief: defenders outnumbered, control drains.
+        const drain = (c.attackersPresent / (c.squad * 8)) * 1.8 * gdtSec;
+        c.control = Math.max(0, c.control - drain);
+      }
+      if (c.control <= 0 && !c.overrun) {
+        c.overrun = true; c.status = 'overrun';
+        c.soldiersKilled = Math.round(c.squad * 0.5);
+        logEvent(`✖ ${c.name} OVERRUN — community has fallen`, 'danger');
+        showNotification('COMMUNITY OVERRUN', `${c.name} has fallen. Civilians in mortal danger.`, 'danger');
+      }
+      // Rampage accrual while overrun AND not yet relieved.
+      if (c.overrun && !c.relieved) {
+        c.civKilled = Math.min(c.maxCiv, c.civKilled + (c.maxCiv / 60) * gdtSec);
+        c.hostages  = Math.min(c.maxHostage, c.hostages + (c.maxHostage / 60) * gdtSec);
+      }
+      if (c.attackersPresent <= 0) {
+        c.attackersPresent = 0; c.resolved = true;
+        c.status = c.overrun ? 'recaptured' : 'cleared';
+        logEvent(`${c.overrun ? '↻ Recaptured' : '✓ Secured'}: ${c.name}`, 'success');
+        o.qrf.forEach(u => { if (u.status === 'engaged' && u.target === c.id) { u.status = 'ready'; u.target = null; } });
+      }
+    }
+  });
+
+  // --- Roll-up national tally ---
+  let cv=0, sd=0, hs=0;
+  o.communities.forEach(c => { cv += c.civKilled; sd += c.soldiersKilled; hs += c.hostages; });
+  o.tally.civKilled = Math.round(cv);
+  o.tally.soldiersKilled = Math.round(sd);
+  o.tally.hostages = Math.round(hs);
+  o.tally.saved = o.communities.filter(c => c.resolved && c.civKilled < c.maxCiv * 0.5).length;
+  o.tally.lost  = o.communities.filter(c => c.overrun).length;
+
+  // --- End conditions ---
+  const allResolved = o.communities.every(c => c.resolved);
+  if (elapsed >= o.dayDurationMs || (allResolved && elapsedSec > 60)) {
+    o.ended = true;
+    endGame(true);
+  }
+}
+
+// Compact "OCT 7 · 09:42"-style clock interpolated across the compressed day.
+function oct7Clock(frac) {
+  const base = Date.UTC(2023, 9, 7, 6, 29);     // Oct 7 2023 06:29
+  const d = new Date(base + Math.max(0, Math.min(1, frac)) * 83.5 * 3600 * 1000);  // → ~Oct 10 18:00
+  const mn = _MONTH_NAMES[d.getUTCMonth()].slice(0,3).toUpperCase();
+  return `${mn} ${d.getUTCDate()} · ${String(d.getUTCHours()).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2,'0')}`;
+}
+
+// Per-frame ground-command DOM panel (self-hides outside the october7 scenario).
+function updateOct7Panel() {
+  let el = document.getElementById('oct7-panel');
+  if (!state.oct7 || state.scenarioId !== 'october7') { if (el) el.style.display = 'none'; return; }
+  const o = state.oct7;
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'oct7-panel';
+    el.style.cssText = 'position:fixed;top:74px;right:12px;width:330px;max-height:76vh;overflow:auto;background:rgba(12,15,24,0.96);border:1px solid #c0392b;border-radius:8px;color:#dde;font-family:monospace;font-size:11px;z-index:9996;box-shadow:0 4px 20px rgba(0,0,0,0.6);';
+    document.body.appendChild(el);
+    if (typeof installPanelChrome === 'function') installPanelChrome(el, { title: '⚔ OCT 7 · SOUTHERN COMMAND' });
+  }
+  const pcs = (typeof _panelChromeState !== 'undefined') ? _panelChromeState : {};
+  if (pcs['oct7-panel'] && pcs['oct7-panel'].closed) { el.style.display = 'none'; return; }
+  el.style.display = 'block';
+  if (pcs['oct7-panel'] && pcs['oct7-panel'].minimized) return;
+  const body = el.querySelector('.panel-body') || el;
+
+  const frac = Math.min(1, (state.gameTime - o.startGT) / o.dayDurationMs);
+  const totalKilled = o.tally.civKilled + o.tally.soldiersKilled;
+  const readyN = o.qrf.filter(u => u.status === 'ready').length;
+  const mobN   = o.qrf.filter(u => u.status === 'mob').length;
+  const resolvedN = o.communities.filter(c => c.resolved).length;
+
+  const STATUS = {
+    secure:    { t:'SECURE',     c:'#5dade2' },
+    under_attack:{ t:'UNDER ATTACK', c:'#ffaa44' },
+    overrun:   { t:'OVERRUN',    c:'#ff5544' },
+    cleared:   { t:'SECURED',    c:'#52be80' },
+    recaptured:{ t:'RECAPTURED', c:'#7fd6a0' }
+  };
+  const bar = (pct, col) =>
+    '<span style="display:inline-block;width:64px;height:7px;background:#222;border:1px solid #333;vertical-align:middle;border-radius:3px;overflow:hidden;">' +
+      '<span style="display:block;width:'+Math.max(0,Math.min(100,pct))+'%;height:100%;background:'+col+';"></span></span>';
+
+  let rows = '';
+  o.communities.forEach(c => {
+    const st = STATUS[c.status] || STATUS.secure;
+    const enroute = o.qrf.find(u => u.status === 'enroute' && u.target === c.id);
+    const engaged = o.qrf.find(u => u.status === 'engaged' && u.target === c.id);
+    let action;
+    if (c.resolved) {
+      action = '<span style="color:'+st.c+';font-weight:bold;">'+st.t+'</span>';
+    } else if (engaged) {
+      action = '<span style="color:#7fd6a0;">'+engaged.icon+' RELIEVING…</span>';
+    } else if (enroute) {
+      action = '<span style="color:#9ad;">'+enroute.icon+' ETA '+Math.ceil(enroute.etaMs/1000)+'s</span>';
+    } else if (c.status === 'secure') {
+      action = '<span style="color:#567;">— quiet —</span>';
+    } else {
+      const dis = readyN > 0 ? '' : 'opacity:0.4;cursor:not-allowed;';
+      action = '<button onclick="oct7Dispatch(\''+c.id+'\')" style="'+dis+'background:#c0392b;color:#fff;border:none;border-radius:3px;padding:2px 7px;font-family:monospace;font-size:10px;cursor:pointer;">DISPATCH QRF</button>';
+    }
+    const cas = (c.maxCiv>0||c.maxHostage>0)
+      ? '<span style="color:#bbb;">☠ '+Math.round(c.civKilled)+'/'+c.maxCiv+(c.maxHostage>0?'  ★ '+Math.round(c.hostages)+'/'+c.maxHostage:'')+'</span>'
+      : '<span style="color:#bbb;">☠ '+Math.round(c.civKilled)+'/'+c.maxCiv+'</span>';
+    const ctlCol = c.control>60?'#52be80':c.control>30?'#ffaa44':'#ff5544';
+    rows +=
+      '<div style="border-top:1px solid #222;padding:5px 0;">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;">' +
+          '<span style="font-weight:bold;color:'+st.c+';">'+c.name+'</span>'+action +
+        '</div>' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:3px;color:#9aa;">' +
+          '<span>hold '+bar(c.control,ctlCol)+'</span>' +
+          (c.status!=='secure'&&!c.resolved ? '<span style="color:#ff7766;">⚔ '+Math.round(c.attackersPresent)+'</span>' : '<span></span>') +
+          cas +
+        '</div>' +
+      '</div>';
+  });
+
+  let qrfList = '';
+  o.qrf.forEach(u => {
+    let s;
+    if (u.status==='ready')   s='<span style="color:#5dde9e;">READY</span>';
+    else if (u.status==='mob') s='<span style="color:#778;">mob '+Math.max(0,Math.ceil(u.readySec-(state.gameTime-o.startGT)/1000))+'s</span>';
+    else if (u.status==='enroute') { const c=o.communities.find(x=>x.id===u.target); s='<span style="color:#9ad;">→ '+(c?c.name:'')+' '+Math.ceil(u.etaMs/1000)+'s</span>'; }
+    else if (u.status==='engaged') { const c=o.communities.find(x=>x.id===u.target); s='<span style="color:#7fd6a0;">⚔ '+(c?c.name:'')+'</span>'; }
+    else s='<span style="color:#556;">—</span>';
+    qrfList += '<div style="display:flex;justify-content:space-between;padding:1px 0;"><span>'+u.icon+' '+u.name.replace(/·.*$/,'').trim()+'</span>'+s+'</div>';
+  });
+
+  body.innerHTML =
+    '<div style="padding:8px 10px;">' +
+      '<div style="display:flex;justify-content:space-between;align-items:baseline;border-bottom:1px solid #333;padding-bottom:5px;margin-bottom:6px;">' +
+        '<span style="font-size:15px;font-weight:bold;color:#ff6b5e;letter-spacing:1px;">'+oct7Clock(frac)+'</span>' +
+        '<span style="font-size:10px;color:#888;">'+resolvedN+'/'+o.communities.length+' resolved</span>' +
+      '</div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:2px 10px;margin-bottom:6px;font-size:11px;">' +
+        '<span>☠ Killed <b style="color:#ff8888;">'+totalKilled+'</b></span>' +
+        '<span>★ Hostages <b style="color:#ffce5e;">'+o.tally.hostages+'</b></span>' +
+        '<span>🛡 Saved <b style="color:#52be80;">'+o.tally.saved+'</b></span>' +
+        '<span>🚁 QRF <b style="color:#5dde9e;">'+readyN+'</b> ready'+(mobN?' <span style="color:#778;">(+'+mobN+')</span>':'')+'</span>' +
+      '</div>' +
+      '<div style="font-size:9px;color:#766;margin-bottom:4px;">vs real Oct 7: 1,195 killed · 251 hostages — do better.</div>' +
+      rows +
+      '<div style="border-top:1px solid #333;margin-top:7px;padding-top:5px;">' +
+        '<div style="color:#5dade2;font-weight:bold;font-size:10px;margin-bottom:3px;">QRF ROSTER</div>'+qrfList +
+      '</div>' +
+    '</div>';
+}
+
+function endOctober7Campaign(victory) {
+  const o = state.oct7;
+  if (!o) return;
+  const killed = o.tally.civKilled + o.tally.soldiersKilled;
+  const host = o.tally.hostages;
+  const saved = o.tally.saved;
+  const total = o.communities.length;
+  // Rating vs the real toll.
+  let rating, rcol, verdict;
+  if (killed <= 300 && host <= 60)       { rating='S'; rcol='#ffd34d'; verdict='UNPRECEDENTED DEFENSE — the envelope held.'; }
+  else if (killed <= 600 && host <= 120) { rating='A'; rcol='#7fd6a0'; verdict='HISTORY ALTERED — thousands of lives saved.'; }
+  else if (killed <= 900 && host <= 180) { rating='B'; rcol='#5dade2'; verdict='COSTLY STAND — but far better than reality.'; }
+  else if (killed < 1195)                { rating='C'; rcol='#ffaa44'; verdict='BLOODY SATURDAY — marginally better than history.'; }
+  else                                   { rating='D'; rcol='#ff5544'; verdict='AS DARK AS HISTORY — the catastrophe repeated.'; }
+
+  let ov = document.getElementById('oct7-end');
+  if (!ov) { ov = document.createElement('div'); ov.id = 'oct7-end'; document.body.appendChild(ov); }
+  ov.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(6,8,14,0.96);display:flex;align-items:center;justify-content:center;font-family:monospace;color:#dde;';
+  const cmp = (mine, real, invert) => {
+    const better = mine < real;
+    return '<span style="color:'+(better?'#7fd6a0':'#ff7766')+';font-weight:bold;">'+mine.toLocaleString()+'</span>'+
+           ' <span style="color:#667;">vs '+real.toLocaleString()+' real</span>';
+  };
+  ov.innerHTML =
+    '<div style="max-width:520px;width:92%;background:rgba(14,18,28,0.98);border:1px solid '+rcol+';border-radius:12px;padding:26px 30px;box-shadow:0 10px 50px rgba(0,0,0,0.7);">' +
+      '<div style="font-size:12px;color:#888;letter-spacing:2px;">OCTOBER 7, 2023 · OPERATION AL-AQSA FLOOD</div>' +
+      '<div style="display:flex;align-items:center;gap:16px;margin:10px 0 14px;">' +
+        '<span style="font-size:62px;font-weight:bold;color:'+rcol+';line-height:1;">'+rating+'</span>' +
+        '<span style="font-size:15px;color:#fff;">'+verdict+'</span>' +
+      '</div>' +
+      '<div style="display:grid;grid-template-columns:auto 1fr;gap:7px 16px;font-size:13px;border-top:1px dashed #444;padding-top:14px;">' +
+        '<span style="color:#9aa;">Total killed</span><span>'+cmp(killed,1195)+'</span>' +
+        '<span style="color:#9aa;">— civilians</span><span style="color:#ddd;">'+o.tally.civKilled.toLocaleString()+'</span>' +
+        '<span style="color:#9aa;">— security forces</span><span style="color:#ddd;">'+o.tally.soldiersKilled.toLocaleString()+'</span>' +
+        '<span style="color:#9aa;">Hostages taken</span><span>'+cmp(host,251)+'</span>' +
+        '<span style="color:#9aa;">Communities saved</span><span style="color:#7fd6a0;font-weight:bold;">'+saved+' / '+total+'</span>' +
+        '<span style="color:#9aa;">Attackers neutralized</span><span style="color:#ddd;">'+Math.round(o.tally.attackersKilled).toLocaleString()+'</span>' +
+      '</div>' +
+      '<div style="font-size:11px;color:#778;margin-top:16px;line-height:1.5;">On the real October 7, ~1,195 people were killed and 251 taken hostage across the Gaza envelope before the IDF regained control — the deadliest day for Jews since the Holocaust. This scenario honours that day by making the cost real.</div>' +
+      '<button onclick="location.reload()" style="margin-top:18px;width:100%;background:'+rcol+';color:#111;border:none;border-radius:6px;padding:11px;font-family:monospace;font-weight:bold;font-size:13px;cursor:pointer;letter-spacing:1px;">RETURN TO MENU</button>' +
+    '</div>';
+}
+
 function startScenario(name) {
   state.scenario = SCENARIOS[name];
   state.scenarioId = name;
@@ -17597,6 +18010,15 @@ function startScenario(name) {
   if (state.scenarioId === 'sandbox') {
     initSandboxDefender();
   }
+  // === OCTOBER 7 — initialize ground-assault state ===
+  if (state.scenario.campaign === 'october7') {
+    initOctober7Campaign();
+  } else {
+    state.oct7 = null;
+    const o7 = document.getElementById('oct7-panel');
+    if (o7) o7.style.display = 'none';
+  }
+
   // === GAZA CAMPAIGN — initialize era state ===
   if (state.scenario.campaign === 'gaza') {
     initGazaCampaign();
@@ -17668,7 +18090,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const stars = '★'.repeat(sc.difficulty) + '☆'.repeat(5 - sc.difficulty);
     let infoLine;
     if (sc.campaign) {
-      infoLine = '<span>Campaign · open-ended</span>';
+      infoLine = '<span>' + (sc.cardInfo || 'Campaign · open-ended') + '</span>';
     } else {
       const totalThreats = sc.waves.reduce((s, w) => s + w.threats.reduce((a, t) => a + t.count, 0), 0);
       infoLine = `<span>${sc.waves.length} waves · ${totalThreats} threats</span>`;
