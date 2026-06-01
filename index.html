@@ -1832,6 +1832,13 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.12.6 — HOTFIX: the v2.12.5 October 7 HUD branch did `return;` inside updateUI BEFORE the
+//            shared tail (updateThreatsList … updateStatsPanel → updateOct7Panel) — so the
+//            command panel updater never ran and the panel DISAPPEARED entirely (user: 'ты
+//            поломал менюшку, её просто щас нет'). Replaced the early return with a
+//            _skipStandardHUD flag that skips ONLY the standard HUD block; the shared tail
+//            (and thus updateOct7Panel) always runs. Browser-verified: panel renders, SEND QRF
+//            works, oct7→tutorial round-trip hides panel + resets HUD labels.
 //   2.12.5 — October 7: dead buttons fixed + HUD bar themed to the scenario.
 //            (1) DEAD BUTTONS (user: 'нажимаю на кнопки а они просто не работают'): the
 //            command panel rebuilds its innerHTML every frame, so inline-onclick buttons were
@@ -2113,7 +2120,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.12.5';
+const GAME_VERSION = '2.12.6';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -16837,6 +16844,7 @@ function endGazaCampaign(victory) {
    UI
    ========================================================= */
 function updateUI() {
+  let _skipStandardHUD = false;   // FIX v2.12.6: set by the October 7 HUD branch (skips standard block, keeps shared tail)
   // === SANDBOX 2027 ERA: futuristic timestamp instead of plain mm:ss ===
   // Format: Y2027.D042 · H14:35 (game-time mapped to fictional Day-of-year + 24h clock)
   let timeStr = formatTime(state.gameTime);
@@ -16889,9 +16897,13 @@ function updateUI() {
     document.getElementById('threats-count').textContent = activeO;
     document.getElementById('battery-count').textContent = state.batteries.filter(b => b.ammo > 0).length;
     document.getElementById('zoom-level').textContent = camera.zoom.toFixed(1);
-    return;   // skip the standard HUD update below
+    // FIX v2.12.6: do NOT return here — the panel updaters (updateStatsPanel → updateOct7Panel)
+    // run at the END of updateUI. An early return skipped them and the command panel vanished.
+    // Skip only the STANDARD HUD block via this flag; the shared tail still runs.
+    _skipStandardHUD = true;
   }
 
+  if (!_skipStandardHUD) {
   // Restore default HUD labels + money item (an October 7 session relabels them in place)
   const _resetLabel = (valId, labelText, color) => {
     const v = document.getElementById(valId); if (!v) return;
@@ -16946,6 +16958,7 @@ function updateUI() {
     mf.classList.toggle('broke', m < 0);
     mf.classList.toggle('low', m >= 0 && m < 20000);
   }
+  }   // end if(!_skipStandardHUD) — FIX v2.12.6
 
   updateThreatsList();
   updateBatteriesList();
