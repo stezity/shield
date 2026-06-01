@@ -1832,6 +1832,17 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.12.4 — October 7 UI polish (user: 'улучши эту менюшку и поубирай верхние кнопки').
+//            (1) Top-bar cleanup: applyOctober7UI() hides every control that doesn't apply to
+//            October 7 — STRIKE, MASS STRIKE, USA, REQUEST FUNDS, DIPLOMACY, WAVE, BUILD —
+//            leaving only Pause / Speed / Exit (+ AUTO/MANUAL, since Iron Dome IS active). The
+//            OPERATION HUD field reads 'AL-AQSA FLOOD'. Restored for all other scenarios.
+//            (2) Southern-Command panel redesigned: day-progress bar, 4 stat tiles (Killed/
+//            Hostages/Saved/QRF) colour-graded vs the real toll, community cards with status-
+//            coloured left borders + hold bars + casualty/hostage/attacker chips, sorted by
+//            urgency (falling+unattended first), resolved entries dimmed. (3) NEW ⚡ AUTO-TRIAGE
+//            button (oct7AutoTriage) — one click sends every ready QRF to the lowest-control
+//            unattended community (supports the 'observe, occasionally decide' play style).
 //   2.12.3 — Engine bug fixes + observer-mode framing. (1) DUPLICATE keydown listener
 //            removed: two global keydown handlers both mapped Space->pause (toggled twice ->
 //            net no-op) and S-> (strike + speed at once), and conflicted on 1/2/Escape. Merged
@@ -2091,7 +2102,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.12.3';
+const GAME_VERSION = '2.12.4';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -13433,6 +13444,27 @@ function applyGazaDefenseUI(canDeploy) {
   if (dipBtn) dipBtn.style.display = isGazaActive ? 'none' : '';
 }
 
+// === OCTOBER 7 — top-bar cleanup (NEW v2.12.4) ===
+// October 7 has no Gaza counter-strikes, no battery-purchasing economy, no diplomacy and no
+// wave system — the only player input is QRF triage in the Southern-Command panel. Hide every
+// top-bar control that doesn't apply; keep only Pause, Speed and Exit. `on` = entering oct7.
+function applyOctober7UI(on) {
+  const hideIds = [
+    'btn-strike', 'btn-mass-strike', 'btn-us-support', 'btn-request-funds',
+    'btn-diplomacy', 'btn-wave', 'btn-build-toggle'
+  ];
+  hideIds.forEach(id => { const el = document.getElementById(id); if (el) el.style.display = on ? 'none' : ''; });
+  // AUTO/MANUAL switch + right-side battery panel stay meaningful (Iron Dome IS active on Oct 7),
+  // but default to AUTO so the player can focus on the ground triage.
+  if (on) {
+    state.mode = 'auto';
+    const ma = document.getElementById('btn-mode-auto');   if (ma) ma.classList.add('active');
+    const mm = document.getElementById('btn-mode-manual'); if (mm) mm.classList.remove('active');
+    // Relabel the OPERATION HUD field to something fitting; blank the wave counter.
+    const opN = document.getElementById('op-name'); if (opN) opN.textContent = 'AL-AQSA FLOOD';
+  }
+}
+
 // Spawn a time-sensitive Hamas target on the map (high-value strike opportunity).
 function spawnGazaTST() {
   // FIX v2.9: was spawnTST('hamas') — wrong signature (spawnTST takes templateId not faction).
@@ -17796,80 +17828,132 @@ function updateOct7Panel() {
   const resolvedN = o.communities.filter(c => c.resolved).length;
 
   const STATUS = {
-    secure:    { t:'SECURE',     c:'#5dade2' },
-    under_attack:{ t:'UNDER ATTACK', c:'#ffaa44' },
-    overrun:   { t:'OVERRUN',    c:'#ff5544' },
-    cleared:   { t:'SECURED',    c:'#52be80' },
-    recaptured:{ t:'RECAPTURED', c:'#7fd6a0' }
+    secure:      { t:'SECURE',       c:'#5dade2', bg:'rgba(93,173,226,0.10)' },
+    under_attack:{ t:'UNDER ATTACK', c:'#ffaa44', bg:'rgba(255,170,68,0.12)' },
+    overrun:     { t:'OVERRUN',      c:'#ff5544', bg:'rgba(255,85,68,0.14)' },
+    cleared:     { t:'SECURED',      c:'#52be80', bg:'rgba(82,190,128,0.10)' },
+    recaptured:  { t:'RECAPTURED',   c:'#7fd6a0', bg:'rgba(127,214,160,0.10)' }
   };
-  const bar = (pct, col) =>
-    '<span style="display:inline-block;width:64px;height:7px;background:#222;border:1px solid #333;vertical-align:middle;border-radius:3px;overflow:hidden;">' +
-      '<span style="display:block;width:'+Math.max(0,Math.min(100,pct))+'%;height:100%;background:'+col+';"></span></span>';
+  const bar = (pct, col, w) =>
+    '<span style="display:inline-block;width:'+(w||72)+'px;height:6px;background:#1a1f28;border-radius:3px;overflow:hidden;vertical-align:middle;">' +
+      '<span style="display:block;width:'+Math.max(0,Math.min(100,pct))+'%;height:100%;background:'+col+';transition:width .2s;"></span></span>';
+
+  // --- sort communities by urgency: active+no-QRF first, then enroute/engaged, then quiet, then resolved ---
+  const rank = c => {
+    if (c.resolved) return 5;
+    const hasQRF = o.qrf.some(u => (u.status==='enroute'||u.status==='engaged') && u.target===c.id);
+    if (c.status==='overrun' && !hasQRF) return 0;       // falling, unattended — top priority
+    if (c.status==='under_attack' && !hasQRF) return 1;  // under attack, unattended
+    if (!c.resolved && hasQRF) return 2;                 // relief inbound
+    if (c.status==='secure') return 4;                   // quiet
+    return 3;
+  };
+  const sorted = o.communities.slice().sort((a,b)=> rank(a)-rank(b));
 
   let rows = '';
-  o.communities.forEach(c => {
+  sorted.forEach(c => {
     const st = STATUS[c.status] || STATUS.secure;
     const enroute = o.qrf.find(u => u.status === 'enroute' && u.target === c.id);
     const engaged = o.qrf.find(u => u.status === 'engaged' && u.target === c.id);
+    const ctlCol = c.control>60?'#52be80':c.control>30?'#ffaa44':'#ff5544';
+
+    // Right-hand action / status chip
     let action;
     if (c.resolved) {
-      action = '<span style="color:'+st.c+';font-weight:bold;">'+st.t+'</span>';
+      action = '<span style="font-weight:bold;color:'+st.c+';font-size:10px;">'+st.t+'</span>';
     } else if (engaged) {
-      action = '<span style="color:#7fd6a0;">'+engaged.icon+' RELIEVING…</span>';
+      action = '<span style="color:#7fd6a0;font-size:10px;">'+engaged.icon+' RELIEVING</span>';
     } else if (enroute) {
-      action = '<span style="color:#9ad;">'+enroute.icon+' ETA '+Math.ceil(enroute.etaMs/1000)+'s</span>';
+      action = '<span style="color:#9ad;font-size:10px;">'+enroute.icon+' ETA '+Math.ceil(enroute.etaMs/1000)+'s</span>';
     } else if (c.status === 'secure') {
-      action = '<span style="color:#567;">— quiet —</span>';
+      action = '<span style="color:#566;font-size:10px;">quiet</span>';
     } else {
-      const dis = readyN > 0 ? '' : 'opacity:0.4;cursor:not-allowed;';
-      action = '<button onclick="oct7Dispatch(\''+c.id+'\')" style="'+dis+'background:#c0392b;color:#fff;border:none;border-radius:3px;padding:2px 7px;font-family:monospace;font-size:10px;cursor:pointer;">DISPATCH QRF</button>';
+      const ready = readyN > 0;
+      action = '<button onclick="oct7Dispatch(\''+c.id+'\')" '+(ready?'':'disabled')+' style="background:'+(ready?'#c0392b':'#3a2222')+';color:'+(ready?'#fff':'#866')+';border:none;border-radius:4px;padding:3px 8px;font-family:monospace;font-size:10px;font-weight:bold;cursor:'+(ready?'pointer':'not-allowed')+';">⚑ SEND QRF</button>';
     }
-    const cas = (c.maxCiv>0||c.maxHostage>0)
-      ? '<span style="color:#bbb;">☠ '+Math.round(c.civKilled)+'/'+c.maxCiv+(c.maxHostage>0?'  ★ '+Math.round(c.hostages)+'/'+c.maxHostage:'')+'</span>'
-      : '<span style="color:#bbb;">☠ '+Math.round(c.civKilled)+'/'+c.maxCiv+'</span>';
-    const ctlCol = c.control>60?'#52be80':c.control>30?'#ffaa44':'#ff5544';
+
+    // Casualty / hostage chips (only show fields that matter)
+    let chips = '<span style="color:#ff9b9b;">☠ '+Math.round(c.civKilled)+(c.maxCiv?'<span style="color:#655;">/'+c.maxCiv+'</span>':'')+'</span>';
+    if (c.maxHostage>0) chips += ' <span style="color:#ffce5e;">★ '+Math.round(c.hostages)+'<span style="color:#655;">/'+c.maxHostage+'</span></span>';
+    if (c.status!=='secure' && !c.resolved && c.attackersPresent>0) chips += ' <span style="color:#ff7766;">⚔ '+Math.round(c.attackersPresent)+'</span>';
+
+    const dim = c.resolved && c.status!=='overrun' ? 'opacity:0.6;' : '';
     rows +=
-      '<div style="border-top:1px solid #222;padding:5px 0;">' +
-        '<div style="display:flex;justify-content:space-between;align-items:center;">' +
-          '<span style="font-weight:bold;color:'+st.c+';">'+c.name+'</span>'+action +
+      '<div style="'+dim+'background:'+st.bg+';border-left:3px solid '+st.c+';border-radius:0 5px 5px 0;padding:5px 8px;margin-bottom:4px;">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;">' +
+          '<span style="font-weight:bold;color:#eef;font-size:11px;">'+c.name+'</span>'+action +
         '</div>' +
-        '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:3px;color:#9aa;">' +
-          '<span>hold '+bar(c.control,ctlCol)+'</span>' +
-          (c.status!=='secure'&&!c.resolved ? '<span style="color:#ff7766;">⚔ '+Math.round(c.attackersPresent)+'</span>' : '<span></span>') +
-          cas +
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px;gap:6px;">' +
+          bar(c.control, ctlCol, 80) +
+          '<span style="font-size:10px;white-space:nowrap;">'+chips+'</span>' +
         '</div>' +
       '</div>';
   });
 
+  // --- QRF roster (compact) ---
   let qrfList = '';
   o.qrf.forEach(u => {
     let s;
-    if (u.status==='ready')   s='<span style="color:#5dde9e;">READY</span>';
-    else if (u.status==='mob') s='<span style="color:#778;">mob '+Math.max(0,Math.ceil(u.readySec-(state.gameTime-o.startGT)/1000))+'s</span>';
-    else if (u.status==='enroute') { const c=o.communities.find(x=>x.id===u.target); s='<span style="color:#9ad;">→ '+(c?c.name:'')+' '+Math.ceil(u.etaMs/1000)+'s</span>'; }
+    if (u.status==='ready')        s='<span style="color:#5dde9e;font-weight:bold;">READY</span>';
+    else if (u.status==='mob')     s='<span style="color:#778;">⏱ '+Math.max(0,Math.ceil(u.readySec-(state.gameTime-o.startGT)/1000))+'s</span>';
+    else if (u.status==='enroute') { const c=o.communities.find(x=>x.id===u.target); s='<span style="color:#9ad;">→ '+(c?c.name:'')+'</span>'; }
     else if (u.status==='engaged') { const c=o.communities.find(x=>x.id===u.target); s='<span style="color:#7fd6a0;">⚔ '+(c?c.name:'')+'</span>'; }
     else s='<span style="color:#556;">—</span>';
-    qrfList += '<div style="display:flex;justify-content:space-between;padding:1px 0;"><span>'+u.icon+' '+u.name.replace(/·.*$/,'').trim()+'</span>'+s+'</div>';
+    qrfList += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:10px;"><span style="color:#bcd;">'+u.icon+' '+u.name.replace(/·.*$/,'').trim()+'</span>'+s+'</div>';
   });
 
+  // --- day-progress bar (06:29 → ~Oct 10) ---
+  const dayBar =
+    '<div style="height:4px;background:#1a1f28;border-radius:2px;overflow:hidden;margin:5px 0 7px;">' +
+      '<span style="display:block;width:'+Math.round(frac*100)+'%;height:100%;background:linear-gradient(90deg,#ff6b5e,#ffaa44);"></span></div>';
+
+  // --- compare to history ---
+  const killCol = totalKilled>=1195?'#ff5544':totalKilled>=600?'#ffaa44':'#7fd6a0';
+  const hostCol = o.tally.hostages>=251?'#ff5544':o.tally.hostages>=120?'#ffaa44':'#7fd6a0';
+
   body.innerHTML =
-    '<div style="padding:8px 10px;">' +
-      '<div style="display:flex;justify-content:space-between;align-items:baseline;border-bottom:1px solid #333;padding-bottom:5px;margin-bottom:6px;">' +
-        '<span style="font-size:15px;font-weight:bold;color:#ff6b5e;letter-spacing:1px;">'+oct7Clock(frac)+'</span>' +
-        '<span style="font-size:10px;color:#888;">'+resolvedN+'/'+o.communities.length+' resolved</span>' +
+    '<div style="padding:9px 11px;">' +
+      // header: clock + resolved count
+      '<div style="display:flex;justify-content:space-between;align-items:baseline;">' +
+        '<span style="font-size:16px;font-weight:bold;color:#ff6b5e;letter-spacing:1px;">'+oct7Clock(frac)+'</span>' +
+        '<span style="font-size:10px;color:#8a93a6;">'+resolvedN+'/'+o.communities.length+' resolved</span>' +
       '</div>' +
-      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:2px 10px;margin-bottom:6px;font-size:11px;">' +
-        '<span>☠ Killed <b style="color:#ff8888;">'+totalKilled+'</b></span>' +
-        '<span>★ Hostages <b style="color:#ffce5e;">'+o.tally.hostages+'</b></span>' +
-        '<span>🛡 Saved <b style="color:#52be80;">'+o.tally.saved+'</b></span>' +
-        '<span>🚁 QRF <b style="color:#5dde9e;">'+readyN+'</b> ready'+(mobN?' <span style="color:#778;">(+'+mobN+')</span>':'')+'</span>' +
+      dayBar +
+      // stat tiles
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:7px;">' +
+        '<div style="background:rgba(255,85,68,0.10);border-radius:5px;padding:5px 7px;"><div style="font-size:9px;color:#9aa;letter-spacing:.5px;">KILLED</div><div style="font-size:16px;font-weight:bold;color:'+killCol+';">'+totalKilled+'</div></div>' +
+        '<div style="background:rgba(255,206,94,0.10);border-radius:5px;padding:5px 7px;"><div style="font-size:9px;color:#9aa;letter-spacing:.5px;">HOSTAGES</div><div style="font-size:16px;font-weight:bold;color:'+hostCol+';">'+o.tally.hostages+'</div></div>' +
+        '<div style="background:rgba(82,190,128,0.10);border-radius:5px;padding:5px 7px;"><div style="font-size:9px;color:#9aa;letter-spacing:.5px;">SAVED</div><div style="font-size:16px;font-weight:bold;color:#52be80;">'+o.tally.saved+'</div></div>' +
+        '<div style="background:rgba(93,222,158,0.10);border-radius:5px;padding:5px 7px;"><div style="font-size:9px;color:#9aa;letter-spacing:.5px;">QRF READY</div><div style="font-size:16px;font-weight:bold;color:#5dde9e;">'+readyN+(mobN?'<span style="font-size:10px;color:#778;"> +'+mobN+'</span>':'')+'</div></div>' +
       '</div>' +
-      '<div style="font-size:9px;color:#766;margin-bottom:4px;">vs real Oct 7: 1,195 killed · 251 hostages — do better.</div>' +
+      // auto-triage button
+      '<button onclick="oct7AutoTriage()" '+(readyN>0?'':'disabled')+' style="width:100%;background:'+(readyN>0?'#1f6f4a':'#243029')+';color:'+(readyN>0?'#bdffdc':'#688')+';border:1px solid '+(readyN>0?'#2f9d6a':'#2a3a30')+';border-radius:5px;padding:6px;font-family:monospace;font-size:10px;font-weight:bold;cursor:'+(readyN>0?'pointer':'not-allowed')+';margin-bottom:5px;letter-spacing:.5px;">⚡ AUTO-TRIAGE — send all ready QRF to the most-at-risk</button>' +
+      '<div style="font-size:9px;color:#7a8290;margin-bottom:7px;text-align:center;">real Oct 7: <b style="color:#caa;">1,195 killed · 251 hostages</b> — beat it</div>' +
       rows +
-      '<div style="border-top:1px solid #333;margin-top:7px;padding-top:5px;">' +
-        '<div style="color:#5dade2;font-weight:bold;font-size:10px;margin-bottom:3px;">QRF ROSTER</div>'+qrfList +
+      // QRF roster
+      '<div style="border-top:1px solid #2a3038;margin-top:6px;padding-top:5px;">' +
+        '<div style="color:#5dade2;font-weight:bold;font-size:10px;margin-bottom:3px;letter-spacing:.5px;">🚁 QRF ROSTER</div>'+qrfList +
       '</div>' +
     '</div>';
+}
+
+// AUTO-TRIAGE — dispatch every ready QRF unit, each to the most-at-risk unattended community.
+function oct7AutoTriage() {
+  const o = state.oct7; if (!o || o.ended) return;
+  let dispatched = 0, guard = 0;
+  while (o.qrf.some(u => u.status === 'ready') && guard++ < 40) {
+    // pick the unattended, unresolved community with the lowest control (closest to falling)
+    const needy = o.communities
+      .filter(c => !c.resolved && c.status !== 'secure' &&
+        !o.qrf.some(u => (u.status==='enroute'||u.status==='engaged') && u.target===c.id))
+      .sort((a,b)=> a.control - b.control);
+    if (!needy.length) break;
+    oct7Dispatch(needy[0].id);
+    dispatched++;
+  }
+  if (!dispatched && typeof showNotification === 'function') {
+    showNotification('NO ACTION', 'No ready QRF, or every community under attack already has relief inbound.', 'warn');
+  }
 }
 
 function endOctober7Campaign(victory) {
@@ -18108,10 +18192,12 @@ function startScenario(name) {
   // === OCTOBER 7 — initialize ground-assault state ===
   if (state.scenario.campaign === 'october7') {
     initOctober7Campaign();
+    applyOctober7UI(true);                       // hide strike/ops/diplomacy/wave top-bar buttons
   } else {
     state.oct7 = null;
     const o7 = document.getElementById('oct7-panel');
     if (o7) o7.style.display = 'none';
+    applyOctober7UI(false);                       // restore top-bar buttons for all other scenarios
   }
 
   // === GAZA CAMPAIGN — initialize era state ===
@@ -18137,6 +18223,11 @@ function startScenario(name) {
     state.paused = false;     // ensure pause flag is cleared (modal might've left it true)
     // Restore default UI (BUILD/right-panel/mode switch) for non-Gaza scenarios
     if (typeof applyGazaDefenseUI === 'function') applyGazaDefenseUI(true);
+    // FIX v2.12.4: applyGazaDefenseUI(true) re-shows BUILD + DIPLOMACY — re-assert the October 7
+    // top-bar cleanup AFTER it so those stay hidden in the Oct 7 scenario.
+    if (state.scenario && state.scenario.campaign === 'october7' && typeof applyOctober7UI === 'function') {
+      applyOctober7UI(true);
+    }
   }
   // Cleanup sandbox state if not entering sandbox
   if (state.scenarioId !== 'sandbox') {
