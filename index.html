@@ -1832,6 +1832,16 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.12.3 — Engine bug fixes + observer-mode framing. (1) DUPLICATE keydown listener
+//            removed: two global keydown handlers both mapped Space->pause (toggled twice ->
+//            net no-op) and S-> (strike + speed at once), and conflicted on 1/2/Escape. Merged
+//            into ONE listener (W=wave, +/- zoom folded in). (2) Interceptor flight-timeout
+//            was wall-clock (Date.now()-bornAt) while the sim runs on state.gameTime — at
+//            x10/x50 speed interceptors flew minutes of game-time before self-destruct and
+//            accumulated. Now game-time via bornAtGameTime. (3) Observer-mode framing for the
+//            Gaza campaign: explicit 'YOU MAY JUST WATCH' intro — defense is automatic and
+//            operations/ceasefires fire on the real historical timeline; player steps in only
+//            for optional strategic decisions.
 //   2.12.2 — Correctly land the patriot_arrived + ally_support excludeFromGaza flags
 //            (their v2.12.1 Edits matched stale desc text and silently failed — the flags
 //            were claimed in the commit msg but never applied). Verified by id-anchor +
@@ -2081,7 +2091,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.12.2';
+const GAME_VERSION = '2.12.3';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -11044,6 +11054,7 @@ function launchInterceptor(battery, threat) {
     accuracy: BATTERY_TYPES[battery.type].accuracy * (Date.now() < (state.accuracyDebuffUntil || 0) ? 0.80 : 1.0),
     trail: [],
     bornAt: Date.now(),
+    bornAtGameTime: state.gameTime,   // FIX v2.12.3: game-time clock for flight-timeout (see updateInterceptors)
     exo: isExo,
     arcRatio: isExo ? 0.55 : (battery.type === 'davidsSling' ? 0.20 : 0.08)
   });
@@ -11220,7 +11231,10 @@ function updateInterceptors(dt) {
     }
 
     // Защита от бесконечного полёта (если перехватчик не догоняет)
-    if (Date.now() - (i.bornAt || 0) > MAX_FLIGHT_MS) {
+    // FIX v2.12.3: was wall-clock (Date.now()-bornAt) while the sim runs on state.gameTime —
+    // at ×10/×50 speed an interceptor flew ~6-29 game-minutes before self-destructing, so
+    // un-catching interceptors accumulated. Now uses game-time so the cap is consistent.
+    if (state.gameTime - (i.bornAtGameTime != null ? i.bornAtGameTime : 0) > MAX_FLIGHT_MS) {
       i.alive = false; i.deadAt = Date.now();
       threat.assigned = false;
     }
@@ -12964,10 +12978,16 @@ function initGazaCampaign() {
       showNotification('NO ACTIVE DEFENSES', 'Iron Dome is not yet in service. Use the STRIKE button to hit Hamas launch sites in Gaza. Cities will absorb damage until 2011.', 'warn');
     }, 3500);
   }
+  // Observer-mode framing (NEW v2.12.3): the campaign plays itself historically — defense is
+  // automatic and operations/ceasefires fire on the real timeline. The player may simply WATCH,
+  // or step in with optional strategic decisions (strikes / operations) when they choose to.
+  setTimeout(() => {
+    showNotification('YOU MAY JUST WATCH', 'Air defense is automatic and history unfolds on its own — operations and ceasefires fire on the real timeline. Step in only when you want to: STRIKE Hamas sites or launch an operation. Or just observe.', 'info');
+  }, 7000);
   // Hotkey hint (one-time)
   setTimeout(() => {
-    showNotification('HOTKEYS', 'Space=Pause · ←/→=Speed · S=Strike · D=Diplomacy · 1/2/3=Ops (small/med/large)', 'info');
-  }, 7000);
+    showNotification('HOTKEYS (all optional)', 'Space=Pause · ←/→=Speed · S=Strike · 1/2/3=Ops (small/med/large)', 'info');
+  }, 11000);
   // Seed the news ticker
   addGazaNews('Hamas seizes full control of Gaza Strip after armed conflict with Fatah forces', 'bad');
   addGazaNews('Israel imposes blockade on Gaza — international community divided on legality', 'warn');
@@ -18284,10 +18304,18 @@ document.addEventListener('DOMContentLoaded', () => {
     else if (e.code === 'KeyM') { const b = document.getElementById('btn-mass-strike'); if (b) b.click(); }
     else if (e.code === 'KeyD' && e.shiftKey) { showDoctrinesPanel(); }
     else if (e.code === 'KeyD') { const b = document.getElementById('btn-diplomacy'); if (b) b.click(); }
+    // FIX v2.12.3: merged the former SECOND keydown listener here (it double-fired Space/S
+    // and conflicted on 1/2/Escape). Unique keys it owned: W=wave, +/- zoom.
+    else if (e.code === 'KeyW') { const b = document.getElementById('btn-wave'); if (b) b.click(); }
+    else if (e.code === 'Equal' || e.code === 'NumpadAdd') { const b = document.getElementById('zoom-in');  if (b) b.click(); }
+    else if (e.code === 'Minus' || e.code === 'NumpadSubtract') { const b = document.getElementById('zoom-out'); if (b) b.click(); }
     else if (e.code === 'Digit1' && state.gaza) startGazaOperation('small', false);
     else if (e.code === 'Digit2' && state.gaza) startGazaOperation('medium', false);
     else if (e.code === 'Digit3' && state.gaza) startGazaOperation('large', false);
     else if (e.code === 'Escape') {
+      // strike/place-mode cancel first, then deal/diplomacy panels
+      if (state.strikeMode) { state.strikeMode = false; const sb = document.getElementById('btn-strike'); if (sb) sb.classList.remove('active'); return; }
+      if (state.buildPhase && state.placeMode) { state.placeMode = null; if (typeof updateBuildPanel === 'function') updateBuildPanel(); return; }
       closeGazaDealUI();
       const dipPanel = document.getElementById('diplomacy-panel');
       if (dipPanel) dipPanel.style.display = 'none';
@@ -18560,29 +18588,9 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // Горячие клавиши
-document.addEventListener('keydown', (e) => {
-  if (!state.active) return;
-  if (e.key === ' ' || e.key === 'Spacebar') {
-    e.preventDefault();
-    document.getElementById('btn-pause').click();
-  } else if (e.key === '1') document.getElementById('btn-mode-auto').click();
-  else if (e.key === '2') document.getElementById('btn-mode-manual').click();
-  else if (e.key === 's' || e.key === 'S' || e.key === 'ы' || e.key === 'Ы') document.getElementById('btn-speed').click();
-  else if (e.key === 'w' || e.key === 'W' || e.key === 'ц' || e.key === 'Ц') document.getElementById('btn-wave').click();
-  else if (e.key === '+' || e.key === '=') document.getElementById('zoom-in').click();
-  else if (e.key === '-' || e.key === '_') document.getElementById('zoom-out').click();
-  else if (e.key === 'Escape') {
-    if (state.buildPhase && state.placeMode) {
-      state.placeMode = null;
-      updateBuildPanel();
-    } else if (state.strikeMode) {
-      state.strikeMode = false;
-      document.getElementById('btn-strike').classList.remove('active');
-    } else {
-      document.getElementById('btn-pause').click();
-    }
-  }
-});
+// FIX v2.12.3: removed a duplicate second keydown listener that double-fired Space (pause
+// toggled twice → net no-op) and S (strike + speed at once), and conflicted on 1/2/Escape.
+// All its keys are now handled by the single primary keydown listener above.
 </script>
 </body>
 </html>
