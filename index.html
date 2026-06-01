@@ -1832,6 +1832,17 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.12.5 — October 7: dead buttons fixed + HUD bar themed to the scenario.
+//            (1) DEAD BUTTONS (user: 'нажимаю на кнопки а они просто не работают'): the
+//            command panel rebuilds its innerHTML every frame, so inline-onclick buttons were
+//            destroyed between mousedown and mouseup → the click never completed. Replaced with
+//            ONE delegated mousedown listener on the stable panel element + data-act/data-id on
+//            the buttons. Browser-verified: SEND QRF dispatches, AUTO-TRIAGE sends all ready.
+//            (2) HUD bar themed for October 7 (user: 'сделай менюшку более связаную с 7 октября,
+//            там дата такая же как в менюшке'): top bar now shows OPERATION OCTOBER 7 · BLACK
+//            SATURDAY, the SAME clock as the panel (OCT 7 · HH:MM), and RESOLVED / KILLED /
+//            HOSTAGES / SAVED instead of WAVE/ACTIVE/INTCPT/SAFETY; money item hidden. Labels +
+//            money fully restored for all other scenarios.
 //   2.12.4 — October 7 UI polish (user: 'улучши эту менюшку и поубирай верхние кнопки').
 //            (1) Top-bar cleanup: applyOctober7UI() hides every control that doesn't apply to
 //            October 7 — STRIKE, MASS STRIKE, USA, REQUEST FUNDS, DIPLOMACY, WAVE, BUILD —
@@ -2102,7 +2113,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.12.4';
+const GAME_VERSION = '2.12.5';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -16842,6 +16853,59 @@ function updateUI() {
   } else if (state.sandbox && state.sandbox.era && state.sandbox.eraId === '2025') {
     opStr = '◇ DEFEND ISRAEL · 2025';
   }
+  // === OCTOBER 7 — repurpose the HUD bar with scenario-relevant fields (NEW v2.12.5) ===
+  // Instead of WAVE/SAFETY/$ (meaningless here) show the same clock as the command panel,
+  // communities resolved, killed and hostages — so the top bar matches the menu.
+  if (state.oct7 && state.scenario && state.scenario.campaign === 'october7') {
+    const o = state.oct7;
+    const frac = Math.min(1, (state.gameTime - o.startGT) / o.dayDurationMs);
+    const clk = (typeof oct7Clock === 'function') ? oct7Clock(frac) : timeStr;
+    document.getElementById('time-display').textContent = state.buildPhase ? 'DEPLOY' : clk;
+    document.getElementById('op-name').textContent = 'OCTOBER 7 · BLACK SATURDAY';
+    const resolvedN = o.communities.filter(c => c.resolved).length;
+    const killed = Math.round(o.tally.civKilled + o.tally.soldiersKilled);
+    // Relabel + repoint the remaining HUD items (label text lives in the sibling .label span)
+    const setItem = (valId, labelText, valText, valColor) => {
+      const v = document.getElementById(valId); if (!v) return;
+      v.textContent = valText; if (valColor) v.style.color = valColor;
+      const lbl = v.parentElement && v.parentElement.querySelector('.label');
+      if (lbl) lbl.textContent = labelText;
+    };
+    setItem('wave-display',     'RESOLVED:', resolvedN + '/' + o.communities.length, '#5dade2');
+    setItem('active-threats',   'KILLED:',   String(killed), '#ff6b6b');
+    setItem('intercept-count',  'HOSTAGES:', String(o.tally.hostages), '#ffce5e');
+    setItem('safety',           'SAVED:',    String(o.tally.saved), '#52be80');
+    // hide the money item (no economy in Oct 7)
+    const mnEl = document.getElementById('money-display');
+    if (mnEl && mnEl.parentElement) mnEl.parentElement.style.display = 'none';
+    // threat level still meaningful (rocket barrage) — fall through to compute it below
+    const activeO = state.threats.filter(t => !t.intercepted && !t.impacted).length;
+    let lvlO = 'low', txtO = 'LOW';
+    if (activeO > 30) { lvlO = 'critical'; txtO = 'CRITICAL'; }
+    else if (activeO > 15) { lvlO = 'high'; txtO = 'HIGH'; }
+    else if (activeO > 5)  { lvlO = 'med';  txtO = 'ELEVATED'; }
+    const tlO = document.getElementById('threat-level');
+    if (tlO) { tlO.className = 'threat-level ' + lvlO; tlO.textContent = 'LEVEL: ' + txtO; }
+    document.getElementById('threats-count').textContent = activeO;
+    document.getElementById('battery-count').textContent = state.batteries.filter(b => b.ammo > 0).length;
+    document.getElementById('zoom-level').textContent = camera.zoom.toFixed(1);
+    return;   // skip the standard HUD update below
+  }
+
+  // Restore default HUD labels + money item (an October 7 session relabels them in place)
+  const _resetLabel = (valId, labelText, color) => {
+    const v = document.getElementById(valId); if (!v) return;
+    const lbl = v.parentElement && v.parentElement.querySelector('.label');
+    if (lbl) lbl.textContent = labelText;
+    if (color) v.style.color = color;
+  };
+  _resetLabel('wave-display',    'WAVE:');
+  _resetLabel('active-threats',  'ACTIVE:',  '');
+  _resetLabel('intercept-count', 'INTCPT:',  '');
+  _resetLabel('safety',          'SAFETY:',  '');
+  const _mnRestore = document.getElementById('money-display');
+  if (_mnRestore && _mnRestore.parentElement) _mnRestore.parentElement.style.display = '';
+
   document.getElementById('time-display').textContent = timeStr;
   document.getElementById('wave-display').textContent = state.scenario ?
     `${Math.min(state.currentWave + (state.inWave ? 1 : 0), state.scenario.waves.length)}/${state.scenario.waves.length}` : '0/0';
@@ -17814,6 +17878,18 @@ function updateOct7Panel() {
     el.style.cssText = 'position:fixed;top:74px;left:12px;width:330px;max-height:76vh;overflow:auto;background:rgba(12,15,24,0.96);border:1px solid #c0392b;border-radius:8px;color:#dde;font-family:monospace;font-size:11px;z-index:9996;box-shadow:0 4px 20px rgba(0,0,0,0.6);';
     document.body.appendChild(el);
     if (typeof installPanelChrome === 'function') installPanelChrome(el, { title: '⚔ OCT 7 · SOUTHERN COMMAND' });
+    // FIX v2.12.5: the panel rebuilds its innerHTML every frame, so inline onclick buttons were
+    // destroyed mid-click (mousedown→[rebuild]→mouseup = no click fired) → buttons felt dead.
+    // Use ONE delegated listener on the stable panel element (survives rebuilds); buttons carry
+    // data-act / data-id. mousedown so it fires before the next frame's rebuild.
+    el.addEventListener('mousedown', (ev) => {
+      const btn = ev.target.closest('[data-act]');
+      if (!btn) return;
+      ev.preventDefault();
+      const act = btn.getAttribute('data-act');
+      if (act === 'dispatch') { const id = btn.getAttribute('data-id'); if (id) oct7Dispatch(id); }
+      else if (act === 'autotriage') { oct7AutoTriage(); }
+    });
   }
   const pcs = (typeof _panelChromeState !== 'undefined') ? _panelChromeState : {};
   if (pcs['oct7-panel'] && pcs['oct7-panel'].closed) { el.style.display = 'none'; return; }
@@ -17869,7 +17945,7 @@ function updateOct7Panel() {
       action = '<span style="color:#566;font-size:10px;">quiet</span>';
     } else {
       const ready = readyN > 0;
-      action = '<button onclick="oct7Dispatch(\''+c.id+'\')" '+(ready?'':'disabled')+' style="background:'+(ready?'#c0392b':'#3a2222')+';color:'+(ready?'#fff':'#866')+';border:none;border-radius:4px;padding:3px 8px;font-family:monospace;font-size:10px;font-weight:bold;cursor:'+(ready?'pointer':'not-allowed')+';">⚑ SEND QRF</button>';
+      action = '<button data-act="dispatch" data-id="'+c.id+'" '+(ready?'':'disabled')+' style="background:'+(ready?'#c0392b':'#3a2222')+';color:'+(ready?'#fff':'#866')+';border:none;border-radius:4px;padding:3px 8px;font-family:monospace;font-size:10px;font-weight:bold;cursor:'+(ready?'pointer':'not-allowed')+';">⚑ SEND QRF</button>';
     }
 
     // Casualty / hostage chips (only show fields that matter)
@@ -17927,7 +18003,7 @@ function updateOct7Panel() {
         '<div style="background:rgba(93,222,158,0.10);border-radius:5px;padding:5px 7px;"><div style="font-size:9px;color:#9aa;letter-spacing:.5px;">QRF READY</div><div style="font-size:16px;font-weight:bold;color:#5dde9e;">'+readyN+(mobN?'<span style="font-size:10px;color:#778;"> +'+mobN+'</span>':'')+'</div></div>' +
       '</div>' +
       // auto-triage button
-      '<button onclick="oct7AutoTriage()" '+(readyN>0?'':'disabled')+' style="width:100%;background:'+(readyN>0?'#1f6f4a':'#243029')+';color:'+(readyN>0?'#bdffdc':'#688')+';border:1px solid '+(readyN>0?'#2f9d6a':'#2a3a30')+';border-radius:5px;padding:6px;font-family:monospace;font-size:10px;font-weight:bold;cursor:'+(readyN>0?'pointer':'not-allowed')+';margin-bottom:5px;letter-spacing:.5px;">⚡ AUTO-TRIAGE — send all ready QRF to the most-at-risk</button>' +
+      '<button data-act="autotriage" '+(readyN>0?'':'disabled')+' style="width:100%;background:'+(readyN>0?'#1f6f4a':'#243029')+';color:'+(readyN>0?'#bdffdc':'#688')+';border:1px solid '+(readyN>0?'#2f9d6a':'#2a3a30')+';border-radius:5px;padding:6px;font-family:monospace;font-size:10px;font-weight:bold;cursor:'+(readyN>0?'pointer':'not-allowed')+';margin-bottom:5px;letter-spacing:.5px;">⚡ AUTO-TRIAGE — send all ready QRF to the most-at-risk</button>' +
       '<div style="font-size:9px;color:#7a8290;margin-bottom:7px;text-align:center;">real Oct 7: <b style="color:#caa;">1,195 killed · 251 hostages</b> — beat it</div>' +
       rows +
       // QRF roster
