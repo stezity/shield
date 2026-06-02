@@ -1832,6 +1832,14 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.13.2 — October 7 endgame clarity (user: 'я проиграл из-за того что отбил все посёлки').
+//            The end screen only showed a letter grade (S-D); a red 'D — AS DARK AS HISTORY'
+//            read as a LOSS even when the player had retaken every village (pre-2.13.1, huge
+//            ETAs let villages fall first, maxing casualties before the eventual recapture).
+//            Added an explicit OUTCOME header above the grade: '✔ VICTORY — ENVELOPE SECURED'
+//            / 'ALL COMMUNITIES RETAKEN' when every community is ultimately held/retaken, down
+//            to '✖ CATASTROPHE' when the envelope is overrun, plus a Held/Retaken/Lost line.
+//            Recapturing everything now reads unambiguously as a win. Verified both paths.
 //   2.13.1 — October 7 QRF timing fix (user: 'слишком долго идут солдаты, слишком большая ETA —
 //            сделай чтобы уже вечером 7 октября начали отбивать посёлки'). The compressed day is
 //            only ~6 min, but ETA was raw distance/speed (Beersheba→Kerem Shalom ≈ 1300s) — far
@@ -2143,7 +2151,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.13.1';
+const GAME_VERSION = '2.13.2';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -18301,6 +18309,21 @@ function endOctober7Campaign(victory) {
   else if (killed <= 680)                { rating='C'; rcol='#ffaa44'; verdict='BLOODY SATURDAY — only a little better than history.'; }
   else                                   { rating='D'; rcol='#ff5544'; verdict='AS DARK AS HISTORY — the catastrophe repeated.'; }
 
+  // === EXPLICIT OUTCOME HEADER (NEW v2.13.2) ===
+  // The letter grade alone read as a 'loss' even when the player retook every village. Add a
+  // clear VICTORY/DEFEAT-style verdict based on how many communities were ultimately held/retaken
+  // and the toll vs history — so 'I recaptured everything' unambiguously shows as a win.
+  const heldCount  = o.communities.filter(c => c.resolved && !c.overrun).length;   // never fell
+  const retaken    = o.communities.filter(c => c.status === 'recaptured').length;  // fell, then retaken
+  const lostCount  = o.communities.filter(c => !c.resolved || (c.overrun && c.status !== 'recaptured')).length;
+  const securedAll = (heldCount + retaken) >= total;     // every community ultimately under IDF control
+  let outcomeTitle, outcomeColor;
+  if (securedAll && killed <= 320) { outcomeTitle = '✔ VICTORY — ENVELOPE SECURED'; outcomeColor = '#52be80'; }
+  else if (securedAll)             { outcomeTitle = '✔ VICTORY — ALL COMMUNITIES RETAKEN'; outcomeColor = '#7fd6a0'; }
+  else if (lostCount <= 3)         { outcomeTitle = '◑ COSTLY HOLD — most communities saved'; outcomeColor = '#ffaa44'; }
+  else if (lostCount <= 8)         { outcomeTitle = '✖ HEAVY LOSSES — many communities fell'; outcomeColor = '#ff7744'; }
+  else                             { outcomeTitle = '✖ CATASTROPHE — the envelope was overrun'; outcomeColor = '#ff5544'; }
+
   let ov = document.getElementById('oct7-end');
   if (!ov) { ov = document.createElement('div'); ov.id = 'oct7-end'; document.body.appendChild(ov); }
   ov.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(6,8,14,0.96);display:flex;align-items:center;justify-content:center;font-family:monospace;color:#dde;';
@@ -18310,11 +18333,19 @@ function endOctober7Campaign(victory) {
            ' <span style="color:#667;">vs '+real.toLocaleString()+' real</span>';
   };
   ov.innerHTML =
-    '<div style="max-width:520px;width:92%;background:rgba(14,18,28,0.98);border:1px solid '+rcol+';border-radius:12px;padding:26px 30px;box-shadow:0 10px 50px rgba(0,0,0,0.7);">' +
+    '<div style="max-width:520px;width:92%;background:rgba(14,18,28,0.98);border:1px solid '+outcomeColor+';border-radius:12px;padding:26px 30px;box-shadow:0 10px 50px rgba(0,0,0,0.7);">' +
       '<div style="font-size:12px;color:#888;letter-spacing:2px;">OCTOBER 7, 2023 · OPERATION AL-AQSA FLOOD</div>' +
-      '<div style="display:flex;align-items:center;gap:16px;margin:10px 0 14px;">' +
-        '<span style="font-size:62px;font-weight:bold;color:'+rcol+';line-height:1;">'+rating+'</span>' +
-        '<span style="font-size:15px;color:#fff;">'+verdict+'</span>' +
+      // explicit win/lose verdict
+      '<div style="font-size:21px;font-weight:bold;color:'+outcomeColor+';margin:8px 0 2px;letter-spacing:.5px;">'+outcomeTitle+'</div>' +
+      // performance grade (secondary)
+      '<div style="display:flex;align-items:center;gap:16px;margin:8px 0 14px;">' +
+        '<span style="font-size:54px;font-weight:bold;color:'+rcol+';line-height:1;">'+rating+'</span>' +
+        '<span style="font-size:13px;color:#cdd;">'+verdict+'</span>' +
+      '</div>' +
+      '<div style="display:flex;gap:14px;font-size:12px;margin-bottom:6px;">' +
+        '<span style="color:#7fd6a0;">🛡 Held '+heldCount+'</span>' +
+        '<span style="color:#9ad;">↻ Retaken '+retaken+'</span>' +
+        '<span style="color:#ff7766;">✖ Lost '+lostCount+'</span>' +
       '</div>' +
       '<div style="display:grid;grid-template-columns:auto 1fr;gap:7px 16px;font-size:13px;border-top:1px dashed #444;padding-top:14px;">' +
         '<span style="color:#9aa;">Total killed</span><span>'+cmp(killed,1195)+'</span>' +
