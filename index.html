@@ -1832,6 +1832,14 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.13.1 — October 7 QRF timing fix (user: 'слишком долго идут солдаты, слишком большая ETA —
+//            сделай чтобы уже вечером 7 октября начали отбивать посёлки'). The compressed day is
+//            only ~6 min, but ETA was raw distance/speed (Beersheba→Kerem Shalom ≈ 1300s) — far
+//            longer than the whole scenario, so relief NEVER arrived. Fixes: QRF speeds raised
+//            (heli 6→75, inf 3.2→52, tank 2.2→38 km/game-min), ETA clamped to 4-30s, and faster
+//            mobilization (3 ready at H-hour, 6 by +30s). Verified: ETAs now 10-29s; an active
+//            triage saves all 14 communities, doing nothing still loses all 14 — the choice
+//            matters and villages get retaken by the evening.
 //   2.13.0 — MAJOR October 7 overhaul (user: 'добавь чтобы я мог видеть на карте как боевики
 //            продвигаются, добавь военные базы откуда солдаты, сделай больше исторического —
 //            7 октября вечером начали бомбить Газу авиаударами'). (1) MILITANT ADVANCE ON THE
@@ -2135,7 +2143,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.13.0';
+const GAME_VERSION = '2.13.1';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -17692,10 +17700,12 @@ const OCT7_BASES = [
 
 // QRF assets. power = combat weight, speedKmMin = travel speed (km per game-minute),
 // readySec = when it finishes mobilizing (reservists arrive over the morning).
+// speedKmMin tuned to the 6-min compressed day (v2.13.1): relief reaches the envelope in
+// ~6-30s, NOT minutes. Heli fast & far, infantry medium, armor a touch slower but hits hard.
 const OCT7_QRF_TYPES = {
-  heli: { name:'Heli QRF · Unit 669/Shaldag', icon:'🚁', power:55, speedKmMin:6.0, color:'#5dde9e' },
-  tank: { name:'Armor platoon',               icon:'🛡', power:75, speedKmMin:2.2, color:'#e2c15d' },
-  inf:  { name:'Infantry company',            icon:'🪖', power:48, speedKmMin:3.2, color:'#5dade2' }
+  heli: { name:'Heli QRF · Unit 669/Shaldag', icon:'🚁', power:55, speedKmMin:75, color:'#5dde9e' },
+  tank: { name:'Armor platoon',               icon:'🛡', power:75, speedKmMin:38, color:'#e2c15d' },
+  inf:  { name:'Infantry company',            icon:'🪖', power:48, speedKmMin:52, color:'#5dade2' }
 };
 
 // === SHARED IDF GRID DEPLOYMENT (NEW v2.12.0) ===
@@ -17756,10 +17766,12 @@ function initOctober7Campaign() {
                homeLat:b.lat, homeLon:b.lon, mapLat:b.lat, mapLon:b.lon,
                status: readySec<=0 ? 'ready' : 'mob', readySec, target:null, etaMs:0, etaTotal:0 });
   };
-  // Distribute across bases (heli from forward bases, armor/inf from depots)
-  addUnit('heli',0,'tzeelim'); addUnit('inf',0,'reim');
-  addUnit('inf',25,'nahaloz'); addUnit('tank',35,'tzeelim'); addUnit('heli',45,'beersheba');
-  addUnit('inf',60,'beersheba'); addUnit('tank',70,'tzeelim'); addUnit('heli',95,'beersheba');
+  // Distribute across bases (heli from forward bases, armor/inf from depots).
+  // FIX v2.13.1: faster mobilization — 3 ready at H-hour, the rest within the first ~70s, so the
+  // player can start retaking villages early instead of watching them all fall first.
+  addUnit('heli',0,'tzeelim'); addUnit('inf',0,'reim'); addUnit('heli',0,'beersheba');
+  addUnit('inf',15,'nahaloz'); addUnit('tank',22,'tzeelim'); addUnit('heli',30,'beersheba');
+  addUnit('inf',45,'beersheba'); addUnit('tank',70,'tzeelim');
   state.oct7 = {
     startGT: state.gameTime,
     lastGT:  state.gameTime,
@@ -17855,7 +17867,10 @@ function oct7Dispatch(id) {
   u.status = 'enroute'; u.target = id;
   u.mapLat = u.homeLat; u.mapLon = u.homeLon;   // start the on-map move from the base
   const travelKm = haversineKm(u.homeLat, u.homeLon, c.lat, c.lon);
-  u.etaMs = Math.max(5000, (travelKm / u.speedKmMin) * 60 * 1000);
+  // FIX v2.13.1: clamp ETA to 4-30s. The compressed day is only ~6 min, so a raw distance/speed
+  // ETA used to exceed the whole scenario — relief never arrived. Now help reaches any kibbutz
+  // within half a minute (the player feels the QRF "start retaking villages by the evening').
+  u.etaMs = Math.max(4000, Math.min(30000, (travelKm / u.speedKmMin) * 60 * 1000));
   u.etaTotal = u.etaMs;
   if (typeof audio !== 'undefined' && audio.click) audio.click();
   logEvent(`${u.icon} ${u.name} → ${c.name} (ETA ${Math.round(u.etaMs/1000)}s, ${travelKm.toFixed(0)}km)`, 'info');
