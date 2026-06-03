@@ -1837,6 +1837,16 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.15.0 — TERRITORIAL CONTROL SHADING on the map (user: 'сделай показ захвата именно
+//            видимостью территорий: 7 октября видно как Хамас продвигается аж до Офакима, и
+//            после в ноябре ЦАХАЛ заходит в Газу'). New drawOct7Control(): soft coloured
+//            radial blobs show WHO HOLDS GROUND. Oct 7 day → RED Hamas incursion spreading
+//            from the Gaza fence into Israel, one blob per attacked/overrun community + a broad
+//            inland wash that extends to Ofakim when the deep-inland town is hit. War phases →
+//            BLUE IDF control growing over Gaza north→south as phases progress (Ground Invasion
+//            = north, Khan Yunis = centre, Rafah = south), with the shrinking red Hamas-held
+//            remainder. During the war stage the map drops the day markers (QRF/columns) and
+//            shows only the control shading + community dots. Browser + screenshot verified.
 //   2.14.3 — Cache-busting fix. User: 'фазы не продолжились, я просто победил 8 октября'.
 //            The v2.14.2 war-phase code was verified working AND correctly deployed (live
 //            GitHub Pages served 2.14.2 with the phases) — the user was getting a STALE
@@ -2189,7 +2199,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.14.3';
+const GAME_VERSION = '2.15.0';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -18331,11 +18341,98 @@ function oct7Clock(frac) {
 // Draws: IDF military bases, Hamas militant columns advancing from the Gaza breach toward each
 // community (red arrows), live QRF units moving base→community (blue/green), and a status ring
 // on each community. Gives the player a real picture of the battle to triage from.
+// === TERRITORIAL CONTROL SHADING (NEW v2.15.0) ===
+// Visualises WHO HOLDS GROUND as soft coloured blobs on the map:
+//   • Oct 7 day  → RED Hamas incursion spreading from Gaza into Israel (reaches Ofakim when the
+//                   deep-inland community falls), one blob per attacked/overrun community.
+//   • War phases → BLUE IDF control growing OVER GAZA, north→south, as the phases progress
+//                   (ground invasion = north, Khan Yunis = centre, Rafah = south).
+// Uses additive soft radial fills (km radius → screen px via a 1-km screen scale).
+function drawOct7Control() {
+  const o = state.oct7;
+  if (!o) return;
+  // screen pixels per km (measure 1° lat ≈ 111km between two screen points near the envelope)
+  const [ax, ay] = geoToScreen(31.4, 34.5);
+  const [bx, by] = geoToScreen(31.4 + 1/111, 34.5);   // +1 km north
+  const pxPerKm = Math.max(1, Math.hypot(bx - ax, by - ay));
+
+  const blob = (lat, lon, km, rgb, peak) => {
+    const [sx, sy] = geoToScreen(lat, lon);
+    const r = km * pxPerKm;
+    if (sx < -r || sx > canvasW + r || sy < -r || sy > canvasH + r) return;
+    const g = ctx.createRadialGradient(sx, sy, 0, sx, sy, r);
+    g.addColorStop(0, `rgba(${rgb}, ${peak})`);
+    g.addColorStop(0.6, `rgba(${rgb}, ${peak * 0.5})`);
+    g.addColorStop(1, `rgba(${rgb}, 0)`);
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI * 2); ctx.fill();
+  };
+
+  ctx.save();
+  const prevOp = ctx.globalCompositeOperation;
+  ctx.globalCompositeOperation = 'source-over';
+
+  if (o.stage === 'day') {
+    // Hamas incursion: a blob at each attacked community, sized by how compromised it is.
+    o.communities.forEach(c => {
+      if (c.status === 'secure') return;
+      const exposure = c.overrun ? 1 : Math.max(0.15, 1 - c.control / 100);
+      if (c.resolved && !c.overrun) return;                 // cleared without falling → no red
+      const km = 3 + exposure * 6 + (c.advance || 0) * 2;   // grows as the column closes/holds
+      blob(c.lat, c.lon, km, '220, 40, 30', 0.22 * (0.5 + exposure * 0.5));
+    });
+    // A broad "incursion reach" wash from the Gaza fence inland — extends to Ofakim once the
+    // deep-inland community (Ofakim) is hit, conveying how far the attack penetrated.
+    const ofakim = o.communities.find(c => c.id === 'ofakim');
+    const reach = (ofakim && ofakim.status !== 'secure') ? 1 : 0.5;
+    blob(31.45, 34.48, 12 * reach + 6, '200, 30, 25', 0.10);
+  } else if (o.stage === 'war' || o.stage === 'done') {
+    // IDF control growing over Gaza. progress 0..1 across ALL phases; ground phases push the
+    // front south. Gaza strip spans ~31.59 (north) → 31.22 (south).
+    const totalPhases = OCT7_WAR_PHASES.length;
+    const prog = Math.min(1, (o.phaseIdx + (() => {
+      const ph = OCT7_WAR_PHASES[o.phaseIdx];
+      return ph ? Math.min(1, (state.gameTime - o.phaseStartGT) / ph.durationMs) : 1;
+    })()) / totalPhases);
+    // front latitude marches from north (31.59) to south (31.20)
+    const frontLat = 31.59 - (31.59 - 31.20) * prog;
+    // shade every Gaza cell north of the front as IDF-controlled (blue)
+    const GAZA_CELLS = [
+      [31.56, 34.50],[31.53, 34.49],[31.50, 34.47],[31.47, 34.44],[31.44, 34.40],
+      [31.41, 34.37],[31.38, 34.34],[31.34, 34.32],[31.30, 34.28],[31.26, 34.25],[31.23, 34.23]
+    ];
+    GAZA_CELLS.forEach(cell => {
+      if (cell[0] >= frontLat - 0.02) blob(cell[0], cell[1], 5, '50, 120, 230', 0.20);
+    });
+    // residual Hamas-held south (red, shrinking)
+    GAZA_CELLS.forEach(cell => {
+      if (cell[0] < frontLat - 0.02) blob(cell[0], cell[1], 4, '220, 50, 40', 0.14);
+    });
+  }
+  ctx.globalCompositeOperation = prevOp;
+  ctx.restore();
+}
+
 function drawOct7Map() {
   const o = state.oct7;
   if (!o || state.buildPhase) return;
   ctx.save();
   ctx.textAlign = 'center';
+
+  // --- territorial control shading (drawn first, under everything) ---
+  try { drawOct7Control(); } catch (e) {}
+
+  // === WAR STAGE: only the control shading + community dots matter (no QRF/columns) ===
+  if (o.stage === 'war' || o.stage === 'done') {
+    o.communities.forEach(c => {
+      const [cx, cy] = geoToScreen(c.lat, c.lon);
+      if (cx < -40 || cx > canvasW + 40 || cy < -40 || cy > canvasH + 40) return;
+      ctx.fillStyle = c.overrun && c.status !== 'recaptured' ? '#ff6644' : '#7fd6a0';
+      ctx.beginPath(); ctx.arc(cx, cy, 2.5, 0, Math.PI * 2); ctx.fill();
+    });
+    ctx.restore();
+    return;
+  }
 
   // --- IDF military bases ---
   (o.bases || []).forEach(b => {
