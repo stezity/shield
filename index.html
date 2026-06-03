@@ -3,6 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- v2.14.3: force browsers/CDN to revalidate so version updates actually reach players
+     (GitHub Pages was serving a stale cached build — users kept getting the old October 7) -->
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>SHIELD • Multi-Layer Air Defense Simulator</title>
 <style>
 /* =========================================================
@@ -1832,6 +1837,14 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.14.3 — Cache-busting fix. User: 'фазы не продолжились, я просто победил 8 октября'.
+//            The v2.14.2 war-phase code was verified working AND correctly deployed (live
+//            GitHub Pages served 2.14.2 with the phases) — the user was getting a STALE
+//            BROWSER/CDN CACHE of the pre-phase build, so the Oct 7 day still just ended in a
+//            win. Added no-cache/no-store meta tags so browsers revalidate and version updates
+//            actually reach players. (No gameplay change; the phase transition itself was
+//            re-confirmed: day ends → stage='war' → phase 1, zero endGame calls at the day
+//            boundary, no end screen.)
 //   2.14.2 — October 7 harder + POST-OCT-7 WAR PHASES (user: 'слишком изичное, добавь фазы
 //            после 7 октября'). (A) DIFFICULTY: ground combat rebalanced — casualties now accrue
 //            CONTINUOUSLY from the moment militants are inside (scaled by lost control), not only
@@ -2176,7 +2189,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.14.2';
+const GAME_VERSION = '2.14.3';
 
 const BATTERY_TYPES = {
   ironDome: {
