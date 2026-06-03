@@ -1832,6 +1832,23 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.14.2 — October 7 harder + POST-OCT-7 WAR PHASES (user: 'слишком изичное, добавь фазы
+//            после 7 октября'). (A) DIFFICULTY: ground combat rebalanced — casualties now accrue
+//            CONTINUOUSLY from the moment militants are inside (scaled by lost control), not only
+//            on a full overrun, so slow relief always costs lives (the old 'reach it before 0%%
+//            = zero deaths' free pass is gone). Hold/fall now depends on FORCE RATIO (squad+QRF
+//            vs attacker force) — one unit can't beat a 90-100-strong Nukhba column, so the
+//            player must concentrate force. AUTO-TRIAGE rewritten to concentrate on winnable
+//            high-stake fights. Tuned so optimal play ≈ B/A, do-nothing = D (was trivially S).
+//            (B) WAR PHASES: after the Oct 7 day resolves the scenario continues into the 8 real
+//            phases of the Gaza war (Wikipedia) — Opening Air Campaign & Siege → Ground Invasion
+//            → First Truce (105 hostages freed) → Khan Yunis → ICJ & Aid Crisis → Rafah &
+//            Philadelphi → Leadership Decapitation (Haniyeh, Sinwar) → Phase-1 Ceasefire (Jan 19
+//            2025). Each phase: incoming rocket fire (auto Iron Dome), IDF strikes over Gaza, a
+//            climbing cumulative casualty counter (1,200 → ~47,000), hostage deals, scripted
+//            news beats. New command-panel WAR TIMELINE view + war-themed HUD + endgame war
+//            summary. New data OCT7_WAR_PHASES; oct7StartWarPhases/AdvanceWarPhase/TickWarPhase/
+//            RenderWarPanel. Browser-verified end-to-end (all 8 phases, no errors).
 //   2.14.0 — Missile/intercept FX pass (next phase). (1) Dedicated MID-AIR INTERCEPT FLASH:
 //            successful Iron Dome / D.Sling intercepts now produce a crisp white-blue air-burst
 //            + fast rings, visually distinct from the orange ground-hit fireball. (2) FALLING
@@ -2159,7 +2176,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.14.0';
+const GAME_VERSION = '2.14.2';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -16972,23 +16989,35 @@ function updateUI() {
   // communities resolved, killed and hostages — so the top bar matches the menu.
   if (state.oct7 && state.scenario && state.scenario.campaign === 'october7') {
     const o = state.oct7;
-    const frac = Math.min(1, (state.gameTime - o.startGT) / o.dayDurationMs);
-    const clk = (typeof oct7Clock === 'function') ? oct7Clock(frac) : timeStr;
-    document.getElementById('time-display').textContent = state.buildPhase ? 'DEPLOY' : clk;
-    document.getElementById('op-name').textContent = 'OCTOBER 7 · BLACK SATURDAY';
-    const resolvedN = o.communities.filter(c => c.resolved).length;
-    const killed = Math.round(o.tally.civKilled + o.tally.soldiersKilled);
-    // Relabel + repoint the remaining HUD items (label text lives in the sibling .label span)
     const setItem = (valId, labelText, valText, valColor) => {
       const v = document.getElementById(valId); if (!v) return;
       v.textContent = valText; if (valColor) v.style.color = valColor;
       const lbl = v.parentElement && v.parentElement.querySelector('.label');
       if (lbl) lbl.textContent = labelText;
     };
-    setItem('wave-display',     'RESOLVED:', resolvedN + '/' + o.communities.length, '#5dade2');
-    setItem('active-threats',   'KILLED:',   String(killed), '#ff6b6b');
-    setItem('intercept-count',  'HOSTAGES:', String(o.tally.hostages), '#ffce5e');
-    setItem('safety',           'SAVED:',    String(o.tally.saved), '#52be80');
+    if (o.stage === 'war') {
+      // === WAR-PHASE HUD (v2.14.2) ===
+      const ph = OCT7_WAR_PHASES[o.phaseIdx];
+      document.getElementById('time-display').textContent = ph ? ph.dateLabel : '—';
+      document.getElementById('op-name').textContent = 'IRON SWORDS · ' + (ph ? ph.name.toUpperCase() : 'GAZA WAR');
+      const il = Math.round(o.tally.civKilled + o.tally.soldiersKilled + o.warSoldiersKilled);
+      const fmtK = n => n >= 1000 ? (n/1000).toFixed(n>=10000?0:1)+'K' : String(Math.round(n));
+      setItem('wave-display',    'PHASE:',     (o.phaseIdx+1) + '/' + OCT7_WAR_PHASES.length, '#5dade2');
+      setItem('active-threats',  'IL KILLED:', fmtK(il), '#9cd');
+      setItem('intercept-count', 'HOSTAGES:',  String(o.tally.hostages), '#ffce5e');
+      setItem('safety',          'PS KILLED:', fmtK(o.palDeaths), '#caa');
+    } else {
+      const frac = Math.min(1, (state.gameTime - o.startGT) / o.dayDurationMs);
+      const clk = (typeof oct7Clock === 'function') ? oct7Clock(frac) : timeStr;
+      document.getElementById('time-display').textContent = state.buildPhase ? 'DEPLOY' : clk;
+      document.getElementById('op-name').textContent = 'OCTOBER 7 · BLACK SATURDAY';
+      const resolvedN = o.communities.filter(c => c.resolved).length;
+      const killed = Math.round(o.tally.civKilled + o.tally.soldiersKilled);
+      setItem('wave-display',     'RESOLVED:', resolvedN + '/' + o.communities.length, '#5dade2');
+      setItem('active-threats',   'KILLED:',   String(killed), '#ff6b6b');
+      setItem('intercept-count',  'HOSTAGES:', String(o.tally.hostages), '#ffce5e');
+      setItem('safety',           'SAVED:',    String(o.tally.saved), '#52be80');
+    }
     // hide the money item (no economy in Oct 7)
     const mnEl = document.getElementById('money-display');
     if (mnEl && mnEl.parentElement) mnEl.parentElement.style.display = 'none';
@@ -17780,6 +17809,47 @@ const OCT7_BASES = [
   { id:'beersheba',name:'Beersheba · Southern Cmd', lat:31.2530, lon:34.7990, reserve:4 }
 ];
 
+// === POST-OCTOBER-7 WAR PHASES (NEW v2.14.2) — the Gaza war after the breach ===
+// After the Oct 7 ground assault is resolved, the scenario continues into the war's phases
+// (en.wikipedia.org/wiki/Gaza_war). Each phase is a compressed era: incoming rocket fire from
+// Gaza (player still defends via auto Iron Dome), IDF airstrikes/ground ops shown over Gaza, a
+// climbing casualty counter, hostage changes, and scripted historical beats. durationMs is
+// game-time; rocket = barrage intensity (0=none..1=heavy); strike = IAF strike rate over Gaza.
+const OCT7_WAR_PHASES = [
+  { id:'air',     name:'Opening Air Campaign & Siege', dateLabel:'Oct 8–26, 2023',
+    durationMs:70000, rocket:1.0, strike:1.0, palStart:1200, palEnd:7000, hostageDelta:0,
+    desc:'Israel declares a complete siege of Gaza and launches the most intense bombing campaign of the war. Northern Gaza ordered to evacuate south.',
+    news:['Defense Minister declares "complete siege" — no food, fuel or power into Gaza','IDF orders 1.1M north Gaza residents to evacuate south within 24h','Hamas keeps up heavy rocket barrages on the south and centre'] },
+  { id:'ground',  name:'Ground Invasion · Northern Gaza', dateLabel:'Oct 27 – Nov 23, 2023',
+    durationMs:80000, rocket:0.7, strike:1.0, palStart:7000, palEnd:13300, hostageDelta:0, ground:true,
+    desc:'100,000+ IDF troops enter northern Gaza and encircle Gaza City. Al-Shifa Hospital is raided. Hamas fights from the tunnel network.',
+    news:['GROUND INVASION: IDF armoured columns enter northern Gaza','Gaza City encircled — IDF reaches the coast, cutting the Strip in two','IDF raids Al-Shifa Hospital, alleges Hamas command centre beneath'] },
+  { id:'truce1',  name:'First Truce · Hostage Deal', dateLabel:'Nov 24 – Dec 1, 2023',
+    durationMs:40000, rocket:0.05, strike:0.05, palStart:13300, palEnd:15000, hostageDelta:-105, truce:true,
+    desc:'A 7-day pause. 105 hostages released (81 Israeli + 24 foreign) for 240 Palestinian prisoners. Aid surges in.',
+    news:['CEASEFIRE: 7-day humanitarian truce begins','HOSTAGES FREED: 105 released over 7 days for 240 Palestinian prisoners','Truce collapses Dec 1 — fighting resumes within minutes'] },
+  { id:'khanyunis',name:'Resumption · Khan Yunis Push', dateLabel:'Dec 1 2023 – Jan 25 2024',
+    durationMs:75000, rocket:0.5, strike:1.0, palStart:15000, palEnd:26000, hostageDelta:0, ground:true,
+    desc:'Fighting resumes immediately. The ground operation drives into southern Gaza and Khan Yunis — Sinwar\'s stronghold. Heavy urban combat.',
+    news:['War resumes — IDF pushes into southern Gaza','Battle of Khan Yunis: heavy urban fighting in Hamas\'s southern stronghold','Hamas fires a rare long-range barrage at Tel Aviv'] },
+  { id:'icj',     name:'ICJ Ruling & Aid Crisis', dateLabel:'Jan 26 – Apr 30, 2024',
+    durationMs:65000, rocket:0.2, strike:0.8, palStart:26000, palEnd:34500, hostageDelta:0,
+    desc:'The ICJ finds genocide "plausible" and orders aid access but no ceasefire. Famine warnings peak; the Flour Massacre kills 100+ at an aid convoy.',
+    news:['ICJ orders Israel to prevent genocidal acts and allow aid — stops short of a ceasefire','FLOUR MASSACRE: 100+ killed at an aid convoy in Gaza City','UN warns of imminent famine across northern Gaza'] },
+  { id:'rafah',   name:'Rafah Operation · Philadelphi Corridor', dateLabel:'May – Sep 2024',
+    durationMs:70000, rocket:0.18, strike:0.9, palStart:34500, palEnd:39000, hostageDelta:0, ground:true,
+    desc:'IDF takes the Rafah crossing and the Philadelphi Corridor on the Egyptian border, closing Gaza\'s last outlet. Mass-casualty strikes hit displacement camps.',
+    news:['IDF seizes the Rafah border crossing — Gaza\'s last exit closed','IDF takes the Philadelphi Corridor to cut smuggling tunnels','Strike on Tel al-Sultan displacement camp kills dozens'] },
+  { id:'leaders', name:'Decapitation of Hamas Leadership', dateLabel:'Jul – Oct 2024',
+    durationMs:55000, rocket:0.12, strike:0.8, palStart:39000, palEnd:42000, hostageDelta:0,
+    desc:'Ismail Haniyeh is assassinated in Tehran (Jul 31). Yahya Sinwar — the Oct 7 mastermind — is killed by the IDF in Rafah (Oct 16).',
+    news:['Hamas political chief Ismail Haniyeh assassinated in Tehran','Yahya Sinwar — the Oct 7 mastermind — killed by IDF troops in Rafah','Renewed IDF siege of Jabalia in northern Gaza'] },
+  { id:'ceasefire',name:'Stalemate → Phase-1 Ceasefire', dateLabel:'Oct 2024 – Jan 19, 2025',
+    durationMs:55000, rocket:0.06, strike:0.4, palStart:42000, palEnd:47000, hostageDelta:-33, truce:true,
+    desc:'Grinding operations give way to a deal under Trump-transition pressure. A 42-day Phase-1 ceasefire takes effect Jan 19, 2025; 33 hostages to be freed for ~1,900 prisoners.',
+    news:['Ceasefire deal reached under US pressure','PHASE 1 CEASEFIRE in effect — 33 hostages to be freed for ~1,900 prisoners','After 15 months, the guns fall silent across Gaza'] }
+];
+
 // QRF assets. power = combat weight, speedKmMin = travel speed (km per game-minute),
 // readySec = when it finishes mobilizing (reservists arrive over the morning).
 // speedKmMin tuned to the 6-min compressed day (v2.13.1): relief reaches the envelope in
@@ -17876,6 +17946,17 @@ function initOctober7Campaign() {
     airstrikePhase: false,
     airstrikeAccum: 0,
     airstrikeAnnounced: false,
+    // === POST-OCT-7 WAR PHASES (v2.14.2) ===
+    stage: 'day',            // 'day' = the Oct 7 ground assault; 'war' = the phase sequence; 'done'
+    phaseIdx: -1,            // index into OCT7_WAR_PHASES while stage==='war'
+    phaseStartGT: 0,
+    phaseBarrageAccum: 0,
+    phaseStrikeAccum: 0,
+    phaseNewsAccum: 0,
+    phaseNewsIdx: 0,
+    palDeaths: 1200,         // cumulative Palestinian deaths (climbs through the phases)
+    warSoldiersKilled: 0,    // IDF soldiers lost in the ground operation (separate counter)
+    hostagesReleased: 0,
     ended:false
   };
   logEvent('★★★ OCTOBER 7, 2023 · 06:29 — MASS SURPRISE ASSAULT ON THE GAZA ENVELOPE ★★★', 'danger');
@@ -17965,6 +18046,8 @@ function tickOctober7Campaign(dt) {
   const gt = state.gameTime;
   const gdt = Math.max(0, gt - o.lastGT); o.lastGT = gt;
   const gdtSec = gdt / 1000;
+  // === WAR-PHASE STAGE (post Oct 7) — runs the phase sequence, not the ground-assault day ===
+  if (o.stage === 'war') { oct7TickWarPhase(gdt, gdtSec); return; }
   const elapsed = gt - o.startGT;
   const elapsedSec = elapsed / 1000;
   const frac_ = Math.min(1, elapsed / o.dayDurationMs);   // 0..1 through the compressed day
@@ -18033,32 +18116,56 @@ function tickOctober7Campaign(dt) {
     o.qrf.forEach(u => { if (u.status === 'engaged' && u.target === c.id) engg += u.power; });
 
     if (c.attackersPresent > 0) {
-      if (engg > 0) {
-        // Relief in progress: attackers killed, perimeter stabilizes, casualties stop.
-        const kill = Math.min(c.attackersPresent, engg * 0.10 * gdtSec);
+      // === REBALANCED GROUND COMBAT (v2.14.1 — harder + more realistic) ===
+      // The local security squad + any engaged QRF fight the attacker force. Whether the
+      // community holds depends on the FORCE RATIO — one QRF unit is NOT enough against a
+      // large Nukhba column (Be'eri 90, Kerem Shalom 100), so the player must commit more.
+      const defense = c.squad * 1.1 + engg;          // local kitat konenut + QRF power
+      const ratio = defense / c.attackersPresent;     // >1 = defenders winning
+      if (ratio >= 1) {
+        // Defenders prevailing: whittle attackers, control recovers (faster the more dominant).
+        // v2.14.1b: QRF clears faster once committed so fights don't drag and bleed civilians.
+        const kill = Math.min(c.attackersPresent, (engg * 0.13 + c.squad * 0.03) * gdtSec);
         c.attackersPresent -= kill; o.tally.attackersKilled += kill;
-        c.relieved = true;
-        c.control = Math.min(100, c.control + 4 * gdtSec);
+        c.control = Math.min(100, c.control + (1.6 + (ratio - 1) * 2.5) * gdtSec);
+        if (engg > 0) c.relieved = true;
       } else {
-        // No relief: defenders outnumbered, control drains.
-        const drain = (c.attackersPresent / (c.squad * 8)) * 1.8 * gdtSec;
+        // Outnumbered: control drains proportional to how badly (steeper than before).
+        const drain = (1 - ratio) * 5.0 * gdtSec;
         c.control = Math.max(0, c.control - drain);
+        // squad/QRF still kill a few attackers even while losing
+        const kill = (engg * 0.03 + c.squad * 0.015) * gdtSec;
+        c.attackersPresent = Math.max(0, c.attackersPresent - kill);
+        o.tally.attackersKilled += kill;
       }
       if (c.control <= 0 && !c.overrun) {
         c.overrun = true; c.status = 'overrun';
         c.soldiersKilled = Math.round(c.squad * 0.5);
         logEvent(`✖ ${c.name} OVERRUN — community has fallen`, 'danger');
         showNotification('COMMUNITY OVERRUN', `${c.name} has fallen. Civilians in mortal danger.`, 'danger');
+      } else if (c.status !== 'overrun') {
+        c.status = 'under_attack';
       }
-      // Rampage accrual while overrun AND not yet relieved.
-      if (c.overrun && !c.relieved) {
-        c.civKilled = Math.min(c.maxCiv, c.civKilled + (c.maxCiv / 60) * gdtSec);
-        c.hostages  = Math.min(c.maxHostage, c.hostages + (c.maxHostage / 60) * gdtSec);
+      // === CASUALTIES ACCRUE CONTINUOUSLY while militants are inside (v2.14.1) ===
+      // Killing scales with EXPOSURE = how much of the community is no longer under IDF control.
+      // So even a community you ultimately save takes losses if relief was slow — there is no
+      // longer a "reach it before 0% control = zero deaths" free pass.
+      const exposure = Math.max(0, 1 - c.control / 100);     // 0 at full hold, 1 at collapse
+      if (exposure > 0.02) {
+        // v2.14.1b: ~maxCiv over 80s at full exposure (was 50s) — gives skilled relief time to
+        // arrive before the cap fills, so an A-grade run is achievable but never trivial.
+        const civRate = (c.maxCiv / 80) * (0.35 + 0.65 * exposure) * exposure * gdtSec;
+        c.civKilled = Math.min(c.maxCiv, c.civKilled + civRate);
+        // hostages taken mostly once the community is badly compromised (exposure high)
+        if (exposure > 0.5 && c.maxHostage > 0) {
+          const hostRate = (c.maxHostage / 45) * exposure * gdtSec;
+          c.hostages = Math.min(c.maxHostage, c.hostages + hostRate);
+        }
       }
       if (c.attackersPresent <= 0) {
         c.attackersPresent = 0; c.resolved = true;
         c.status = c.overrun ? 'recaptured' : 'cleared';
-        logEvent(`${c.overrun ? '↻ Recaptured' : '✓ Secured'}: ${c.name}`, 'success');
+        logEvent(`${c.overrun ? '↻ Recaptured' : '✓ Secured'}: ${c.name} (${Math.round(c.civKilled)} killed)`, c.civKilled > c.maxCiv*0.3 ? 'warn' : 'success');
         o.qrf.forEach(u => { if (u.status === 'engaged' && u.target === c.id) { u.status = 'ready'; u.target = null; } });
       }
     }
@@ -18073,12 +18180,130 @@ function tickOctober7Campaign(dt) {
   o.tally.saved = o.communities.filter(c => c.resolved && c.civKilled < c.maxCiv * 0.5).length;
   o.tally.lost  = o.communities.filter(c => c.overrun).length;
 
-  // --- End conditions ---
+  // --- End of the Oct 7 DAY → transition into the war phases (v2.14.2) ---
   const allResolved = o.communities.every(c => c.resolved);
-  if (elapsed >= o.dayDurationMs || (allResolved && elapsedSec > 60)) {
-    o.ended = true;
-    endGame(true);
+  if (o.stage === 'day' && (elapsed >= o.dayDurationMs || (allResolved && elapsedSec > 60))) {
+    oct7StartWarPhases();
+    return;
   }
+}
+
+// Begin the post-Oct-7 war: hand off from the ground-assault day to the phase sequence.
+function oct7StartWarPhases() {
+  const o = state.oct7;
+  o.stage = 'war';
+  o.phaseIdx = -1;
+  o.palDeaths = 1200;
+  o.warSoldiersKilled = 0;
+  logEvent('════ THE GROUND ASSAULT IS OVER — ISRAEL DECLARES WAR ════', 'danger');
+  showNotification('OPERATION IRON SWORDS', 'The October 7 assault is contained. Israel declares war on Hamas. The campaign in Gaza begins — defend against the rocket fire and watch the war unfold through its phases.', 'danger');
+  oct7AdvanceWarPhase();
+}
+
+// Advance to the next war phase (or end the scenario after the last one).
+function oct7AdvanceWarPhase() {
+  const o = state.oct7;
+  o.phaseIdx++;
+  if (o.phaseIdx >= OCT7_WAR_PHASES.length) {
+    o.stage = 'done'; o.ended = true;
+    endGame(true);
+    return;
+  }
+  const ph = OCT7_WAR_PHASES[o.phaseIdx];
+  o.phaseStartGT = state.gameTime;
+  o.phaseBarrageAccum = 0; o.phaseStrikeAccum = 0; o.phaseNewsAccum = 0; o.phaseNewsIdx = 0;
+  o.palDeaths = ph.palStart;
+  // hostage changes (truce releases)
+  if (ph.hostageDelta) {
+    const before = o.tally.hostages;
+    o.tally.hostages = Math.max(0, o.tally.hostages + ph.hostageDelta);
+    o.hostagesReleased += Math.max(0, before - o.tally.hostages);
+  }
+  logEvent(`━━ PHASE ${o.phaseIdx + 1}/${OCT7_WAR_PHASES.length}: ${ph.name} (${ph.dateLabel}) ━━`, ph.truce ? 'success' : 'danger');
+  showNotification(`PHASE ${o.phaseIdx + 1}: ${ph.name}`, ph.dateLabel + ' — ' + ph.desc, ph.truce ? 'success' : 'danger');
+  if (typeof addGazaNews === 'function' && ph.news && ph.news[0]) addGazaNews(ph.news[0], ph.truce ? 'info' : 'bad');
+}
+
+// Per-frame tick while stage==='war' — incoming rockets, IDF strikes on Gaza, casualty climb,
+// scripted news, and phase advance.
+function oct7TickWarPhase(gdt, gdtSec) {
+  const o = state.oct7;
+  const ph = OCT7_WAR_PHASES[o.phaseIdx];
+  if (!ph) return;
+  const pElapsed = state.gameTime - o.phaseStartGT;
+  const pFrac = Math.min(1, pElapsed / ph.durationMs);
+
+  // incoming rocket fire from Gaza (player defends via auto Iron Dome)
+  if (ph.rocket > 0) {
+    o.phaseBarrageAccum += gdt;
+    if (o.phaseBarrageAccum >= 2600 / ph.rocket) { o.phaseBarrageAccum = 0; oct7FireBarrage(ph.rocket); }
+  }
+  // IDF airstrikes / ground ops over Gaza
+  if (ph.strike > 0) {
+    o.phaseStrikeAccum += gdt;
+    if (o.phaseStrikeAccum >= 1500 / ph.strike) { o.phaseStrikeAccum = 0; oct7GazaAirstrike(); }
+  }
+  // cumulative Palestinian death counter climbs across the phase
+  o.palDeaths = Math.round(ph.palStart + (ph.palEnd - ph.palStart) * pFrac);
+  // IDF soldier losses accrue during ground-op phases
+  if (ph.ground) o.warSoldiersKilled += 0.04 * gdtSec;
+  // scripted news beats spread across the phase
+  o.phaseNewsAccum += gdt;
+  if (ph.news && o.phaseNewsIdx < ph.news.length && o.phaseNewsAccum >= ph.durationMs / (ph.news.length + 0.5)) {
+    o.phaseNewsAccum = 0;
+    if (typeof addGazaNews === 'function') addGazaNews(ph.news[o.phaseNewsIdx], ph.truce ? 'info' : 'bad');
+    o.phaseNewsIdx++;
+  }
+  // advance phase
+  if (pElapsed >= ph.durationMs) oct7AdvanceWarPhase();
+}
+
+// Render the war-phase view of the command panel (timeline of phases + live war stats).
+function oct7RenderWarPanel(body) {
+  const o = state.oct7;
+  const ph = OCT7_WAR_PHASES[o.phaseIdx];
+  const pFrac = ph ? Math.min(1, (state.gameTime - o.phaseStartGT) / ph.durationMs) : 0;
+  const il = o.tally.civKilled + o.tally.soldiersKilled + Math.round(o.warSoldiersKilled);
+
+  // phase timeline rows
+  let rows = '';
+  OCT7_WAR_PHASES.forEach((p, i) => {
+    const done = i < o.phaseIdx, cur = i === o.phaseIdx;
+    const col = done ? '#52be80' : cur ? (p.truce ? '#7fd6a0' : '#ff6b5e') : '#566';
+    const mark = done ? '✔' : cur ? '▶' : '○';
+    const barW = cur ? Math.round(pFrac * 100) : (done ? 100 : 0);
+    rows +=
+      '<div style="padding:4px 0;border-top:1px solid #1e2630;'+(cur?'background:rgba(255,107,94,0.06);':'')+'">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;">' +
+          '<span style="color:'+col+';font-size:10px;'+(cur?'font-weight:bold;':'')+'">'+mark+' '+p.name+'</span>' +
+          '<span style="color:#667;font-size:8px;">'+p.dateLabel+'</span>' +
+        '</div>' +
+        (cur ? '<div style="height:3px;background:#1a1f28;border-radius:2px;margin-top:3px;overflow:hidden;"><span style="display:block;width:'+barW+'%;height:100%;background:'+col+';"></span></div>' : '') +
+      '</div>';
+  });
+
+  const rocketLbl = ph ? (ph.rocket >= 0.6 ? 'HEAVY' : ph.rocket >= 0.25 ? 'MODERATE' : ph.rocket > 0.02 ? 'SPORADIC' : 'CEASEFIRE') : '—';
+  const rocketCol = ph ? (ph.rocket >= 0.6 ? '#ff5544' : ph.rocket >= 0.25 ? '#ffaa44' : '#5dade2') : '#566';
+  const fmt = n => n >= 1000 ? (n/1000).toFixed(n>=10000?0:1)+'K' : String(Math.round(n));
+
+  body.innerHTML =
+    '<div style="padding:9px 11px;">' +
+      '<div style="font-size:12px;color:#888;letter-spacing:1px;">OPERATION IRON SWORDS · THE GAZA WAR</div>' +
+      '<div style="font-size:15px;font-weight:bold;color:#ff6b5e;margin:3px 0 2px;">'+(ph?ph.name:'—')+'</div>' +
+      '<div style="font-size:10px;color:#9ab;margin-bottom:6px;">'+(ph?ph.dateLabel:'')+'</div>' +
+      '<div style="font-size:10px;color:#bcd;line-height:1.4;margin-bottom:8px;">'+(ph?ph.desc:'')+'</div>' +
+      // live stat tiles
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:8px;">' +
+        '<div style="background:rgba(255,85,68,0.10);border-radius:5px;padding:5px 7px;"><div style="font-size:9px;color:#9aa;">ROCKET FIRE</div><div style="font-size:13px;font-weight:bold;color:'+rocketCol+';">'+rocketLbl+'</div></div>' +
+        '<div style="background:rgba(255,206,94,0.10);border-radius:5px;padding:5px 7px;"><div style="font-size:9px;color:#9aa;">HOSTAGES HELD</div><div style="font-size:13px;font-weight:bold;color:#ffce5e;">'+o.tally.hostages+'</div></div>' +
+        '<div style="background:rgba(93,173,226,0.10);border-radius:5px;padding:5px 7px;"><div style="font-size:9px;color:#9aa;">ISRAELI KILLED</div><div style="font-size:13px;font-weight:bold;color:#9cd;">'+fmt(il)+'</div></div>' +
+        '<div style="background:rgba(120,120,130,0.10);border-radius:5px;padding:5px 7px;"><div style="font-size:9px;color:#9aa;">PALESTINIAN KILLED</div><div style="font-size:13px;font-weight:bold;color:#caa;">'+fmt(o.palDeaths)+'</div></div>' +
+      '</div>' +
+      (o.hostagesReleased ? '<div style="font-size:10px;color:#7fd6a0;margin-bottom:6px;">★ '+o.hostagesReleased+' hostages released in deals</div>' : '') +
+      '<div style="color:#5dade2;font-weight:bold;font-size:10px;margin:4px 0 2px;letter-spacing:.5px;">WAR TIMELINE</div>' +
+      rows +
+      '<div style="font-size:9px;color:#677;margin-top:8px;line-height:1.4;">Iron Dome is intercepting automatically. These figures reflect the real war — presented to honour its toll, not as a score.</div>' +
+    '</div>';
 }
 
 // Compact "OCT 7 · 09:42"-style clock interpolated across the compressed day.
@@ -18228,6 +18453,9 @@ function updateOct7Panel() {
   if (pcs['oct7-panel'] && pcs['oct7-panel'].minimized) return;
   const body = el.querySelector('.panel-body') || el;
 
+  // === WAR-PHASE PANEL VIEW (post Oct 7, v2.14.2) ===
+  if (o.stage === 'war') { oct7RenderWarPanel(body); return; }
+
   const frac = Math.min(1, (state.gameTime - o.startGT) / o.dayDurationMs);
   const totalKilled = o.tally.civKilled + o.tally.soldiersKilled;
   const readyN = o.qrf.filter(u => u.status === 'ready').length;
@@ -18351,14 +18579,32 @@ function updateOct7Panel() {
 function oct7AutoTriage() {
   const o = state.oct7; if (!o || o.ended) return;
   let dispatched = 0, guard = 0;
+  // v2.14.1: smarter — CONCENTRATE force. For each contested community, estimate the QRF power
+  // already inbound/engaged; if the local squad + that power still loses to the attacker force,
+  // keep sending more units to it. Prioritise the most savory targets: highest casualty-cap at
+  // risk, closest to falling. This makes auto-triage actually win the big fights (Be'eri etc.).
   while (o.qrf.some(u => u.status === 'ready') && guard++ < 40) {
-    // pick the unattended, unresolved community with the lowest control (closest to falling)
-    const needy = o.communities
-      .filter(c => !c.resolved && c.status !== 'secure' &&
-        !o.qrf.some(u => (u.status==='enroute'||u.status==='engaged') && u.target===c.id))
-      .sort((a,b)=> a.control - b.control);
-    if (!needy.length) break;
-    oct7Dispatch(needy[0].id);
+    const contested = o.communities.filter(c => !c.resolved && c.status !== 'secure');
+    if (!contested.length) break;
+    // score = how badly this community still needs help (deficit) weighted by lives at stake
+    let bestC = null, bestScore = -1;
+    contested.forEach(c => {
+      let inbound = 0;
+      o.qrf.forEach(u => { if ((u.status==='enroute'||u.status==='engaged') && u.target===c.id) inbound += u.power; });
+      const deficit = c.attackersPresent - (c.squad * 1.1 + inbound);   // >0 = still losing
+      if (deficit <= 0) return;                                          // already winnable, skip
+      const stake = (c.maxCiv + c.maxHostage * 3) * (1 + (100 - c.control) / 100);
+      const score = stake * (1 + deficit / 30);
+      if (score > bestScore) { bestScore = score; bestC = c; }
+    });
+    if (!bestC) {
+      // every contested community is already winnable — top up the lowest-control one
+      const lc = contested.filter(c => !o.qrf.some(u => (u.status==='enroute'||u.status==='engaged') && u.target===c.id))
+                          .sort((a,b)=>a.control-b.control)[0];
+      if (!lc) break;
+      oct7Dispatch(lc.id); dispatched++; continue;
+    }
+    oct7Dispatch(bestC.id);
     dispatched++;
   }
   if (!dispatched && typeof showNotification === 'function') {
@@ -18429,7 +18675,20 @@ function endOctober7Campaign(victory) {
         '<span style="color:#9aa;">Communities saved</span><span style="color:#7fd6a0;font-weight:bold;">'+saved+' / '+total+'</span>' +
         '<span style="color:#9aa;">Attackers neutralized</span><span style="color:#ddd;">'+Math.round(o.tally.attackersKilled).toLocaleString()+'</span>' +
       '</div>' +
-      '<div style="font-size:11px;color:#778;margin-top:16px;line-height:1.5;">On the real October 7, ~1,195 people were killed and 251 taken hostage across the Gaza envelope before the IDF regained control — the deadliest day for Jews since the Holocaust. This scenario honours that day by making the cost real.</div>' +
+      // === WAR-PHASE SUMMARY (v2.14.2) — shown if the war was fought past Oct 7 ===
+      ((o.stage === 'war' || o.stage === 'done') ?
+        '<div style="margin-top:14px;border-top:1px solid '+outcomeColor+';padding-top:12px;">' +
+          '<div style="font-size:12px;color:#ff9b7a;font-weight:bold;letter-spacing:1px;margin-bottom:8px;">THE WAR THAT FOLLOWED · OPERATION IRON SWORDS</div>' +
+          '<div style="display:grid;grid-template-columns:auto 1fr;gap:6px 16px;font-size:13px;">' +
+            '<span style="color:#9aa;">Phases fought</span><span style="color:#ddd;">'+Math.min(o.phaseIdx+1,OCT7_WAR_PHASES.length)+' / '+OCT7_WAR_PHASES.length+' (through Jan 2025)</span>' +
+            '<span style="color:#9aa;">Palestinian deaths</span><span style="color:#caa;font-weight:bold;">~'+o.palDeaths.toLocaleString()+'</span>' +
+            '<span style="color:#9aa;">IDF soldiers lost (ground op)</span><span style="color:#9cd;">~'+Math.round(o.warSoldiersKilled).toLocaleString()+'</span>' +
+            '<span style="color:#9aa;">Hostages released in deals</span><span style="color:#7fd6a0;">'+o.hostagesReleased+'</span>' +
+            '<span style="color:#9aa;">Hostages still held</span><span style="color:#ffce5e;">'+o.tally.hostages+'</span>' +
+          '</div>' +
+        '</div>'
+      : '') +
+      '<div style="font-size:11px;color:#778;margin-top:16px;line-height:1.5;">On the real October 7, ~1,195 people were killed and 251 taken hostage across the Gaza envelope — the deadliest day for Jews since the Holocaust. The war that followed killed tens of thousands in Gaza over 15 months. This scenario presents these real figures to honour the toll, not as a score.</div>' +
       '<button onclick="location.reload()" style="margin-top:18px;width:100%;background:'+rcol+';color:#111;border:none;border-radius:6px;padding:11px;font-family:monospace;font-weight:bold;font-size:13px;cursor:pointer;letter-spacing:1px;">RETURN TO MENU</button>' +
     '</div>';
 }
