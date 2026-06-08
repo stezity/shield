@@ -109,16 +109,58 @@ body::after {
 .scenario-difficulty { margin-top: 10px; font-size: 10px; color: var(--text-dim); display: flex; justify-content: space-between; }
 .scenario-difficulty .stars { color: var(--amber); letter-spacing: 2px; }
 
+/* === v2.19.0 MAP-FIRST LAYOUT ===
+   The map fills the whole screen. The top bar floats over it. The four data panels
+   (threats / batteries / log / stats) are floating glass overlays docked to the screen
+   edges — each can be hidden via the bottom dock so newcomers see a clean map by default. */
 #game-container {
-  display: grid;
-  grid-template-rows: 64px 1fr 200px;
-  grid-template-columns: 290px 1fr 290px;
-  height: 100vh; gap: 6px; padding: 6px;
+  position: relative;
+  height: 100vh; width: 100vw;
+  overflow: hidden;
 }
-#top-bar { grid-column: 1 / 4; }
-#left-panel { grid-row: 2; grid-column: 1; display: flex; flex-direction: column; }
-#center-area { grid-row: 2; grid-column: 2; position: relative; overflow: hidden; }
-#right-panel { grid-row: 2; grid-column: 3; display: flex; flex-direction: column; }
+#top-bar {
+  position: absolute; top: 8px; left: 8px; right: 8px; z-index: 60;
+  height: 56px;
+  background: rgba(8,17,30,0.82); backdrop-filter: blur(6px);
+  border: 1px solid var(--border); border-radius: 12px;
+  box-shadow: 0 4px 18px rgba(0,0,0,0.5);
+}
+#center-area { position: absolute; inset: 0; z-index: 1; }
+/* data panels → floating glassy overlays */
+#left-panel, #right-panel, #event-log, #stats-panel {
+  position: absolute; z-index: 40;
+  background: rgba(8,17,30,0.80); backdrop-filter: blur(7px);
+  border: 1px solid var(--border); border-radius: 12px;
+  box-shadow: 0 6px 22px rgba(0,0,0,0.55);
+  display: flex; flex-direction: column;
+  transition: opacity 0.18s, transform 0.18s;
+}
+#left-panel  { top: 74px;  left: 8px;  width: 270px; max-height: calc(50vh - 40px); }
+#right-panel { top: 74px;  right: 8px; width: 270px; max-height: calc(62vh - 40px); }
+#event-log   { bottom: 56px; left: 8px;  width: 380px; height: 188px; }
+#stats-panel { bottom: 56px; right: 8px; width: 290px; max-height: 52vh; }
+/* hidden state (toggled from the dock) */
+.panel-hidden { opacity: 0; transform: translateY(8px); pointer-events: none; }
+#bottom-bar { display: contents; }   /* its two children are positioned individually above */
+
+/* === BOTTOM DOCK — clean show/hide chips for the data panels === */
+#panel-dock {
+  position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%);
+  z-index: 70; display: flex; gap: 6px;
+  background: rgba(8,17,30,0.85); backdrop-filter: blur(6px);
+  border: 1px solid var(--border); border-radius: 30px;
+  padding: 5px 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+}
+.dock-chip {
+  display: flex; align-items: center; gap: 5px;
+  background: transparent; border: 1px solid transparent; border-radius: 20px;
+  color: var(--text-dim); padding: 5px 12px;
+  font-family: inherit; font-size: 11px; letter-spacing: 1px; cursor: pointer;
+  transition: all 0.15s; text-transform: uppercase; white-space: nowrap;
+}
+.dock-chip:hover { color: var(--text); background: rgba(255,255,255,0.04); }
+.dock-chip.on { color: var(--accent); border-color: var(--accent-dim); background: rgba(0,212,255,0.10); }
+.dock-chip .ico { font-size: 13px; }
 #bottom-bar { grid-column: 1 / 4; grid-row: 3; display: grid; grid-template-columns: 1fr 320px; gap: 6px; }
 
 .panel {
@@ -254,22 +296,24 @@ body::after {
 .map-corner.br { bottom: 8px; right: 12px; text-align: right; max-width: 240px; }
 
 .map-zoom {
-  position: absolute; top: 50%; right: 12px; transform: translateY(-50%);
-  display: flex; flex-direction: column; gap: 2px; z-index: 6;
+  position: absolute; top: 72px; left: 50%; transform: translateX(-50%);
+  display: flex; flex-direction: row; gap: 3px; z-index: 30;
+  background: rgba(8,17,30,0.7); backdrop-filter: blur(4px);
+  border-radius: 8px; padding: 3px; align-items: center;
 }
 .map-zoom button {
-  width: 32px; height: 32px;
+  width: 28px; height: 28px; border-radius: 6px;
   background: rgba(8,17,30,0.9); border: 1px solid var(--border);
-  color: var(--accent); font-size: 18px; font-weight: bold;
+  color: var(--accent); font-size: 16px; font-weight: bold;
   cursor: pointer; font-family: inherit; line-height: 1;
 }
 .map-zoom button:hover { background: rgba(0,212,255,0.2); border-color: var(--accent); }
 .map-zoom button:active { transform: scale(0.95); }
 
 #layers-panel {
-  position: absolute; top: 50%; right: 56px; transform: translateY(-50%);
+  position: absolute; top: 108px; left: 50%; transform: translateX(-50%);
   background: rgba(8,17,30,0.96); border: 1px solid var(--accent);
-  padding: 10px 12px; z-index: 7; min-width: 180px;
+  padding: 10px 12px; z-index: 31; min-width: 180px; border-radius: 10px;
   box-shadow: 0 4px 14px rgba(0,0,0,0.6);
   font-family: inherit;
 }
@@ -294,16 +338,17 @@ body::after {
 }
 #layers-panel .layers-actions button:hover { background: rgba(0,212,255,0.2); border-color: var(--accent); }
 .map-zoom .zoom-level {
-  background: rgba(8,17,30,0.9); border: 1px solid var(--border);
-  color: var(--text-dim); font-size: 10px; padding: 4px 0;
-  text-align: center; min-width: 32px;
+  background: rgba(8,17,30,0.9); border: 1px solid var(--border); border-radius: 6px;
+  color: var(--text-dim); font-size: 10px; padding: 0 6px; height: 28px;
+  display: flex; align-items: center; text-align: center; min-width: 28px;
 }
 .map-zoom .quick {
-  background: rgba(8,17,30,0.9); border: 1px solid var(--border);
-  color: var(--text); font-size: 9px; padding: 4px 0;
-  text-align: center; cursor: pointer; letter-spacing: 1px;
+  background: rgba(8,17,30,0.9); border: 1px solid var(--border); border-radius: 6px;
+  color: var(--text); font-size: 9px; padding: 0 8px; height: 28px;
+  display: flex; align-items: center; cursor: pointer; letter-spacing: 1px;
 }
 .map-zoom .quick:hover { color: var(--accent); border-color: var(--accent); }
+.map-zoom .quick[id="layers-toggle"] { margin-top: 0 !important; }
 
 #tooltip {
   position: absolute; background: rgba(8, 17, 30, 0.96);
@@ -1216,10 +1261,8 @@ body.targeting-cursor #map-canvas {
   <div id="center-area">
     <div id="map-wrapper">
       <canvas id="game-canvas"></canvas>
-      <div class="map-corner tl">ISRAEL · TACTICAL MAP</div>
-      <div class="map-corner tr">RADAR: ONLINE · SAT: NOMINAL<br>SCROLL — ZOOM · DRAG — PAN</div>
-      <div class="map-corner bl">▲ AIR DEFENSE · ● CITIES · ◯ COVERAGE</div>
-      <div class="map-corner br">© OpenStreetMap contributors · © CARTO</div>
+      <!-- v2.19.0: decluttered map corners — only a subtle attribution remains (top bar floats above) -->
+      <div class="map-corner br">scroll = zoom · drag = pan &nbsp;·&nbsp; © OpenStreetMap / CARTO</div>
       <div class="map-zoom">
         <button id="zoom-in" title="Zoom in">+</button>
         <div class="zoom-level" id="zoom-level">8</div>
@@ -1486,6 +1529,14 @@ body.targeting-cursor #map-canvas {
         </div>
       </div>
     </div>
+  </div>
+
+  <!-- ===== BOTTOM DOCK — show/hide the data panels (v2.19.0) ===== -->
+  <div id="panel-dock">
+    <button class="dock-chip on" data-panel="left-panel"  title="Incoming threats"><span class="ico">🎯</span>Threats</button>
+    <button class="dock-chip idf-only" data-panel="right-panel" title="Your air-defence batteries"><span class="ico">🛡</span>Defences</button>
+    <button class="dock-chip" data-panel="event-log"   title="Operations log"><span class="ico">📜</span>Log</button>
+    <button class="dock-chip" data-panel="stats-panel" title="Live statistics"><span class="ico">📊</span>Stats</button>
   </div>
 
 </div>
@@ -1920,6 +1971,20 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.19.0 — FULL MAP-FIRST REDESIGN (user: 'я просил полный редизайн и упрощение интерфейса').
+//            Replaced the rigid 3-column grid (map boxed in by 4 heavy data panels) with a
+//            map-first layout: the tactical map now fills the ENTIRE screen, the top bar floats
+//            over it as a rounded glass strip, and the four data panels (Threats / Defences /
+//            Log / Stats) became floating, blurred glass overlays docked to the screen corners.
+//            New BOTTOM DOCK with four labelled chips (🎯 Threats · 🛡 Defences · 📜 Log ·
+//            📊 Stats) toggles each panel — default CLEAN VIEW shows only Threats + Defences so
+//            a newcomer sees an uncluttered map. Dock stays in sync with each panel's existing
+//            ×/_ chrome (close → chip off; chip on → reopen). Map corners decluttered to a single
+//            subtle attribution; zoom controls moved to a compact top-centre pill. game-container
+//            switched from display:grid to block (startScenario now sets block). No gameplay
+//            logic touched. Verified via computed-CSS + functional tests (viewport-independent):
+//            full-bleed map, floating panels at correct edges, dock toggles + chrome-sync work,
+//            clean default view, zero console errors.
 //   2.18.0 — UI SIMPLIFICATION + redesign for newcomers (user: 'упрости/переделай интерфейс,
 //            новичку очень сложно, очень много лишних кнопок, улучши дизайн'). (1) TOP BAR
 //            decluttered: was 11+ loose buttons → now 7 grouped essentials (Pause, a segmented
@@ -2353,7 +2418,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.18.0';
+const GAME_VERSION = '2.19.0';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -16182,6 +16247,9 @@ function closePanel(panelId) {
   _panelChromeState[panelId].closed = true;
   const panel = document.getElementById(panelId);
   if (panel) panel.style.display = 'none';
+  // v2.19.0: keep the bottom dock chip in sync when a panel is closed via its × button
+  const chip = document.querySelector('#panel-dock .dock-chip[data-panel="' + panelId + '"]');
+  if (chip) chip.classList.remove('on');
   updatePanelTray();
 }
 function reopenPanel(panelId) {
@@ -20068,12 +20136,14 @@ function startScenario(name) {
   document.getElementById('start-menu').classList.add('hidden');
   document.getElementById('scenario-menu').classList.add('hidden');
   document.getElementById('endgame-screen').classList.add('hidden');
-  document.getElementById('game-container').style.display = 'grid';
+  document.getElementById('game-container').style.display = 'block';   // v2.19.0: map-first layout (was grid)
 
   document.getElementById('btn-pause').textContent = '⏸ PAUSE';
   document.getElementById('btn-speed').textContent = '× 1';
   document.getElementById('btn-mode-auto').classList.add('active');
   document.getElementById('btn-mode-manual').classList.remove('active');
+  // v2.19.0: apply the clean default dock view (Threats + Defences shown, Log + Stats hidden)
+  try { if (typeof window._applyDockDefault === 'function') window._applyDockDefault(); } catch (e) {}
   // v2.18.0: show the How-to-Play overlay automatically the first time the player ever starts a game
   try {
     if (!localStorage.getItem('shield_seen_help') && typeof window._openHelp === 'function') {
@@ -20290,6 +20360,45 @@ document.addEventListener('DOMContentLoaded', () => {
   if (helpClose) helpClose.onclick = () => { audio.click(); closeHelp(); };
   // expose so startScenario can auto-show on the player's first game
   window._openHelp = openHelp;
+
+  // === v2.19.0: BOTTOM DOCK — toggle the floating data panels (map-first clean view) ===
+  const dock = document.getElementById('panel-dock');
+  if (dock) {
+    const applyDock = () => {
+      dock.querySelectorAll('.dock-chip').forEach(chip => {
+        const id = chip.getAttribute('data-panel');
+        const panel = document.getElementById(id);
+        if (!panel) return;
+        const on = chip.classList.contains('on');
+        panel.classList.toggle('panel-hidden', !on);
+        if (on) { panel.style.display = ''; if (_panelChromeState[id]) _panelChromeState[id].closed = false; }
+      });
+    };
+    dock.querySelectorAll('.dock-chip').forEach(chip => {
+      chip.addEventListener('click', () => {
+        audio.click();
+        chip.classList.toggle('on');
+        const id = chip.getAttribute('data-panel');
+        const panel = document.getElementById(id);
+        const on = chip.classList.contains('on');
+        if (panel) {
+          panel.classList.toggle('panel-hidden', !on);
+          if (on) panel.style.display = '';   // clear any inline display:none from the × chrome
+          // reopening via dock should un-close + un-minimize the chrome state
+          if (_panelChromeState[id]) { _panelChromeState[id].closed = false; if (on) _panelChromeState[id].minimized = false; }
+        }
+      });
+    });
+    // default clean view: Threats + Defences visible, Log + Stats hidden
+    window._applyDockDefault = () => {
+      const def = { 'left-panel': true, 'right-panel': true, 'event-log': false, 'stats-panel': false };
+      dock.querySelectorAll('.dock-chip').forEach(chip => {
+        const id = chip.getAttribute('data-panel');
+        chip.classList.toggle('on', !!def[id]);
+      });
+      applyDock();
+    };
+  }
 
   // Игровые кнопки
   document.getElementById('btn-pause').onclick = () => {
