@@ -1837,6 +1837,23 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.16.0 — NEW SCENARIO: HEZBOLLAH WAR · 2024 (user: 'сделай новый сценарий Hezbollah War'
+//            про Третью Ливанскую войну). A northern-front, phase-driven air-defence campaign
+//            (en.wikipedia.org/wiki/2024_Lebanon_war), built on the same phase engine as the
+//            Oct-7 war. 7 historical phases: The Support Front (Oct 2023) → Majdal Shams & the
+//            Shukr strike → Operation Grim Beeper (the pager/walkie-talkie attacks) → Operation
+//            Northern Arrows + Nasrallah killed → Ground Invasion + Iran's ~180-missile salvo →
+//            Deep Strikes & the Binyamina drone → Final Barrages → Nov-27 ceasefire. Player
+//            auto-defends the north with the full IDF battery grid; rocket/missile/drone fire
+//            escalates by weapon tier (short border rockets → medium → heavy Fadi on Haifa →
+//            Iran ballistic boss-salvo on Tel Aviv/airbases). Map shows the IDF ground front
+//            advancing to the Litani (blue) + Israeli belt under fire (red) + Dahieh HQ strike.
+//            Climbing casualty counters (Lebanese 60→3,800, Israeli 0→127). New command-panel
+//            WAR TIMELINE, themed HUD, endgame graded on interception rate. New data
+//            HEZ_WAR_PHASES / HEZ_TARGETS / HEZ_LEBANON_SITES; functions initHezbollahWar /
+//            tickHezbollahWar / hezFireBarrage / hezIranSalvo / hezLebanonStrike / hezAdvancePhase
+//            / drawHezWarMap / updateHezPanel / endHezbollahWar. Browser + screenshot verified:
+//            all 7 phases, Nasrallah + Iran salvo + Binyamina drone fire, no errors.
 //   2.15.0 — TERRITORIAL CONTROL SHADING on the map (user: 'сделай показ захвата именно
 //            видимостью территорий: 7 октября видно как Хамас продвигается аж до Офакима, и
 //            после в ноябре ЦАХАЛ заходит в Газу'). New drawOct7Control(): soft coloured
@@ -2199,7 +2216,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.15.0';
+const GAME_VERSION = '2.16.0';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -2958,6 +2975,18 @@ const SCENARIOS = {
     waves: [{ delay: 999999, threats: [] }],   // dynamic — tickOctober7Campaign drives everything
     campaign: 'october7',
     cardInfo: 'Single day · ground assault',
+    sandbox: false,
+    requiredSafety: 0
+  },
+
+  // === HEZBOLLAH WAR — 2024 Lebanon war / "Third Lebanon War" (NEW v2.16.0) ===
+  hezbollah: {
+    name: 'Hezbollah War · 2024',
+    description: 'The northern front. From the Oct 2023 border skirmishes through the Sept 2024 explosion: the pager attack, Operation Northern Arrows, the killing of Nasrallah, the ground invasion of south Lebanon and Iran\'s ballistic salvos — to the Nov 2024 ceasefire. Defend Israel\'s north (Kiryat Shmona → Haifa → Tel Aviv) with Iron Dome, David\'s Sling and Arrow as the war escalates through its phases.',
+    difficulty: 5,
+    waves: [{ delay: 999999, threats: [] }],   // dynamic — tickHezbollahWar drives everything
+    campaign: 'hezbollah',
+    cardInfo: '2024 · northern front · phases',
     sandbox: false,
     requiredSafety: 0
   },
@@ -5750,6 +5779,7 @@ function render() {
   drawFighterChases();
   drawGazaGroundInvasion();
   if (state.oct7) { try { drawOct7Map(); } catch (e) {} }   // Oct 7: militant advance + IDF bases + QRF
+  if (state.hezWar) { try { drawHezWarMap(); } catch (e) {} }   // Hezbollah War: control shading + Lebanon front
   if (L.particles !== false) drawPings();
   drawExplosions();
   if (L.particles !== false) drawParticles();
@@ -13026,6 +13056,12 @@ function updateScenario(dt) {
     return;
   }
 
+  // === HEZBOLLAH WAR — northern-front phase campaign tick ===
+  if (state.scenario.campaign === 'hezbollah') {
+    tickHezbollahWar(dt);
+    return;
+  }
+
   // === Sandbox · Defend — wave-intensity campaign tick ===
   if (state.scenarioId === 'sandbox') {
     tickSandboxDefender(dt);
@@ -16615,6 +16651,8 @@ function checkEndConditions() {
   if (state.scenario && state.scenario.campaign === 'gaza') return;
   // === October 7 — end conditions handled inside tickOctober7Campaign (day elapsed / all resolved) ===
   if (state.scenario && state.scenario.campaign === 'october7') return;
+  // === Hezbollah War — end conditions handled inside tickHezbollahWar (phase sequence) ===
+  if (state.scenario && state.scenario.campaign === 'hezbollah') return;
   // === Resistance Axis non-sandbox — flip the conditions (attacker wins on Israeli collapse) ===
   if (state.playAs === 'attacker') {
     if (state.stats.civilianSafety <= 5) { endGame(true); return; }
@@ -16639,6 +16677,10 @@ function endGame(victory) {
   // === OCTOBER 7 — special end-game summary (vs historical toll) ===
   if (state.oct7 && state.scenario && state.scenario.campaign === 'october7') {
     return endOctober7Campaign(victory);
+  }
+  // === HEZBOLLAH WAR — special end-game summary ===
+  if (state.hezWar && state.scenario && state.scenario.campaign === 'hezbollah') {
+    return endHezbollahWar(victory);
   }
   // === ATTACKER (Resistance Axis) — special end-game summary ===
   if (state.playAs === 'attacker' && state.attacker && state.attacker.factionId) {
@@ -17007,6 +17049,38 @@ function updateUI() {
   } else if (state.sandbox && state.sandbox.era && state.sandbox.eraId === '2025') {
     opStr = '◇ DEFEND ISRAEL · 2025';
   }
+  // === HEZBOLLAH WAR — themed HUD bar (NEW v2.16.0) ===
+  if (state.hezWar && state.scenario && state.scenario.campaign === 'hezbollah') {
+    const w = state.hezWar;
+    const ph = HEZ_WAR_PHASES[w.phaseIdx];
+    const setItemH = (valId, labelText, valText, valColor) => {
+      const v = document.getElementById(valId); if (!v) return;
+      v.textContent = valText; if (valColor) v.style.color = valColor;
+      const lbl = v.parentElement && v.parentElement.querySelector('.label');
+      if (lbl) lbl.textContent = labelText;
+    };
+    document.getElementById('time-display').textContent = ph ? ph.dateLabel : '—';
+    document.getElementById('op-name').textContent = 'LEBANON WAR · ' + (ph ? ph.name.toUpperCase() : 'NORTHERN FRONT');
+    const fmtK = n => n >= 1000 ? (n/1000).toFixed(n>=10000?0:1)+'K' : String(Math.round(n));
+    setItemH('wave-display',    'PHASE:',     (w.phaseIdx+1) + '/' + HEZ_WAR_PHASES.length, '#ffb000');
+    setItemH('active-threats',  'IL KILLED:', fmtK(w.ilKilled), '#9cd');
+    setItemH('intercept-count', 'INTCPT:',    fmtK(state.stats.intercepted), '#00d4ff');
+    setItemH('safety',          'LEB KILLED:', fmtK(w.lebDeaths), '#caa');
+    const mnElH = document.getElementById('money-display');
+    if (mnElH && mnElH.parentElement) mnElH.parentElement.style.display = 'none';
+    // threat level from live incoming
+    const activeH = state.threats.filter(t => !t.intercepted && !t.impacted).length;
+    let lvlH='low', txtH='LOW';
+    if (activeH > 30) { lvlH='critical'; txtH='CRITICAL'; }
+    else if (activeH > 15) { lvlH='high'; txtH='HIGH'; }
+    else if (activeH > 5)  { lvlH='med'; txtH='ELEVATED'; }
+    const tlH=document.getElementById('threat-level');
+    if (tlH) { tlH.className='threat-level '+lvlH; tlH.textContent='LEVEL: '+txtH; }
+    document.getElementById('threats-count').textContent = activeH;
+    document.getElementById('battery-count').textContent = state.batteries.filter(b => b.ammo > 0).length;
+    document.getElementById('zoom-level').textContent = camera.zoom.toFixed(1);
+    _skipStandardHUD = true;
+  }
   // === OCTOBER 7 — repurpose the HUD bar with scenario-relevant fields (NEW v2.12.5) ===
   // Instead of WAVE/SAFETY/$ (meaningless here) show the same clock as the command panel,
   // communities resolved, killed and hostages — so the top bar matches the menu.
@@ -17258,6 +17332,8 @@ function updateStatsPanel() {
   updateSandboxHud();
   // === October 7 · Southern Command panel === (guarded — never break the shared UI loop)
   try { updateOct7Panel(); } catch (e) {}
+  // === Hezbollah War · Northern Command panel ===
+  try { updateHezPanel(); } catch (e) {}
   // === World Modifiers HUD (always visible during active scenario) ===
   updateWorldHud();
   // === New stats: panic, evacuations, intel, cyber ===
@@ -17872,6 +17948,74 @@ const OCT7_WAR_PHASES = [
     desc:'Grinding operations give way to a deal under Trump-transition pressure. A 42-day Phase-1 ceasefire takes effect Jan 19, 2025; 33 hostages to be freed for ~1,900 prisoners.',
     news:['Ceasefire deal reached under US pressure','PHASE 1 CEASEFIRE in effect — 33 hostages to be freed for ~1,900 prisoners','After 15 months, the guns fall silent across Gaza'] }
 ];
+
+// ===========================================================================
+// HEZBOLLAH WAR · 2024 (the "Third Lebanon War")  — DATA TABLES (v2.16.0)
+// Phases from the Oct-2023 border skirmishes through the Nov-27-2024 ceasefire
+// (en.wikipedia.org/wiki/2024_Lebanon_war). The player defends Israel's north
+// with auto Iron Dome / David's Sling / Arrow while the war escalates.
+//   rocket = incoming barrage intensity 0..1 ; tier = which weapon tiers fire ;
+//   strike = IDF airstrike rate on Lebanon ; front = IDF ground front 0..1
+//   (0 = at border, 1 = at the Litani) ; lebStart/End = cumulative Lebanese deaths.
+// ===========================================================================
+const HEZ_WAR_PHASES = [
+  { id:'support', name:'The Support Front', dateLabel:'Oct 8 2023 – Jul 2024',
+    durationMs:60000, rocket:0.22, tier:'short', strike:0.4, front:0, ground:false,
+    lebStart:60, lebEnd:560, ilStart:0, ilEnd:33,
+    desc:'A day after Oct 7, Hezbollah opens a "support front" for Gaza — daily rockets, ATGMs and drones on the border belt. ~60,000 Israelis evacuate the north.',
+    news:['Hezbollah opens a "support front" — rockets on the Galilee border belt','Kiryat Shmona, Metula and Shtula under daily fire; 60,000 evacuated','Tit-for-tat: IDF artillery and airstrikes on south Lebanon launch sites'] },
+  { id:'majdal', name:'Majdal Shams & the Shukr Strike', dateLabel:'Jul 27 – Sep 16, 2024',
+    durationMs:45000, rocket:0.38, tier:'medium', strike:0.6, front:0, ground:false,
+    lebStart:560, lebEnd:900, ilStart:33, ilEnd:52,
+    desc:'A rocket hits a football pitch in Majdal Shams, killing 12 children. Israel assassinates senior commander Fuad Shukr in Beirut. The slide to open war begins.',
+    news:['Rocket kills 12 children on a football pitch in Majdal Shams','Israel kills senior Hezbollah commander Fuad Shukr in Beirut','Cross-border exchanges intensify across the whole front'] },
+  { id:'pager', name:'Operation Grim Beeper · Device Attacks', dateLabel:'Sep 17–18, 2024',
+    durationMs:32000, rocket:0.3, tier:'medium', strike:0.7, front:0, ground:false,
+    lebStart:900, lebEnd:1000, ilStart:52, ilEnd:53,
+    desc:'Israel detonates thousands of booby-trapped Hezbollah pagers (Sep 17) and walkie-talkies (Sep 18) across Lebanon — ~42 killed, ~3,500 wounded, ~1,500 fighters out of action.',
+    news:['Thousands of Hezbollah pagers explode simultaneously across Lebanon','A day later, hundreds of walkie-talkies detonate — ~3,500 wounded','Hezbollah reels — command and communications shattered'] },
+  { id:'arrows', name:'Operation Northern Arrows · Nasrallah Killed', dateLabel:'Sep 23–30, 2024',
+    durationMs:55000, rocket:0.7, tier:'heavy', strike:1.0, front:0.1, ground:false,
+    lebStart:1000, lebEnd:1700, ilStart:53, ilEnd:55,
+    desc:'Israel launches Operation Northern Arrows — massive strikes on Hezbollah\'s missile stores. On Sep 27, bunker-busters on the Dahieh HQ kill Hassan Nasrallah. Hezbollah fires 100+ rockets a day in reply.',
+    news:['Operation Northern Arrows: 800+ killed in Lebanon in the first week','★ HASSAN NASRALLAH killed in a bunker-buster strike on Dahieh, Beirut','Hezbollah retaliates with heavy rocket barrages on Haifa and the Galilee'] },
+  { id:'ground', name:'Ground Invasion + Iran\'s Missiles', dateLabel:'Oct 1 – mid-Oct 2024',
+    durationMs:60000, rocket:0.9, tier:'heavy', strike:1.0, front:0.4, ground:true,
+    lebStart:1700, lebEnd:2300, ilStart:55, ilEnd:70, iranSalvo:true,
+    desc:'IDF ground forces cross into south Lebanon. The same day, Iran fires ~180 ballistic missiles at Israel (True Promise II). An ambush at Odaisseh kills 8 soldiers — the deadliest day of the ground war.',
+    news:['GROUND INVASION: IDF crosses into south Lebanon','★ IRAN fires ~180 ballistic missiles at Israel — intercepted by Arrow + Iron Dome','Egoz commandos ambushed at Odaisseh — 8 soldiers killed'] },
+  { id:'drones', name:'Deep Strikes & the Binyamina Drone', dateLabel:'mid-Oct – mid-Nov 2024',
+    durationMs:55000, rocket:0.85, tier:'heavy', strike:1.0, front:0.7, ground:true, drones:true,
+    lebStart:2300, lebEnd:3000, ilStart:70, ilEnd:100,
+    desc:'Grinding combat in the border villages. Hezbollah\'s deepest strikes: 100+ rockets on Haifa, and a drone that evades defences to hit a Golani base near Binyamina, killing 4 soldiers.',
+    news:['Heaviest barrage on Haifa yet — 100+ rockets in 30 minutes','★ Hezbollah drone evades defences, hits a Golani base near Binyamina — 4 killed','IDF razes border strongholds: Maroun al-Ras, Aita al-Shaab'] },
+  { id:'ceasefire', name:'Final Barrages → Ceasefire', dateLabel:'mid-Nov – Nov 27, 2024',
+    durationMs:50000, rocket:0.95, tier:'heavy', strike:0.8, front:1.0, ground:true, truceAtEnd:true,
+    lebStart:3000, lebEnd:3800, ilStart:100, ilEnd:127,
+    desc:'A last surge of heavy fire — up to 250 rockets in a day on Haifa, Tiberias, Acre and the Krayot — even as diplomacy closes in. On Nov 27 a 60-day ceasefire takes effect: Hezbollah north of the Litani, IDF south of the Blue Line.',
+    news:['Up to 250 rockets in a single day — Haifa, Tiberias, Acre, the Krayot','Ceasefire agreed under US-French mediation','CEASEFIRE in effect — Hezbollah withdraws north of the Litani; the guns fall silent'] }
+];
+
+// Hezbollah weapon tiers → which cities each can reach + the weapon used.
+// 'short' adds to 'medium' adds to 'heavy' (heavier phases can still fire short rockets too).
+const HEZ_TARGETS = {
+  short:  ['kiryat_shmona','metula','nahariya','shlomi','maalot','shtula'],
+  medium: ['safed','karmiel','tiberias','akko','nahariya'],
+  heavy:  ['haifa','kiryat_bialik','kiryat_yam','kiryat_motzkin','akko','karmiel','binyamina']
+};
+// Tel Aviv / airbases reserved for the Iran ballistic salvo (boss wave).
+const HEZ_IRAN_TARGETS = ['telaviv','nevatim','tel_nof','gedera','rishon'];
+
+// Southern-Lebanon places drawn on the offensive map as the IDF ground front advances to the Litani.
+const HEZ_LEBANON_SITES = [
+  { name:'Maroun al-Ras', lat:33.094, lon:35.428, frontAt:0.2 },
+  { name:'Aita al-Shaab', lat:33.106, lon:35.302, frontAt:0.3 },
+  { name:'Bint Jbeil',    lat:33.121, lon:35.435, frontAt:0.45 },
+  { name:'Mais al-Jabal', lat:33.197, lon:35.379, frontAt:0.6 },
+  { name:'Khiam',         lat:33.328, lon:35.622, frontAt:0.75 },
+  { name:'Litani River',  lat:33.350, lon:35.450, frontAt:1.0 }
+];
+const HEZ_DAHIEH = { name:'Dahieh · Hezbollah HQ', lat:33.853, lon:35.503 };  // Nasrallah killed here
 
 // QRF assets. power = combat weight, speedKmMin = travel speed (km per game-minute),
 // readySec = when it finishes mobilizing (reservists arrive over the morning).
@@ -18803,6 +18947,315 @@ function endOctober7Campaign(victory) {
     '</div>';
 }
 
+/* ===========================================================================
+   HEZBOLLAH WAR · 2024 — LOGIC (v2.16.0)
+   A northern-front, phase-driven air-defence campaign. The player's Iron Dome /
+   David's Sling / Arrow batteries (full sandbox grid) auto-intercept; the war
+   escalates through 7 historical phases with rising rocket/missile/drone fire,
+   IDF airstrikes on Lebanon, a ground front advancing to the Litani, an Iran
+   ballistic boss-salvo, and the Nov-27-2024 ceasefire.
+   =========================================================================== */
+function initHezbollahWar() {
+  deployFullIDFGrid(['thaad']);          // full IDF battery grid (same as sandbox/Oct 7)
+  state.mode = 'auto';
+  state.buildPhase = false;
+  state.placeMode = null;
+  // northern-front clock starts Oct 8, 2023
+  state.hezWar = {
+    startGT: state.gameTime,
+    lastGT: state.gameTime,
+    phaseIdx: -1,
+    phaseStartGT: 0,
+    barrageAccum: 0, strikeAccum: 0, newsAccum: 0, newsIdx: 0,
+    lebDeaths: 60, ilKilled: 0,
+    interceptsAtPhaseStart: 0,
+    front: 0,                 // IDF ground front 0 (border) .. 1 (Litani)
+    nasrallahKilled: false,
+    iranSalvoFired: false,
+    droneEventFired: false,
+    ended: false
+  };
+  logEvent('════ NORTHERN FRONT · OCTOBER 8, 2023 — HEZBOLLAH OPENS FIRE ════', 'danger');
+  showNotification('HEZBOLLAH WAR · 2024', 'The day after Oct 7, Hezbollah opens a "support front" on Israel\'s north. Defend the Galilee and the coast as the war escalates to all-out in September 2024. Iron Dome, David\'s Sling and Arrow defend automatically.', 'danger');
+  hezAdvancePhase();
+}
+
+// Fire one incoming Hezbollah barrage of the appropriate weapon tier (player auto-defends).
+function hezFireBarrage(ph) {
+  const gen = state.scenarioGen;
+  const n = Math.max(2, Math.round((3 + Math.random() * 7) * ph.rocket));
+  // build the eligible target+weapon pool for this phase's tier
+  let pool = [];
+  if (ph.tier === 'short')  pool = HEZ_TARGETS.short.map(c => [c, 'rocket']);
+  else if (ph.tier === 'medium') pool = HEZ_TARGETS.short.map(c => [c,'rocket']).concat(HEZ_TARGETS.medium.map(c => [c,'rocket']));
+  else { // heavy: short + medium rockets + heavy rockets on Haifa belt
+    pool = HEZ_TARGETS.short.map(c => [c,'rocket'])
+      .concat(HEZ_TARGETS.medium.map(c => [c,'rocket']))
+      .concat(HEZ_TARGETS.heavy.map(c => [c,'heavyRocket']));
+  }
+  for (let i = 0; i < n; i++) {
+    setTimeout(() => {
+      if (state.scenarioGen !== gen || !state.active || state.paused) return;
+      const pick = pool[Math.floor(Math.random() * pool.length)];
+      if (!pick) return;
+      try { spawnThreat(pick[1], 'hezbollah', pick[0]); } catch (e) {}
+    }, i * 160);
+  }
+  // drones in the drone phase
+  if (ph.drones && Math.random() < 0.5) {
+    setTimeout(() => {
+      if (state.scenarioGen !== gen || !state.active || state.paused) return;
+      try { spawnThreat('drone', 'hezbollah', Math.random() < 0.4 ? 'binyamina' : 'haifa'); } catch (e) {}
+    }, 900);
+  }
+}
+
+// Iran ballistic boss-salvo (Oct 1, 2024) — ~heavy ballistic volley at Tel Aviv + airbases.
+function hezIranSalvo() {
+  const gen = state.scenarioGen;
+  logEvent('★★★ IRAN: ~180 BALLISTIC MISSILES INBOUND (Operation True Promise II) ★★★', 'danger');
+  showNotification('IRAN MISSILE ATTACK', 'Iran fires ~180 ballistic missiles at Israel — Tel Aviv, Nevatim and Tel Nof airbases. Arrow and David\'s Sling engage.', 'danger');
+  for (let i = 0; i < 14; i++) {
+    setTimeout(() => {
+      if (state.scenarioGen !== gen || !state.active || state.paused) return;
+      const t = HEZ_IRAN_TARGETS[Math.floor(Math.random() * HEZ_IRAN_TARGETS.length)];
+      try { spawnThreat(Math.random() < 0.5 ? 'ballistic' : 'tacBallistic', 'iran', t); } catch (e) {}
+    }, i * 220);
+  }
+}
+
+// One IDF airstrike on a Lebanon target (Beirut/Dahieh + the advancing front).
+function hezLebanonStrike() {
+  const w = state.hezWar;
+  // pick Dahieh (HQ) sometimes, else a front-line village at/behind the front
+  let lat, lon;
+  if (Math.random() < 0.3) { lat = HEZ_DAHIEH.lat; lon = HEZ_DAHIEH.lon; }
+  else {
+    const sites = HEZ_LEBANON_SITES.filter(s => s.frontAt <= w.front + 0.25);
+    const s = sites.length ? sites[Math.floor(Math.random() * sites.length)] : HEZ_LEBANON_SITES[0];
+    lat = s.lat + (Math.random() - 0.5) * 0.05;
+    lon = s.lon + (Math.random() - 0.5) * 0.05;
+  }
+  try { createExplosion(lat, lon, 18 + Math.random() * 14, 1400, true); } catch (e) {}
+}
+
+function hezAdvancePhase() {
+  const w = state.hezWar;
+  w.phaseIdx++;
+  if (w.phaseIdx >= HEZ_WAR_PHASES.length) {
+    w.ended = true;
+    endGame(true);
+    return;
+  }
+  const ph = HEZ_WAR_PHASES[w.phaseIdx];
+  w.phaseStartGT = state.gameTime;
+  w.barrageAccum = 0; w.strikeAccum = 0; w.newsAccum = 0; w.newsIdx = 0;
+  w.lebDeaths = ph.lebStart;
+  w.interceptsAtPhaseStart = state.stats.intercepted;
+  logEvent(`━━ PHASE ${w.phaseIdx + 1}/${HEZ_WAR_PHASES.length}: ${ph.name} (${ph.dateLabel}) ━━`, ph.truceAtEnd ? 'success' : 'danger');
+  showNotification(`PHASE ${w.phaseIdx + 1}: ${ph.name}`, ph.dateLabel + ' — ' + ph.desc, ph.id === 'pager' ? 'warn' : 'danger');
+  if (typeof addGazaNews === 'function' && ph.news && ph.news[0]) addGazaNews(ph.news[0], 'bad');
+}
+
+function tickHezbollahWar(dt) {
+  const w = state.hezWar;
+  if (!w || w.ended) return;
+  if (state.paused) return;
+  const gt = state.gameTime;
+  const gdt = Math.max(0, gt - w.lastGT); w.lastGT = gt;
+  const gdtSec = gdt / 1000;
+  const ph = HEZ_WAR_PHASES[w.phaseIdx];
+  if (!ph) return;
+  const pElapsed = gt - w.phaseStartGT;
+  const pFrac = Math.min(1, pElapsed / ph.durationMs);
+
+  // incoming rocket / missile / drone fire
+  if (ph.rocket > 0) {
+    w.barrageAccum += gdt;
+    if (w.barrageAccum >= 2400 / ph.rocket) { w.barrageAccum = 0; hezFireBarrage(ph); }
+  }
+  // IDF airstrikes on Lebanon
+  if (ph.strike > 0) {
+    w.strikeAccum += gdt;
+    if (w.strikeAccum >= 1500 / ph.strike) { w.strikeAccum = 0; hezLebanonStrike(); }
+  }
+  // one-off scripted beats
+  if (ph.id === 'arrows' && !w.nasrallahKilled && pFrac >= 0.6) {
+    w.nasrallahKilled = true;
+    logEvent('★ HASSAN NASRALLAH KILLED — bunker-buster strike on the Dahieh HQ', 'danger');
+    showNotification('NASRALLAH KILLED', 'Israel kills Hezbollah Secretary-General Hassan Nasrallah in a strike on the underground HQ in Dahieh, Beirut.', 'danger');
+    try { createExplosion(HEZ_DAHIEH.lat, HEZ_DAHIEH.lon, 40, 2000, true); } catch (e) {}
+  }
+  if (ph.iranSalvo && !w.iranSalvoFired && pFrac >= 0.25) { w.iranSalvoFired = true; hezIranSalvo(); }
+  if (ph.drones && !w.droneEventFired && pFrac >= 0.5) {
+    w.droneEventFired = true;
+    logEvent('★ Binyamina drone strike — a Golani base mess hall hit, 4 soldiers killed', 'danger');
+    showNotification('DRONE STRIKE · BINYAMINA', 'A Hezbollah attack drone evades air defences (masked by a rocket barrage) and hits a Golani training base near Binyamina — 4 soldiers killed.', 'danger');
+    w.ilKilled += 4;
+  }
+  // ground front advances toward the Litani during ground phases
+  if (ph.ground) {
+    const target = ph.front;
+    if (w.front < target) w.front = Math.min(target, w.front + (gdtSec / (ph.durationMs/1000)) * (target - (w.frontBase||0)) + 0.0002 * gdtSec);
+  }
+  w.front = Math.max(w.front, ph.ground ? ph.front * pFrac : w.front);
+  // climbing casualty counters
+  w.lebDeaths = Math.round(ph.lebStart + (ph.lebEnd - ph.lebStart) * pFrac);
+  w.ilKilled = Math.max(w.ilKilled, Math.round(ph.ilStart + (ph.ilEnd - ph.ilStart) * pFrac));
+  // scripted news beats
+  w.newsAccum += gdt;
+  if (ph.news && w.newsIdx < ph.news.length && w.newsAccum >= ph.durationMs / (ph.news.length + 0.5)) {
+    w.newsAccum = 0;
+    if (typeof addGazaNews === 'function') addGazaNews(ph.news[w.newsIdx], 'bad');
+    w.newsIdx++;
+  }
+  // ceasefire / phase advance
+  if (pElapsed >= ph.durationMs) hezAdvancePhase();
+}
+
+// === HEZBOLLAH WAR MAP LAYER — control shading (north Israel red ← rocket reach; Lebanon blue ← IDF front) ===
+function drawHezWarMap() {
+  const w = state.hezWar;
+  if (!w) return;
+  const ph = HEZ_WAR_PHASES[w.phaseIdx];
+  const [ax, ay] = geoToScreen(33.0, 35.3);
+  const [bx, by] = geoToScreen(33.0 + 1/111, 35.3);
+  const pxPerKm = Math.max(1, Math.hypot(bx - ax, by - ay));
+  const blob = (lat, lon, km, rgb, peak) => {
+    const [sx, sy] = geoToScreen(lat, lon);
+    const r = km * pxPerKm;
+    if (sx < -r || sx > canvasW + r || sy < -r || sy > canvasH + r) return;
+    const g = ctx.createRadialGradient(sx, sy, 0, sx, sy, r);
+    g.addColorStop(0, `rgba(${rgb}, ${peak})`); g.addColorStop(0.6, `rgba(${rgb}, ${peak*0.5})`); g.addColorStop(1, `rgba(${rgb}, 0)`);
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI * 2); ctx.fill();
+  };
+  ctx.save();
+  // Lebanon: blue IDF-controlled band growing from the border up to the Litani as the front advances
+  HEZ_LEBANON_SITES.forEach(s => {
+    if (s.frontAt <= w.front + 0.05) blob(s.lat, s.lon, 6, '50, 120, 230', 0.18);
+  });
+  // Dahieh HQ marker (struck) — small red/orange after Nasrallah killed
+  if (w.nasrallahKilled) blob(HEZ_DAHIEH.lat, HEZ_DAHIEH.lon, 5, '230, 120, 40', 0.22);
+  // Israel north: faint red "under fire" wash over the belt currently being hit
+  const intensity = ph ? ph.rocket : 0;
+  if (intensity > 0.05) {
+    blob(33.15, 35.45, 14, '220, 50, 40', 0.05 + intensity * 0.06);     // border belt
+    if (ph && (ph.tier === 'medium' || ph.tier === 'heavy')) blob(32.9, 35.3, 12, '220, 50, 40', 0.04 + intensity * 0.05); // Galilee
+    if (ph && ph.tier === 'heavy') blob(32.79, 34.99, 10, '220, 50, 40', 0.04 + intensity * 0.05); // Haifa
+  }
+  // markers for the Lebanon front-line villages
+  ctx.textAlign = 'center';
+  HEZ_LEBANON_SITES.forEach(s => {
+    const taken = s.frontAt <= w.front + 0.05;
+    const [sx, sy] = geoToScreen(s.lat, s.lon);
+    if (sx < -40 || sx > canvasW + 40 || sy < -40 || sy > canvasH + 40) return;
+    ctx.fillStyle = taken ? '#7fd0ff' : '#ff8866';
+    ctx.beginPath(); ctx.arc(sx, sy, 3, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = taken ? '#bfe6ff' : '#ffb09a'; ctx.font = '8px Consolas';
+    ctx.shadowColor = 'rgba(0,0,0,0.8)'; ctx.shadowBlur = 3;
+    ctx.fillText(s.name.replace(/·.*$/,'').trim(), sx, sy - 6);
+    ctx.shadowBlur = 0;
+  });
+  ctx.restore();
+}
+
+// === HEZBOLLAH WAR — command panel (timeline + live war stats) ===
+function updateHezPanel() {
+  let el = document.getElementById('hez-panel');
+  if (!state.hezWar || state.scenarioId !== 'hezbollah') { if (el) el.style.display = 'none'; return; }
+  const w = state.hezWar;
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'hez-panel';
+    el.style.cssText = 'position:fixed;top:74px;left:12px;width:330px;max-height:76vh;overflow:auto;background:rgba(12,15,24,0.96);border:1px solid #d4a017;border-radius:8px;color:#dde;font-family:monospace;font-size:11px;z-index:9996;box-shadow:0 4px 20px rgba(0,0,0,0.6);';
+    document.body.appendChild(el);
+    if (typeof installPanelChrome === 'function') installPanelChrome(el, { title: '⚔ NORTHERN COMMAND · LEBANON' });
+  }
+  const pcs = (typeof _panelChromeState !== 'undefined') ? _panelChromeState : {};
+  if (pcs['hez-panel'] && pcs['hez-panel'].closed) { el.style.display = 'none'; return; }
+  el.style.display = 'block';
+  if (pcs['hez-panel'] && pcs['hez-panel'].minimized) return;
+  const body = el.querySelector('.panel-body') || el;
+  const ph = HEZ_WAR_PHASES[w.phaseIdx];
+  const pFrac = ph ? Math.min(1, (state.gameTime - w.phaseStartGT) / ph.durationMs) : 0;
+  const fmt = n => n >= 1000 ? (n/1000).toFixed(n>=10000?0:1)+'K' : String(Math.round(n));
+  const rocketLbl = ph ? (ph.rocket >= 0.7 ? 'HEAVY' : ph.rocket >= 0.3 ? 'MODERATE' : ph.rocket > 0.02 ? 'SPORADIC' : 'CEASE') : '—';
+  const rocketCol = ph ? (ph.rocket >= 0.7 ? '#ff5544' : ph.rocket >= 0.3 ? '#ffaa44' : '#5dade2') : '#566';
+  const intercepted = state.stats.intercepted;
+
+  let rows = '';
+  HEZ_WAR_PHASES.forEach((p, i) => {
+    const done = i < w.phaseIdx, cur = i === w.phaseIdx;
+    const col = done ? '#52be80' : cur ? (p.truceAtEnd ? '#7fd6a0' : '#ffb000') : '#566';
+    const mark = done ? '✔' : cur ? '▶' : '○';
+    const barW = cur ? Math.round(pFrac * 100) : (done ? 100 : 0);
+    rows +=
+      '<div style="padding:4px 0;border-top:1px solid #1e2630;'+(cur?'background:rgba(212,160,23,0.07);':'')+'">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;">' +
+          '<span style="color:'+col+';font-size:10px;'+(cur?'font-weight:bold;':'')+'">'+mark+' '+p.name+'</span>' +
+          '<span style="color:#667;font-size:8px;">'+p.dateLabel+'</span>' +
+        '</div>' +
+        (cur ? '<div style="height:3px;background:#1a1f28;border-radius:2px;margin-top:3px;overflow:hidden;"><span style="display:block;width:'+barW+'%;height:100%;background:'+col+';"></span></div>' : '') +
+      '</div>';
+  });
+
+  body.innerHTML =
+    '<div style="padding:9px 11px;">' +
+      '<div style="font-size:12px;color:#888;letter-spacing:1px;">2024 LEBANON WAR · NORTHERN FRONT</div>' +
+      '<div style="font-size:15px;font-weight:bold;color:#ffb000;margin:3px 0 2px;">'+(ph?ph.name:'—')+'</div>' +
+      '<div style="font-size:10px;color:#9ab;margin-bottom:6px;">'+(ph?ph.dateLabel:'')+'</div>' +
+      '<div style="font-size:10px;color:#bcd;line-height:1.4;margin-bottom:8px;">'+(ph?ph.desc:'')+'</div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:8px;">' +
+        '<div style="background:rgba(255,85,68,0.10);border-radius:5px;padding:5px 7px;"><div style="font-size:9px;color:#9aa;">ROCKET FIRE</div><div style="font-size:13px;font-weight:bold;color:'+rocketCol+';">'+rocketLbl+'</div></div>' +
+        '<div style="background:rgba(0,212,255,0.10);border-radius:5px;padding:5px 7px;"><div style="font-size:9px;color:#9aa;">INTERCEPTED</div><div style="font-size:13px;font-weight:bold;color:#00d4ff;">'+fmt(intercepted)+'</div></div>' +
+        '<div style="background:rgba(93,173,226,0.10);border-radius:5px;padding:5px 7px;"><div style="font-size:9px;color:#9aa;">ISRAELI KILLED</div><div style="font-size:13px;font-weight:bold;color:#9cd;">'+fmt(w.ilKilled)+'</div></div>' +
+        '<div style="background:rgba(120,120,130,0.10);border-radius:5px;padding:5px 7px;"><div style="font-size:9px;color:#9aa;">LEBANESE KILLED</div><div style="font-size:13px;font-weight:bold;color:#caa;">'+fmt(w.lebDeaths)+'</div></div>' +
+      '</div>' +
+      '<div style="font-size:10px;color:#9ab;margin-bottom:7px;">IDF ground front → Litani: <b style="color:'+(w.front>=1?'#52be80':'#ffaa44')+';">'+Math.round(w.front*100)+'%</b>'+(w.nasrallahKilled?' · <span style="color:#ff8866;">Nasrallah eliminated</span>':'')+'</div>' +
+      '<div style="color:#ffb000;font-weight:bold;font-size:10px;margin:4px 0 2px;letter-spacing:.5px;">WAR TIMELINE</div>' +
+      rows +
+      '<div style="font-size:9px;color:#677;margin-top:8px;line-height:1.4;">Iron Dome / David\'s Sling / Arrow intercept automatically. Figures reflect the real war — shown to honour the toll, not as a score.</div>' +
+    '</div>';
+}
+
+function endHezbollahWar(victory) {
+  const w = state.hezWar; if (!w) return;
+  const intercepted = state.stats.intercepted;
+  const leaked = state.stats.missed || 0;
+  const eff = (intercepted + leaked) > 0 ? Math.round(intercepted / (intercepted + leaked) * 100) : 100;
+  let rating, rcol, verdict;
+  if (eff >= 90)      { rating='S'; rcol='#ffd34d'; verdict='IRON WALL — the north held against everything.'; }
+  else if (eff >= 80) { rating='A'; rcol='#7fd6a0'; verdict='STRONG DEFENCE — few leakers got through.'; }
+  else if (eff >= 68) { rating='B'; rcol='#5dade2'; verdict='HELD THE LINE — at a cost.'; }
+  else if (eff >= 55) { rating='C'; rcol='#ffaa44'; verdict='STRAINED — saturation took its toll.'; }
+  else                { rating='D'; rcol='#ff5544'; verdict='OVERWHELMED — the north paid dearly.'; }
+
+  let ov = document.getElementById('hez-end');
+  if (!ov) { ov = document.createElement('div'); ov.id = 'hez-end'; document.body.appendChild(ov); }
+  ov.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(6,8,14,0.96);display:flex;align-items:center;justify-content:center;font-family:monospace;color:#dde;';
+  const fmt = n => n.toLocaleString();
+  ov.innerHTML =
+    '<div style="max-width:520px;width:92%;background:rgba(14,18,28,0.98);border:1px solid '+rcol+';border-radius:12px;padding:26px 30px;box-shadow:0 10px 50px rgba(0,0,0,0.7);">' +
+      '<div style="font-size:12px;color:#888;letter-spacing:2px;">2024 LEBANON WAR · NORTHERN FRONT</div>' +
+      '<div style="font-size:20px;font-weight:bold;color:'+rcol+';margin:8px 0 2px;">CEASEFIRE · NOVEMBER 27, 2024</div>' +
+      '<div style="display:flex;align-items:center;gap:16px;margin:8px 0 14px;">' +
+        '<span style="font-size:54px;font-weight:bold;color:'+rcol+';line-height:1;">'+rating+'</span>' +
+        '<span style="font-size:13px;color:#cdd;">'+verdict+'</span>' +
+      '</div>' +
+      '<div style="display:grid;grid-template-columns:auto 1fr;gap:7px 16px;font-size:13px;border-top:1px dashed #444;padding-top:14px;">' +
+        '<span style="color:#9aa;">Interception rate</span><span style="color:'+rcol+';font-weight:bold;">'+eff+'%</span>' +
+        '<span style="color:#9aa;">Threats intercepted</span><span style="color:#00d4ff;">'+fmt(intercepted)+'</span>' +
+        '<span style="color:#9aa;">Leaked impacts</span><span style="color:#ff8888;">'+fmt(leaked)+'</span>' +
+        '<span style="color:#9aa;">Israeli killed</span><span style="color:#9cd;">~'+fmt(w.ilKilled)+'</span>' +
+        '<span style="color:#9aa;">Lebanese killed</span><span style="color:#caa;">~'+fmt(w.lebDeaths)+'</span>' +
+        '<span style="color:#9aa;">Nasrallah eliminated</span><span style="color:#ddd;">'+(w.nasrallahKilled?'Yes (Sep 27)':'No')+'</span>' +
+        '<span style="color:#9aa;">IDF front reached</span><span style="color:#ddd;">'+(w.front>=0.95?'the Litani River':Math.round(w.front*100)+'% to the Litani')+'</span>' +
+      '</div>' +
+      '<div style="font-size:11px;color:#778;margin-top:16px;line-height:1.5;">The 2024 war killed ~3,800 in Lebanon and ~127 in Israel before the Nov 27 ceasefire under UNSCR 1701 — Hezbollah north of the Litani, the IDF south of the Blue Line. These are real figures, shown to honour the toll, not as a score.</div>' +
+      '<button onclick="location.reload()" style="margin-top:18px;width:100%;background:'+rcol+';color:#111;border:none;border-radius:6px;padding:11px;font-family:monospace;font-weight:bold;font-size:13px;cursor:pointer;letter-spacing:1px;">RETURN TO MENU</button>' +
+    '</div>';
+}
+
 function startScenario(name) {
   state.scenario = SCENARIOS[name];
   state.scenarioId = name;
@@ -18948,6 +19401,9 @@ function startScenario(name) {
   const wide = (name === 'iran' || name === 'fullWar' || name === 'resistanceAxis');
   if (wide) {
     camera.centerLat = 28.0; camera.centerLon = 45.0; camera.zoom = 5;
+  } else if (name === 'hezbollah') {
+    // Northern front — centre on the Galilee / south Lebanon
+    camera.centerLat = 33.0; camera.centerLon = 35.3; camera.zoom = 8;
   } else {
     camera.centerLat = 31.5; camera.centerLon = 35.0; camera.zoom = 8;
   }
@@ -19000,6 +19456,15 @@ function startScenario(name) {
     const o7 = document.getElementById('oct7-panel');
     if (o7) o7.style.display = 'none';
     applyOctober7UI(false);                       // restore top-bar buttons for all other scenarios
+  }
+
+  // === HEZBOLLAH WAR — initialize northern-front state ===
+  if (state.scenario.campaign === 'hezbollah') {
+    initHezbollahWar();
+  } else {
+    state.hezWar = null;
+    const hw = document.getElementById('hez-panel');
+    if (hw) hw.style.display = 'none';
   }
 
   // === GAZA CAMPAIGN — initialize era state ===
