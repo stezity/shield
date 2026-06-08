@@ -2,7 +2,10 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#03060d">
 <!-- v2.14.3: force browsers/CDN to revalidate so version updates actually reach players
      (GitHub Pages was serving a stale cached build — users kept getting the old October 7) -->
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
@@ -184,7 +187,10 @@ body::after {
 .panel-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 .panel-body::-webkit-scrollbar-thumb:hover { background: var(--border-light); }
 
-#top-bar { display: grid; grid-template-columns: 280px 1fr auto; align-items: center; padding: 0 14px; gap: 14px; }
+#top-bar { display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; padding: 0 14px; gap: 14px; overflow: visible; }
+.hud-info { min-width: 0; overflow-x: auto; }       /* HUD scrolls instead of pushing the controls off-screen */
+.hud-info::-webkit-scrollbar { height: 0; }
+.controls { flex-shrink: 0; }
 .logo { font-size: 20px; font-weight: 900; letter-spacing: 5px; color: var(--accent); text-shadow: 0 0 10px var(--accent-dim); }
 .logo small { display: block; font-size: 9px; letter-spacing: 3px; color: var(--text-dim); font-weight: normal; margin-top: 2px; }
 
@@ -209,8 +215,8 @@ body::after {
 .controls { display: flex; gap: 6px; align-items: center; }
 .btn {
   background: var(--bg-panel-light); border: 1px solid var(--border);
-  color: var(--text); padding: 6px 12px;
-  font-family: inherit; font-size: 11px; letter-spacing: 1px;
+  color: var(--text); padding: 5px 10px;
+  font-family: inherit; font-size: 10.5px; letter-spacing: 0.5px;
   cursor: pointer; transition: all 0.15s;
   text-transform: uppercase; white-space: nowrap;
 }
@@ -1116,6 +1122,76 @@ body.targeting-cursor #map-canvas {
   letter-spacing: 0.5px; text-align: center;
   border-left: 3px solid #c0392b;
 }
+
+/* =========================================================================
+   MOBILE / TOUCH RESPONSIVE LAYOUT  (v2.20.0)
+   Phones: smaller floating panels, scrollable top bar, bigger tap targets,
+   menus that fit a narrow screen. Map stays full-bleed (map-first layout).
+   ========================================================================= */
+/* width-only — must NOT match touch-capable desktops (was: (pointer:coarse) inflated buttons on desktop) */
+@media (max-width: 820px) {
+  html, body { font-size: 12px; }
+  body::after { display: none; }          /* drop the scanline overlay — costs FPS on phones */
+  #game-canvas { cursor: default; }
+
+  /* top bar: let the controls scroll horizontally instead of overflowing */
+  #top-bar { height: 44px; top: 6px; left: 6px; right: 6px; padding: 0 6px; gap: 6px;
+             grid-template-columns: auto 1fr auto; }
+  .logo { font-size: 14px; letter-spacing: 1px; }
+  .logo small { display: none; }
+  .hud-info { gap: 5px; overflow-x: auto; flex-wrap: nowrap; -webkit-overflow-scrolling: touch; }
+  .hud-info::-webkit-scrollbar { height: 0; }
+  .hud-item { padding: 2px 6px; font-size: 10px; }
+  .threat-level { padding: 3px 7px; font-size: 10px; }
+  .controls { gap: 4px; }
+  .btn { padding: 6px 9px; font-size: 11px; }    /* compact but still tappable */
+  .seg-group .btn { padding: 6px 8px; }
+  .btn-help, .btn-exit { width: 28px; min-width: 28px; }
+
+  /* floating data panels → bottom sheets sized for a phone */
+  #left-panel, #right-panel, #stats-panel { width: 46vw; max-width: 230px; max-height: 38vh; top: 60px; }
+  #left-panel  { left: 6px; }
+  #right-panel { right: 6px; }
+  #event-log   { left: 6px; right: 6px; width: auto; bottom: 60px; height: 130px; }
+  #stats-panel { right: 6px; bottom: 60px; max-height: 40vh; }
+
+  /* bottom dock: full-width, compact chips */
+  #panel-dock { left: 6px; right: 6px; transform: none; justify-content: space-around; border-radius: 12px; padding: 4px 5px; }
+  .dock-chip { padding: 6px 8px; font-size: 10px; gap: 3px; }
+  .dock-chip .ico { font-size: 13px; }
+
+  /* map controls: bottom-left cluster, clear of the dock */
+  .map-zoom { top: auto; bottom: 56px; left: 6px; transform: none; flex-wrap: wrap; max-width: 124px; }
+  .map-zoom button, .map-zoom .quick, .map-zoom .zoom-level { width: 30px; height: 30px; font-size: 12px; }
+  #layers-panel { top: auto; bottom: 100px; left: 6px; transform: none; max-height: 50vh; overflow-y: auto; }
+
+  /* menus fit narrow screens */
+  .menu-title { font-size: 46px; letter-spacing: 6px; }
+  .menu-subtitle { font-size: 12px; letter-spacing: 2px; }
+  .menu-tagline { font-size: 10px; letter-spacing: 1px; margin-bottom: 18px; }
+  .menu-hint { font-size: 12px; }
+  .menu-button { min-width: 80vw; padding: 16px; font-size: 14px; }
+  .scenarios, #sandbox-list { grid-template-columns: 1fr !important; max-width: 92vw; gap: 10px; }
+  .scenario-card p { min-height: 0; }
+  .fullscreen { padding: 20px 14px; }
+
+  /* command bar / shelter toast / help card fit the width */
+  #fighter-cmd-bar { left: 6px; right: 6px; transform: none; flex-wrap: wrap; bottom: 110px; }
+  #shelter-countdown { width: auto; left: 6px; right: 6px; transform: none; }
+  #shelter-countdown.show { animation: none; }
+  .help-card { padding: 20px 18px; }
+  .help-row { font-size: 12px; }
+
+  /* the MORE dropdown opens upward-friendly and wide */
+  .more-menu { right: 0; min-width: 200px; }
+}
+
+/* very small phones — tighten further */
+@media (max-width: 480px) {
+  #left-panel, #right-panel, #stats-panel { width: 60vw; }
+  .hud-item:nth-child(n+5) { display: none; }   /* hide the least-critical HUD chips */
+  .menu-title { font-size: 36px; }
+}
 </style>
 </head>
 <body>
@@ -1249,7 +1325,8 @@ body.targeting-cursor #map-canvas {
         <div class="help-row"><span class="help-ico">🗺</span><div><b>Read the map.</b> Coloured arcs are interceptors meeting threats. Scroll to zoom, drag to pan. Red = incoming, cyan/green/blue = your defences.</div></div>
         <div class="help-row"><span class="help-ico">✈</span><div><b>Strike back (optional).</b> Press the <b>STRIKE</b> button, then click a target to hit it.</div></div>
         <div class="help-row"><span class="help-ico">⚙</span><div><b>Pause & speed.</b> Use <b>PAUSE</b> (Space) and the <b>×</b> speed control any time. <b>MORE</b> holds advanced actions.</div></div>
-        <div class="help-row"><span class="help-ico">✈</span><div><b>Fighters.</b> Click an airbase to scramble jets. Left-click a jet to select it, right-click the map to send it (right-click a drone to intercept).</div></div>
+        <div class="help-row"><span class="help-ico">✈</span><div><b>Fighters.</b> Tap an airbase to scramble jets. Tap a jet to select it, then <b>long-press</b> the map to send it (long-press a drone to intercept). On desktop: left-click to select, right-click to command.</div></div>
+        <div class="help-row" id="help-touch-row" style="display:none;"><span class="help-ico">👆</span><div><b>Touch controls.</b> Drag = pan · pinch = zoom · tap = select · <b>long-press</b> = command. Use the bottom chips to open panels.</div></div>
       </div>
       <button class="help-start" id="help-close">GOT IT — LET'S GO</button>
     </div>
@@ -1976,6 +2053,33 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.20.1 — Smaller buttons + fix 'buttons don't work' (user: 'уменьши кнопки и сделай их
+//            рабочими, там много багов'). ROOT CAUSE: the v2.20.0 mobile media query was
+//            '(max-width:820px), (pointer:coarse)' — the (pointer:coarse) clause matched
+//            touch-capable DESKTOPS/laptops, applying the big-tap-target mobile CSS (and its
+//            larger paddings) on desktop, and the wider buttons could overflow the floating
+//            top bar. Fixes: (1) media query is now WIDTH-ONLY (max-width:820px) so desktop
+//            keeps its compact styling. (2) Base .btn padding reduced (6px12→5px10, font
+//            11→10.5). (3) Top-bar grid changed to 'auto minmax(0,1fr) auto' with a scrollable
+//            HUD (min-width:0, overflow-x:auto) and flex-shrink:0 controls, so the HUD chips
+//            scroll instead of pushing the control buttons off-screen / clipping them. (4)
+//            Mobile button/dock/zoom sizes trimmed. Browser-verified: every top-bar button +
+//            MORE actions + all 4 dock chips work (pause/speed/mode/strike/build/etc.), nothing
+//            clipped, pause button now 75×26, no console errors.
+//   2.20.0 — MOBILE / TOUCH SUPPORT (user: 'сделай чтобы можно было играть на телефоне,
+//            оптимизируй всё'). (1) TOUCH INPUT on the canvas: 1-finger drag = pan, tap =
+//            left-click (select/scramble), LONG-PRESS = right-click (command the selected
+//            fighter — fly/strike/intercept), 2-finger PINCH = zoom around the midpoint.
+//            Implemented by synthesizing the existing mouse* / contextmenu events from touch,
+//            so all click logic is reused. (2) RESPONSIVE CSS @media (max-width:820px),
+//            (pointer:coarse): smaller floating panels sized for a phone, horizontally-
+//            scrollable top bar, bigger tap targets, full-width bottom dock, bottom-left zoom
+//            cluster, single-column menus, width-fit command bar / shelter toast / help card;
+//            <480px hides the least-critical HUD chips. Scanline overlay dropped on mobile for
+//            FPS. (3) viewport meta locked (user-scalable=no, viewport-fit=cover) so pinch
+//            zooms the MAP not the page; orientationchange re-fits the canvas; touch-controls
+//            help row shown on touch devices (body.is-touch). Browser-verified at 375×812:
+//            map full-bleed, top bar + dock fit, touch pan dispatches cleanly, no errors.
 //   2.19.1 — Post-redesign fixes (user report). (1) EMPTY ⋯MORE dropdown: in scenarios that
 //            hide all advanced actions (October 7, etc.) the menu was blank — now refreshMoreMenu()
 //            hides the whole MORE button when no action is available (run each UI frame). (2)
@@ -2434,7 +2538,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.19.1';
+const GAME_VERSION = '2.20.1';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -5945,6 +6049,8 @@ function initCanvas() {
   ctx = canvas.getContext('2d');
   resizeCanvas();
   window.addEventListener('resize', resizeCanvas);
+  // v2.20.0: re-fit the canvas on phone orientation change (after the browser settles)
+  window.addEventListener('orientationchange', () => { setTimeout(resizeCanvas, 250); });
 }
 
 function resizeCanvas() {
@@ -18599,6 +18705,102 @@ function setupCanvasInteraction() {
     camera.centerLat += latBefore - latAfter;
     camera.centerLon += lonBefore - lonAfter;
   }, { passive: false });
+
+  // ===========================================================================
+  // TOUCH INPUT (mobile) — v2.20.0
+  //   • 1 finger drag      → pan (synthesizes mousedown/move/up so all click logic works)
+  //   • 1 finger tap       → left-click (select fighter / battery / TST / scramble)
+  //   • 1 finger LONG-PRESS→ right-click (command the selected fighter — fly/strike/intercept)
+  //   • 2 finger pinch     → zoom the map around the pinch midpoint
+  // We translate touches into the existing mouse* code paths to avoid duplicating logic.
+  // ===========================================================================
+  let _t = { active:false, startX:0, startY:0, lastX:0, lastY:0, moved:false, longTimer:null, longFired:false, pinch:false, pinchDist:0, pinchMidLat:0, pinchMidLon:0 };
+  const TAP_MOVE = 12;          // px before a tap becomes a drag
+  const LONG_MS = 500;          // long-press threshold
+
+  const fakeMouse = (type, x, y, button) => {
+    // dispatch a synthetic MouseEvent the existing handlers understand
+    const ev = new MouseEvent(type, { clientX: x, clientY: y, button: button || 0, bubbles: true });
+    canvas.dispatchEvent(ev);
+  };
+  const fireRightClick = (x, y) => {
+    const ev = new MouseEvent('contextmenu', { clientX: x, clientY: y, bubbles: true, cancelable: true });
+    // shiftKey can't be set via ctor reliably; long-press = plain right-click (no waypoint append)
+    canvas.dispatchEvent(ev);
+  };
+
+  canvas.addEventListener('touchstart', (e) => {
+    if (e.touches.length === 2) {
+      // begin pinch
+      _t.active = false; _t.pinch = true;
+      if (_t.longTimer) { clearTimeout(_t.longTimer); _t.longTimer = null; }
+      const a = e.touches[0], b = e.touches[1];
+      _t.pinchDist = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+      const rect = canvas.getBoundingClientRect();
+      const mx = (a.clientX + b.clientX) / 2 - rect.left, my = (a.clientY + b.clientY) / 2 - rect.top;
+      const [la, lo] = screenToGeo(mx, my); _t.pinchMidLat = la; _t.pinchMidLon = lo;
+      e.preventDefault(); return;
+    }
+    const t = e.touches[0];
+    _t.active = true; _t.pinch = false; _t.moved = false; _t.longFired = false;
+    _t.startX = _t.lastX = t.clientX; _t.startY = _t.lastY = t.clientY;
+    fakeMouse('mousedown', t.clientX, t.clientY, 0);   // begins pan tracking
+    // schedule long-press → right-click (only if finger hasn't moved/lifted)
+    _t.longTimer = setTimeout(() => {
+      if (_t.active && !_t.moved) {
+        _t.longFired = true;
+        // end the would-be pan first, then fire right-click at the held point
+        fakeMouse('mouseup', _t.lastX, _t.lastY, 0);
+        fireRightClick(_t.lastX, _t.lastY);
+        if (navigator.vibrate) try { navigator.vibrate(15); } catch(e){}
+      }
+    }, LONG_MS);
+    e.preventDefault();
+  }, { passive: false });
+
+  canvas.addEventListener('touchmove', (e) => {
+    if (_t.pinch && e.touches.length === 2) {
+      const a = e.touches[0], b = e.touches[1];
+      const d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+      const rect = canvas.getBoundingClientRect();
+      const mx = (a.clientX + b.clientX) / 2 - rect.left, my = (a.clientY + b.clientY) / 2 - rect.top;
+      if (Math.abs(d - _t.pinchDist) > 22) {
+        const dir = d > _t.pinchDist ? 1 : -1;
+        camera.zoom = clampZoom(camera.zoom + dir);
+        _t.pinchDist = d;
+        // keep the pinch midpoint stationary
+        const [la2, lo2] = screenToGeo(mx, my);
+        camera.centerLat += _t.pinchMidLat - la2;
+        camera.centerLon += _t.pinchMidLon - lo2;
+      }
+      e.preventDefault(); return;
+    }
+    if (!_t.active) return;
+    const t = e.touches[0];
+    _t.lastX = t.clientX; _t.lastY = t.clientY;
+    if (!_t.moved && Math.hypot(t.clientX - _t.startX, t.clientY - _t.startY) > TAP_MOVE) {
+      _t.moved = true;
+      if (_t.longTimer) { clearTimeout(_t.longTimer); _t.longTimer = null; }
+    }
+    fakeMouse('mousemove', t.clientX, t.clientY, 0);   // drives the pan
+    e.preventDefault();
+  }, { passive: false });
+
+  canvas.addEventListener('touchend', (e) => {
+    if (_t.pinch) { _t.pinch = (e.touches.length > 0); return; }
+    if (_t.longTimer) { clearTimeout(_t.longTimer); _t.longTimer = null; }
+    if (_t.longFired) { _t.active = false; return; }    // already handled as right-click
+    if (_t.active) {
+      // mouseup at the last point → triggers tap (select) or finishes a pan
+      fakeMouse('mouseup', _t.lastX, _t.lastY, 0);
+    }
+    _t.active = false;
+    e.preventDefault();
+  }, { passive: false });
+  canvas.addEventListener('touchcancel', () => {
+    if (_t.longTimer) { clearTimeout(_t.longTimer); _t.longTimer = null; }
+    _t.active = false; _t.pinch = false;
+  });
 }
 
 function cityTypeName(t) {
@@ -20399,6 +20601,14 @@ document.addEventListener('DOMContentLoaded', () => {
   if (helpClose) helpClose.onclick = () => { audio.click(); closeHelp(); };
   // expose so startScenario can auto-show on the player's first game
   window._openHelp = openHelp;
+  // v2.20.0: on touch devices, reveal the touch-controls help row + mark body for CSS hooks
+  try {
+    if (('ontouchstart' in window) || (navigator.maxTouchPoints > 0)) {
+      document.body.classList.add('is-touch');
+      const tr = document.getElementById('help-touch-row');
+      if (tr) tr.style.display = 'flex';
+    }
+  } catch (e) {}
 
   // === v2.19.0: BOTTOM DOCK — toggle the floating data panels (map-first clean view) ===
   const dock = document.getElementById('panel-dock');
