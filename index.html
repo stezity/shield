@@ -464,17 +464,22 @@ body::after {
 }
 #gaza-news-scroll-wrap:hover #gaza-news-scroll { animation-play-state: paused; }   /* hover to read */
 
+/* v2.19.1: shelter alert is now a compact PUSH toast pinned to the top-right —
+   it no longer covers the map. Smaller text, tidy list, slides in. */
+/* v2.19.1: shelter alert is now a compact PUSH toast under the top bar (top-centre, narrow) —
+   it no longer covers the map. */
 #shelter-countdown {
-  position: absolute; top: 24px; left: 50%; transform: translateX(-50%);
-  background: rgba(0,0,0,0.85); border: 2px solid var(--red);
-  padding: 14px 28px 10px; font-size: 28px; color: var(--red);
-  font-weight: bold; letter-spacing: 4px; z-index: 200;
-  display: none; text-shadow: 0 0 10px var(--red);
-  animation: pulse-alert 0.8s infinite; text-align: center;
-  min-width: 240px; max-width: 360px;
+  position: absolute; top: 112px; left: 50%; transform: translateX(-50%);
+  background: rgba(20,4,6,0.92); backdrop-filter: blur(6px);
+  border: 1px solid var(--red); border-radius: 10px;
+  padding: 8px 14px; font-size: 15px; color: var(--red);
+  font-weight: bold; letter-spacing: 1px; z-index: 55;
+  display: none; box-shadow: 0 6px 22px rgba(0,0,0,0.5);
+  text-align: center; width: 280px; max-width: 80vw;
 }
-#shelter-countdown.show { display: block; }
-#shelter-countdown small { display: block; font-size: 11px; letter-spacing: 2px; color: var(--amber); margin-top: 4px; font-weight: normal; }
+#shelter-countdown.show { display: block; animation: shelter-in 0.25s ease-out; }
+@keyframes shelter-in { from { opacity: 0; transform: translateX(-50%) translateY(-10px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
+#shelter-countdown small { display: block; font-size: 10px; letter-spacing: 1px; color: var(--amber); margin-top: 2px; font-weight: normal; }
 #shelter-countdown .shelter-close {
   position: absolute; top: 4px; right: 6px;
   width: 18px; height: 18px; line-height: 14px; font-size: 14px;
@@ -486,9 +491,9 @@ body::after {
 }
 #shelter-countdown .shelter-close:hover { background: rgba(255,80,80,0.25); color: #fff; }
 #shelter-countdown .shelter-list {
-  margin-top: 10px; padding-top: 8px; border-top: 1px dashed rgba(255,120,120,0.35);
-  max-height: 260px; overflow-y: auto; overflow-x: hidden;
-  font-size: 12px; letter-spacing: 1.5px; font-weight: normal;
+  margin-top: 7px; padding-top: 6px; border-top: 1px dashed rgba(255,120,120,0.35);
+  max-height: 130px; overflow-y: auto; overflow-x: hidden;
+  font-size: 11px; letter-spacing: 1px; font-weight: normal;
   text-shadow: none;
   scrollbar-color: rgba(255,80,80,0.55) rgba(0,0,0,0.3);
   scrollbar-width: thin;
@@ -1971,6 +1976,17 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.19.1 — Post-redesign fixes (user report). (1) EMPTY ⋯MORE dropdown: in scenarios that
+//            hide all advanced actions (October 7, etc.) the menu was blank — now refreshMoreMenu()
+//            hides the whole MORE button when no action is available (run each UI frame). (2)
+//            SHELTER ALERT redesigned as a compact PUSH toast under the top bar (280px, 15px)
+//            instead of a big red box covering the map. (3) INTERCEPTS now happen OVER Israeli
+//            territory: meeting-point interceptF mins raised (Iron Dome 0.80→0.88, D-Sling/Arrow
+//            similar, cap 0.95→0.96) so the kill is over the city, not the border; interceptor
+//            speeds nudged down (Iron Dome 0.11→0.095, D-Sling 0.18→0.16) for a nicer arc —
+//            verified 6/6 still intercepted, 0 leaks. (4) HEZBOLLAH WAR is now fully scripted
+//            like October 7: pickWeightedEvent + spawnCrisis + updateIntel hard-return for it, so
+//            the ahistorical Hamas/Houthi/US random events no longer appear on the Lebanon front.
 //   2.19.0 — FULL MAP-FIRST REDESIGN (user: 'я просил полный редизайн и упрощение интерфейса').
 //            Replaced the rigid 3-column grid (map boxed in by 4 heavy data panels) with a
 //            map-first layout: the tactical map now fills the ENTIRE screen, the top bar floats
@@ -2418,13 +2434,13 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.19.0';
+const GAME_VERSION = '2.19.1';
 
 const BATTERY_TYPES = {
   ironDome: {
     name: 'Iron Dome', shortName: 'IRON DOME', color: '#00d4ff',
     rangeKm: 70, altitudeRange: '0–10 km',
-    speed: 0.11, reloadTime: 1200,             // boosted from 0.085 — was too slow, threats impacted before catch
+    speed: 0.095, reloadTime: 1200,            // v2.19.1: 0.11→0.095 — a touch slower, prettier arc (still catches)
     capacity: 60, launchers: 3,
     // heavyRocket added — Tamir interceptor IS rated for Fajr-5/M-302/A-120 in terminal phase
     // (real-world: Iron Dome shot down hundreds of heavy rockets in 2014 + 2021 + 2023 wars)
@@ -2434,7 +2450,7 @@ const BATTERY_TYPES = {
   davidsSling: {
     name: 'David\'s Sling', shortName: 'D. SLING', color: '#00ff99',
     rangeKm: 200, altitudeRange: '15–60 km',
-    speed: 0.18, reloadTime: 4000,             // 0.28 → 0.18 — medium-altitude intercept over Israeli territory
+    speed: 0.16, reloadTime: 4000,             // v2.19.1: 0.18→0.16 — slightly slower terminal intercept
     capacity: 24, launchers: 3,
     canTarget: ['heavyRocket', 'cruise', 'drone', 'tacBallistic', 'ballistic'],
     cost: 1000000, accuracy: 0.94
@@ -5819,6 +5835,8 @@ function pickWeightedEvent(pool) {
   // The October 7 scenario is a historical re-enactment; the player only triages QRF.
   // Random Iran/Hezbollah/US/diplomatic events would be ahistorical noise — block them all.
   if (state.scenario && state.scenario.campaign === 'october7') return null;
+  // v2.19.1: Hezbollah War is fully scripted too — no random Hamas/Houthi/US/diplomatic events.
+  if (state.scenario && state.scenario.campaign === 'hezbollah') return null;
   // === GAZA-ONLY FILTER (NEW v2.9) ===
   // In Gaza scenario only HAMAS-RELEVANT events fire — drop Iran/Hezbollah/Houthi events,
   // diplomatic deal events (everything is historical now), and non-Gaza-themed events.
@@ -11289,20 +11307,21 @@ function predictInterceptPoint(battery, threat) {
   if (remaining < 0.05) return null;
   let interceptF;
   const btype = battery.type || battery._btype;
+  // v2.19.1: push the meeting point DEEPER toward the protected city so intercepts visibly
+  // happen OVER Israeli territory (not out at the border). Higher interceptF = closer to the city.
   if (btype === 'arrow3') {
     // Arrow-3: terminal-phase exo-atmospheric — intercept inside Israeli airspace
-    interceptF = Math.max(0.78, threat.progress + remaining * 0.65);
+    interceptF = Math.max(0.84, threat.progress + remaining * 0.7);
   } else if (btype === 'thaad') {
-    interceptF = Math.max(0.82, threat.progress + remaining * 0.65);
+    interceptF = Math.max(0.86, threat.progress + remaining * 0.7);
   } else if (btype === 'davidsSling') {
     // D-Sling: medium-altitude terminal intercept — well over Israeli land
-    interceptF = Math.max(0.78, threat.progress + remaining * 0.78);
+    interceptF = Math.max(0.86, threat.progress + remaining * 0.82);
   } else {
-    // Iron Dome: late-terminal intercept — over the city or just before (5-15 km out).
-    // 0.80 gives the interceptor enough time to actually catch the threat at sane speeds.
-    interceptF = Math.max(0.80, threat.progress + remaining * 0.85);
+    // Iron Dome: late-terminal intercept — right over the protected city.
+    interceptF = Math.max(0.88, threat.progress + remaining * 0.88);
   }
-  if (interceptF > 0.95) interceptF = 0.95;
+  if (interceptF > 0.96) interceptF = 0.96;
   return {
     lat: threat.startLat + (threat.targetLat - threat.startLat) * interceptF,
     lon: threat.startLon + (threat.targetLon - threat.startLon) * interceptF,
@@ -13248,7 +13267,7 @@ function updateCivilian(dt) {
    ========================================================= */
 function updateIntel(dt) {
   // FIX v2.12.0: October 7 is a scripted single day — no satellite-pass log spam.
-  if (state.scenario && state.scenario.campaign === 'october7') return;
+  if (state.scenario && (state.scenario.campaign === 'october7' || state.scenario.campaign === 'hezbollah')) return;
   if (state.intelTimer == null) state.intelTimer = 90000;
   state.intelTimer -= dt;
   if (state.intelTimer <= 0) {
@@ -14194,8 +14213,8 @@ function ensureWorldState() {
 // Pop a random crisis (weighted random with cooldown)
 function spawnCrisis() {
   if (state.playAs === 'attacker') return;   // crises = IDF-defender mechanic only
-  // === OCTOBER 7 — scripted scenario: no world crises (NEW v2.12.0) ===
-  if (state.scenario && state.scenario.campaign === 'october7') return;
+  // === OCTOBER 7 + HEZBOLLAH WAR — scripted scenarios: no world crises ===
+  if (state.scenario && (state.scenario.campaign === 'october7' || state.scenario.campaign === 'hezbollah')) return;
   ensureWorldState();
   if (state.world.activeCrisis) return;   // already active
   // === GAZA FILTER (NEW v2.9.4): exclude Iran/Hezbollah-themed crises in Gaza scenario ===
@@ -16307,6 +16326,20 @@ function installAllPanelChrome() {
   }
 }
 
+// === v2.19.1: keep the ⋯MORE button honest — hide it when no advanced action is available ===
+// Several scenarios hide individual MORE actions (October 7 hides strike/build/etc.; Gaza hides
+// build+diplomacy). If ALL of them are hidden the dropdown was empty ('I open MORE and nothing's
+// there'). This hides the whole MORE button in that case, and shows a note if it's somehow open.
+function refreshMoreMenu() {
+  const wrap = document.querySelector('.more-wrap');
+  const menu = document.getElementById('more-menu');
+  if (!menu || !wrap) return;
+  const actions = menu.querySelectorAll('.btn');
+  let visible = 0;
+  actions.forEach(b => { if (getComputedStyle(b).display !== 'none') visible++; });
+  wrap.style.display = visible > 0 ? '' : 'none';
+}
+
 // Backwards-compat shim — old gaza-specific name maps to universal API.
 function ensureGazaPanelChrome(panelEl, panelId, accentColor) {
   if (!panelEl) return;
@@ -17993,6 +18026,8 @@ function updateStatsPanel() {
   try { updateHezPanel(); } catch (e) {}
   // === Player-fighter command bar (refresh fuel/mode; auto-hide if no selection) ===
   try { if (state.selectedFighter) showFighterCommandBar(); else { var _fcb=document.getElementById('fighter-cmd-bar'); if(_fcb) _fcb.style.display='none'; } } catch (e) {}
+  // === v2.19.1: hide ⋯MORE when it has no available actions (avoids the empty dropdown) ===
+  try { refreshMoreMenu(); } catch (e) {}
   // === World Modifiers HUD (always visible during active scenario) ===
   updateWorldHud();
   // === New stats: panic, evacuations, intel, cyber ===
@@ -20344,8 +20379,12 @@ document.addEventListener('DOMContentLoaded', () => {
   const moreBtn = document.getElementById('btn-more');
   const moreMenu = document.getElementById('more-menu');
   if (moreBtn && moreMenu) {
-    moreBtn.onclick = (e) => { e.stopPropagation(); audio.click(); moreMenu.style.display = moreMenu.style.display === 'none' ? 'flex' : 'none'; };
-    // close after clicking any action inside, and on outside click
+    moreBtn.onclick = (e) => {
+      e.stopPropagation(); audio.click();
+      // v2.19.1: build the menu from only the actions actually available right now
+      if (moreMenu.style.display === 'none') { refreshMoreMenu(); moreMenu.style.display = 'flex'; }
+      else moreMenu.style.display = 'none';
+    };
     moreMenu.querySelectorAll('.btn').forEach(b => b.addEventListener('click', () => { moreMenu.style.display = 'none'; }));
     document.addEventListener('click', (e) => { if (moreMenu.style.display !== 'none' && !moreMenu.contains(e.target) && e.target !== moreBtn) moreMenu.style.display = 'none'; });
   }
