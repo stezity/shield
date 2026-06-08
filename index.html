@@ -1837,6 +1837,19 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.17.2 — Fighter routes + multi-select + slower (user: 'отображение маршрута истребителя,
+//            не делай таким быстрым, много точек маршрута зажимая Shift+ПКМ, выбор нескольких
+//            истребителей Shift или ЛКМ-рамкой'). (1) SLOWER: cruise 0.16→0.085 deg/s (~2×),
+//            AAM 0.30→0.26. (2) WAYPOINT ROUTES: each fighter has a waypoints[] queue; a plain
+//            right-click REPLACES the route, Shift+right-click APPENDS a waypoint — build a
+//            multi-leg route (move legs + strike legs). New 'route' mode flies the queue, runs
+//            each strike waypoint's bombing on arrival, then loiters at the last point. The
+//            route is drawn as a dashed numbered polyline (orange ✕ on strike legs). (3) MULTI-
+//            SELECT: state.selectedFighters[] — Shift+left-click toggles fighters into the set;
+//            a plain left-click on empty space deselects; commands apply to ALL selected (fanned
+//            out slightly). Command bar shows 'N FLIGHTS', adds a CLEAR-waypoints button and a
+//            full control hint. Browser-verified: 3-select, 3-waypoint route incl. strike leg,
+//            movement consumes the queue, no errors.
 //   2.17.1 — Fighter control scheme as requested (user: 'выбираю истребитель — он обведён в
 //            белом квадратике — потом даю команды правой кнопкой куда лететь/бить; кнопка
 //            strike чтобы бомбить; или даю команду лететь к дрону и он сам пускает ракету по
@@ -2244,7 +2257,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.17.1';
+const GAME_VERSION = '2.17.2';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -14214,8 +14227,8 @@ function showDoctrinesPanel() {
    BOMB a ground location / enemy target.
    =========================================================================== */
 const FIGHTER_RADAR_KM = 28;        // onboard radar range (drone auto-detect)
-const FIGHTER_SPEED = 0.16;         // deg/sec cruise (~Mach abstracted)
-const FIGHTER_AAM_SPEED = 0.30;
+const FIGHTER_SPEED = 0.085;        // deg/sec cruise — v2.17.2: slowed ~2× (was 0.16, too fast)
+const FIGHTER_AAM_SPEED = 0.26;     // v2.17.2: slightly slowed too
 
 function scrambleSquadron(baseId, count) {
   const base = IL_AIRBASES.find(b => b.id === baseId) || US_AIRBASES.find(b => b.id === baseId);
@@ -14235,25 +14248,48 @@ function scrambleSquadron(baseId, count) {
       homeLat: base.lat, homeLon: base.lon,
       patrolLat: base.lat + 0.25, patrolLon: base.lon,   // orbit a point just north by default
       orbitPhase: Math.random() * Math.PI * 2,
-      mode: 'patrol',            // 'patrol' | 'strike' | 'rtb'
+      mode: 'patrol',            // 'patrol' | 'strike' | 'rtb' | 'route'
       strikeLat: null, strikeLon: null, strikeTargetId: null,
+      waypoints: [],             // v2.17.2: queue of {lat,lon,strike,targetId} for multi-point routes
       aam: null, aamCooldown: 0,
       fuel: 100,                  // 0..100 — RTB when low
       trail: []
     });
   }
   if (typeof audio !== 'undefined' && audio.launch) audio.launch();
-  showNotification('✈ SCRAMBLE', `${n} F-16 launched from ${base.name} — now on CAP patrol. Click a fighter to re-task (patrol / strike).`, 'success');
+  showNotification('✈ SCRAMBLE', `${n} F-16 launched from ${base.name} — on CAP. Left-click to select (Shift = add), right-click to command (Shift = queue waypoints).`, 'success');
   logEvent(`✈ ${n} F-16 scrambled from ${base.name} (combat air patrol)`, 'info');
 }
 
 // Select a player fighter and open the command bar (Patrol / Strike / RTB).
-function selectPlayerFighter(id) {
-  state.selectedFighter = id;
+// Select a fighter. add=true (Shift) → toggle into the multi-select set; else select only it.
+function selectPlayerFighter(id, add) {
+  state.selectedFighters = state.selectedFighters || [];
+  if (add) {
+    const idx = state.selectedFighters.indexOf(id);
+    if (idx >= 0) { state.selectedFighters.splice(idx, 1); }   // shift-click again = deselect
+    else state.selectedFighters.push(id);
+  } else {
+    state.selectedFighters = [id];
+  }
+  // primary selection (drives the command bar) = last one added, or null
+  state.selectedFighter = state.selectedFighters.length ? state.selectedFighters[state.selectedFighters.length - 1] : null;
   state.fighterCommandMode = null;
   document.body.classList.remove('targeting-cursor');
   if (typeof audio !== 'undefined' && audio.click) audio.click();
   showFighterCommandBar();
+}
+
+// Apply a command to ALL selected fighters (with a small spread so they don't stack).
+function commandSelectedFighters(lat, lon, mode, targetId, append) {
+  const sel = state.selectedFighters || (state.selectedFighter ? [state.selectedFighter] : []);
+  sel.forEach((id, i) => {
+    // fan out destination slightly per aircraft for non-strike orders
+    const spread = (mode === 'strike' || mode === 'intercept') ? 0 : 0.05;
+    const ox = spread ? (Math.cos(i * 2.4) * spread) : 0;
+    const oy = spread ? (Math.sin(i * 2.4) * spread) : 0;
+    commandFighter(id, lat + oy, lon + ox, mode, targetId, append);
+  });
 }
 
 // Floating command bar for the selected fighter.
@@ -14274,18 +14310,21 @@ function showFighterCommandBar() {
         if (state.fighterCommandMode === 'strike') { state.fighterCommandMode = null; document.body.classList.remove('targeting-cursor'); }
         else { state.fighterCommandMode = 'strike'; document.body.classList.add('targeting-cursor'); showNotification('STRIKE ARMED', 'Right-click a ground target or location to bomb it.', 'warn'); }
       }
-      else if (cmd === 'rtb') { const ff = (state.playerFighters||[]).find(x=>x.id===state.selectedFighter); if (ff) ff.mode = 'rtb'; state.fighterCommandMode = null; document.body.classList.remove('targeting-cursor'); }
-      else if (cmd === 'close') { state.selectedFighter = null; state.fighterCommandMode = null; document.body.classList.remove('targeting-cursor'); bar.style.display = 'none'; }
+      else if (cmd === 'rtb') { (state.selectedFighters||[]).forEach(id=>{ const ff=(state.playerFighters||[]).find(x=>x.id===id); if(ff){ff.mode='rtb';ff.waypoints=[];} }); state.fighterCommandMode = null; document.body.classList.remove('targeting-cursor'); }
+      else if (cmd === 'clearwp') { (state.selectedFighters||[]).forEach(id=>{ const ff=(state.playerFighters||[]).find(x=>x.id===id); if(ff){ff.waypoints=[];ff.mode='patrol';ff.patrolLat=ff.curLat;ff.patrolLon=ff.curLon;} }); }
+      else if (cmd === 'close') { state.selectedFighter = null; state.selectedFighters = []; state.fighterCommandMode = null; document.body.classList.remove('targeting-cursor'); bar.style.display = 'none'; }
       showFighterCommandBar();
     });
   }
   bar.style.display = 'flex';
-  const modeTxt = f.mode==='strike'?'STRIKE':f.mode==='rtb'?'RTB':f.mode==='intercept'?'INTERCEPT':'CAP';
+  const nSel = (state.selectedFighters && state.selectedFighters.length) || 1;
+  const modeTxt = f.mode==='rtb'?'RTB':f.mode==='intercept'?'INTERCEPT':f.mode==='route'?('ROUTE'+(f.waypoints&&f.waypoints.length>1?' ·'+f.waypoints.length+'wp':'')):'CAP';
   const btn = (cmd, label, col) => '<button data-fcmd="'+cmd+'" style="background:'+col+';color:#06121a;border:none;border-radius:5px;padding:5px 10px;font-family:monospace;font-weight:bold;font-size:11px;cursor:pointer;">'+label+'</button>';
   bar.innerHTML =
-    '<span style="color:#5dde9e;font-weight:bold;font-size:11px;">✈ '+f.baseName+' · '+modeTxt+' · '+Math.round(f.fuel)+'%</span>' +
-    '<span style="color:#9ab;font-size:9px;max-width:160px;line-height:1.3;">right-click map = fly/patrol · right-click a drone = intercept</span>' +
+    '<span style="color:#5dde9e;font-weight:bold;font-size:11px;">✈ '+(nSel>1?nSel+' FLIGHTS':f.baseName+' · '+modeTxt+' · '+Math.round(f.fuel)+'%')+'</span>' +
+    '<span style="color:#9ab;font-size:9px;max-width:180px;line-height:1.3;">RMB = fly · Shift+RMB = add waypoint · RMB on drone = intercept · Shift+LMB = multi-select</span>' +
     btn('strike', state.fighterCommandMode==='strike'?'✸ STRIKE: pick target':'✸ STRIKE', state.fighterCommandMode==='strike'?'#ffd24d':'#ff8844') +
+    btn('clearwp', '⟲ CLEAR', '#9ad8ff') +
     btn('rtb', '↩ RTB', '#aab') +
     btn('close', '✕', '#778');
 }
@@ -14321,20 +14360,30 @@ function showScramblePopup(baseId, clientX, clientY) {
 }
 
 // Order a selected fighter to a map point: patrol there, or strike it.
-function commandFighter(fighterId, lat, lon, mode, targetId) {
+// command a fighter. mode: 'patrol' | 'strike' | 'intercept'. append=true → queue a waypoint
+// (Shift+right-click) instead of replacing the current order, building a multi-point route.
+function commandFighter(fighterId, lat, lon, mode, targetId, append) {
   const f = (state.playerFighters || []).find(x => x.id === fighterId);
   if (!f) return;
-  if (mode === 'strike') {
-    f.mode = 'strike'; f.strikeLat = lat; f.strikeLon = lon; f.strikeTargetId = targetId || null;
-    logEvent(`✈ ${f.baseName} flight → STRIKE ordered`, 'info');
-  } else if (mode === 'intercept') {
-    // Vector to a specific air threat — fly to it; the onboard radar fires the AAM on contact.
+  // intercept is immediate (chase a live threat) and clears any route
+  if (mode === 'intercept') {
+    f.waypoints = [];
     f.mode = 'intercept'; f.interceptId = targetId || null;
-    f.patrolLat = lat; f.patrolLon = lon;     // initial vector point (updated to live threat pos in tick)
+    f.patrolLat = lat; f.patrolLon = lon;
     logEvent(`✈ ${f.baseName} flight → vectoring to intercept`, 'info');
   } else {
-    f.mode = 'patrol'; f.patrolLat = lat; f.patrolLon = lon;
-    logEvent(`✈ ${f.baseName} flight → patrol ${lat.toFixed(2)},${lon.toFixed(2)}`, 'info');
+    const wp = { lat, lon, strike: (mode === 'strike'), targetId: targetId || null };
+    if (append) {
+      f.waypoints = f.waypoints || [];
+      f.waypoints.push(wp);
+      f.mode = 'route';
+      logEvent(`✈ ${f.baseName} flight → waypoint ${f.waypoints.length} queued${wp.strike?' (strike)':''}`, 'info');
+    } else {
+      // replace the whole route with this single order
+      f.waypoints = [wp];
+      f.mode = 'route';
+      logEvent(`✈ ${f.baseName} flight → ${wp.strike ? 'STRIKE' : 'move'} ${lat.toFixed(2)},${lon.toFixed(2)}`, 'info');
+    }
   }
   if (typeof audio !== 'undefined' && audio.click) audio.click();
 }
@@ -14393,42 +14442,51 @@ function tickPlayerFighters(dt) {
       }
     }
 
-    // --- movement ---
+    // --- movement (v2.17.2: waypoint routes) ---
     let aimLat, aimLon;
     if (f.mode === 'rtb') { aimLat = f.homeLat; aimLon = f.homeLon; }
-    else if (f.mode === 'strike') { aimLat = f.strikeLat; aimLon = f.strikeLon; }
     else if (f.mode === 'intercept') {
       // chase the assigned air threat; the radar block above fires the AAM on contact.
       const tgt = state.threats.find(t => t.id === f.interceptId && !t.intercepted && !t.impacted);
       if (tgt) { aimLat = tgt.curLat; aimLon = tgt.curLon; f.patrolLat = tgt.curLat; f.patrolLon = tgt.curLon; }
       else { f.mode = 'patrol'; f.interceptId = null; aimLat = f.patrolLat; aimLon = f.patrolLon; }   // target gone → loiter here
+    } else if (f.mode === 'route' && f.waypoints && f.waypoints.length) {
+      const wp = f.waypoints[0];
+      aimLat = wp.lat; aimLon = wp.lon;
+      const distKm = haversineKm(f.curLat, f.curLon, wp.lat, wp.lon);
+      const reach = wp.strike ? 2.5 : 1.5;
+      if (distKm < reach) {
+        if (wp.strike) {
+          try { createExplosion(wp.lat, wp.lon, 26, 1500, true); } catch(e){}
+          if (typeof audio !== 'undefined' && audio.explosion) audio.explosion();
+          if (wp.targetId && state.enemyTargets) {
+            const tg = state.enemyTargets.find(x => x.id === wp.targetId);
+            if (tg && tg.alive !== false) { tg.damage = Math.min(100, (tg.damage||0) + 45); if (tg.damage >= 100) tg.alive = false; }
+          }
+          logEvent(`✈ ${f.baseName} flight delivered ordnance`, 'success');
+        }
+        f.waypoints.shift();   // waypoint reached → next
+        if (!f.waypoints.length) {
+          // route done → loiter at the last point
+          f.mode = 'patrol'; f.patrolLat = wp.lat; f.patrolLon = wp.lon;
+        }
+      }
     } else { // patrol: orbit the patrol point in a small circle
       f.orbitPhase += dtSec * 0.9;
       aimLat = f.patrolLat + Math.sin(f.orbitPhase) * 0.06;
       aimLon = f.patrolLon + Math.cos(f.orbitPhase) * 0.06;
     }
-    const dLat = aimLat - f.curLat, dLon = aimLon - f.curLon;
-    const dD = Math.hypot(dLat, dLon);
-    if (dD > 1e-5) {
-      const mv = Math.min(step, dD);
-      f.curLat += (dLat / dD) * mv; f.curLon += (dLon / dD) * mv;
-      f.heading = Math.atan2(dLat, dLon);
+    if (aimLat != null) {
+      const dLat = aimLat - f.curLat, dLon = aimLon - f.curLon;
+      const dD = Math.hypot(dLat, dLon);
+      if (dD > 1e-5) {
+        const mv = Math.min(step, dD);
+        f.curLat += (dLat / dD) * mv; f.curLon += (dLon / dD) * mv;
+        f.heading = Math.atan2(dLat, dLon);
+      }
     }
     f.trail.push({ lat: f.curLat, lon: f.curLon }); if (f.trail.length > 22) f.trail.shift();
 
-    // --- strike delivery ---
-    if (f.mode === 'strike' && haversineKm(f.curLat, f.curLon, f.strikeLat, f.strikeLon) < 2.5) {
-      try { createExplosion(f.strikeLat, f.strikeLon, 26, 1500, true); } catch(e){}
-      if (typeof audio !== 'undefined' && audio.explosion) audio.explosion();
-      // damage an enemy target if one is there
-      if (f.strikeTargetId && state.enemyTargets) {
-        const tg = state.enemyTargets.find(x => x.id === f.strikeTargetId);
-        if (tg && tg.alive !== false) { tg.damage = Math.min(100, (tg.damage||0) + 45); if (tg.damage >= 100) tg.alive = false; }
-      }
-      logEvent(`✈ ${f.baseName} flight delivered ordnance on target`, 'success');
-      f.mode = 'patrol'; f.patrolLat = f.strikeLat + 0.15; f.patrolLon = f.strikeLon;
-      f.strikeLat = f.strikeLon = f.strikeTargetId = null;
-    }
     // --- RTB landing ---
     if (f.mode === 'rtb' && haversineKm(f.curLat, f.curLon, f.homeLat, f.homeLon) < 2) {
       f.done = true;
@@ -14700,8 +14758,8 @@ function drawPlayerFighters() {
   list.forEach(f => {
     const [sx, sy] = geoToScreen(f.curLat, f.curLon);
     if (sx < -60 || sx > canvasW + 60 || sy < -60 || sy > canvasH + 60) return;
-    const sel = state.selectedFighter === f.id;
-    const modeCol = f.mode === 'strike' ? '#ff8844' : f.mode === 'rtb' ? '#9aa' : f.mode === 'intercept' ? '#ffd24d' : '#5dde9e';
+    const sel = (state.selectedFighters && state.selectedFighters.indexOf(f.id) >= 0) || state.selectedFighter === f.id;
+    const modeCol = f.mode === 'rtb' ? '#9aa' : f.mode === 'intercept' ? '#ffd24d' : f.mode === 'route' ? '#9ad8ff' : '#5dde9e';
 
     // radar circle (faint; brighter if selected)
     const rr = FIGHTER_RADAR_KM * pxPerKm;
@@ -14715,15 +14773,34 @@ function drawPlayerFighters() {
       ctx.beginPath(); ctx.arc(sx, sy, rr, 0, Math.PI * 2); ctx.fill();
     }
 
-    // patrol/strike order line
-    if (f.mode === 'patrol' || f.mode === 'strike') {
-      const [ox, oy] = geoToScreen(f.mode === 'strike' ? f.strikeLat : f.patrolLat, f.mode === 'strike' ? f.strikeLon : f.patrolLon);
-      ctx.strokeStyle = (f.mode === 'strike' ? 'rgba(255,136,68,0.5)' : 'rgba(93,222,158,0.35)');
-      ctx.lineWidth = 1; ctx.setLineDash([3, 4]);
-      ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(ox, oy); ctx.stroke(); ctx.setLineDash([]);
-      if (f.mode === 'strike') {
-        ctx.strokeStyle = '#ff8844'; ctx.lineWidth = 1.4;
-        ctx.beginPath(); ctx.moveTo(ox-5,oy-5); ctx.lineTo(ox+5,oy+5); ctx.moveTo(ox+5,oy-5); ctx.lineTo(ox-5,oy+5); ctx.stroke();
+    // === ROUTE / ORDER DISPLAY (v2.17.2) ===
+    // waypoint route: dashed polyline from the jet through every queued waypoint, with numbered
+    // nodes; strike waypoints get an orange ✕. Intercept shows a line to the chased threat.
+    if (f.mode === 'route' && f.waypoints && f.waypoints.length) {
+      ctx.lineWidth = 1.3; ctx.setLineDash([5, 4]);
+      ctx.strokeStyle = sel ? 'rgba(154,216,255,0.85)' : 'rgba(154,216,255,0.4)';
+      ctx.beginPath(); ctx.moveTo(sx, sy);
+      const nodes = [];
+      f.waypoints.forEach(wp => { const [wx, wy] = geoToScreen(wp.lat, wp.lon); nodes.push([wx, wy, wp.strike]); ctx.lineTo(wx, wy); });
+      ctx.stroke(); ctx.setLineDash([]);
+      nodes.forEach((nd, idx) => {
+        ctx.fillStyle = nd[2] ? '#ff8844' : '#9ad8ff';
+        ctx.beginPath(); ctx.arc(nd[0], nd[1], 4, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = '#06121a'; ctx.lineWidth = 1; ctx.stroke();
+        if (nd[2]) { // strike X
+          ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.4;
+          ctx.beginPath(); ctx.moveTo(nd[0]-4,nd[1]-4); ctx.lineTo(nd[0]+4,nd[1]+4); ctx.moveTo(nd[0]+4,nd[1]-4); ctx.lineTo(nd[0]-4,nd[1]+4); ctx.stroke();
+        } else if (f.waypoints.length > 1) { // waypoint number
+          ctx.fillStyle = '#06121a'; ctx.font = 'bold 7px Consolas'; ctx.textAlign = 'center';
+          ctx.fillText(String(idx+1), nd[0], nd[1]+2.5); ctx.textAlign = 'left';
+        }
+      });
+    } else if (f.mode === 'intercept') {
+      const tgt = state.threats.find(t => t.id === f.interceptId && !t.intercepted && !t.impacted);
+      if (tgt) {
+        const [ox, oy] = geoToScreen(tgt.curLat, tgt.curLon);
+        ctx.strokeStyle = 'rgba(255,210,77,0.6)'; ctx.lineWidth = 1.2; ctx.setLineDash([4, 3]);
+        ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(ox, oy); ctx.stroke(); ctx.setLineDash([]);
       }
     }
 
@@ -18195,7 +18272,8 @@ function setupCanvasInteraction() {
               const d = Math.hypot(fsx - sx, fsy - sy);
               if (d < bestD) { bestD = d; best = f; }
             }
-            if (best) { selectPlayerFighter(best.id); hitFighter = true; }
+            if (best) { selectPlayerFighter(best.id, e.shiftKey); hitFighter = true; }   // Shift = add to selection
+            else if (!e.shiftKey) { state.selectedFighters = []; state.selectedFighter = null; }  // empty click = deselect
           }
           // === Click an airbase → scramble popup ===
           if (!hitFighter) {
@@ -18241,18 +18319,21 @@ function setupCanvasInteraction() {
     }
   });
 
-  // ПКМ — команда выбранному истребителю / отмена выбора батареи / снятие оружия
+  // ПКМ — команда выбранным истребителям / отмена выбора батареи / снятие оружия
   canvas.addEventListener('contextmenu', (e) => {
     e.preventDefault();
-    // === FIGHTER COMMAND via RIGHT-CLICK (v2.17.1) ===
-    // A fighter is selected → right-click commands it where to go / what to do:
-    //   • STRIKE armed (via button)        → bomb the clicked point/target
-    //   • clicking on/near an enemy drone  → intercept it (fly to it; radar auto-fires the AAM)
-    //   • otherwise                        → fly & patrol that point
-    if (state.selectedFighter && (state.playerFighters || []).some(f => f.id === state.selectedFighter)) {
+    // === FIGHTER COMMAND via RIGHT-CLICK (v2.17.1 → multi-select + waypoints v2.17.2) ===
+    //   • STRIKE armed (via button)  → bomb the clicked point/target
+    //   • on/near an enemy drone     → intercept it (radar auto-fires the AAM)
+    //   • otherwise                  → fly there & loiter
+    //   • Shift held                 → APPEND a waypoint (build a multi-point route)
+    const haveSel = (state.selectedFighters && state.selectedFighters.length) ||
+                    (state.selectedFighter && (state.playerFighters||[]).some(f=>f.id===state.selectedFighter));
+    if (haveSel) {
       const rect = canvas.getBoundingClientRect();
       const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
       const [lat, lon] = screenToGeo(sx, sy);
+      const append = e.shiftKey;
       // strike mode armed?
       if (state.fighterCommandMode === 'strike') {
         let tgtId = null;
@@ -18263,12 +18344,11 @@ function setupCanvasInteraction() {
             if (Math.hypot(tx - sx, ty - sy) < 14) { tgtId = tg.id; break; }
           }
         }
-        commandFighter(state.selectedFighter, lat, lon, 'strike', tgtId);
-        state.fighterCommandMode = null;
-        document.body.classList.remove('targeting-cursor');
+        commandSelectedFighters(lat, lon, 'strike', tgtId, append);
+        if (!append) { state.fighterCommandMode = null; document.body.classList.remove('targeting-cursor'); }
         return;
       }
-      // right-clicked on/near an enemy threat (drone/cruise/rocket)? → intercept it
+      // right-clicked on/near an enemy threat? → intercept it (intercept ignores append)
       let hitThreat = null;
       for (const t of state.threats) {
         if (t.intercepted || t.impacted) continue;
@@ -18277,9 +18357,9 @@ function setupCanvasInteraction() {
         if (Math.hypot(txx - sx, tyy - sy) < 18) { hitThreat = t; break; }
       }
       if (hitThreat) {
-        commandFighter(state.selectedFighter, hitThreat.curLat, hitThreat.curLon, 'intercept', hitThreat.id);
+        commandSelectedFighters(hitThreat.curLat, hitThreat.curLon, 'intercept', hitThreat.id, false);
       } else {
-        commandFighter(state.selectedFighter, lat, lon, 'patrol', null);
+        commandSelectedFighters(lat, lon, 'patrol', null, append);
       }
       return;
     }
@@ -19746,6 +19826,7 @@ function startScenario(name) {
   state.airIntercepts = [];       // FIX v2.11.1: scrambled F-16s leaked into next scenario (ghost fighters)
   state.playerFighters = [];      // NEW v2.17.0: player-commanded F-16 squadrons (CAP / strike / radar)
   state.selectedFighter = null;
+  state.selectedFighters = [];    // v2.17.2: multi-select set
   state.fighterCommandMode = null; // 'patrol' | 'strike' when awaiting a map click for a selected fighter
   state.activeRevenge = [];       // FIX v2.11.1: queued revenge salvos leaked into next scenario
   state.alerts = {};
