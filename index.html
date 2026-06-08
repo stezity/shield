@@ -2053,6 +2053,18 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.21.2 — Hezbollah pre-Oct-1 'border war' confined to the frontier (user: 'с 7 окт до 1 окт
+//            Хезболла стреляла ближе к границе — это их территория, ЦАХАЛ не заходил до 1 окт').
+//            Before the Oct-1-2024 ground invasion there were NO IDF troops in south Lebanon, so:
+//            (1) IDF strikes in hezLebanonStrike now hit ONLY the immediate frontier strip
+//            (~33.10–33.16N, just north of the Blue Line) until the Sept 'arrows' air campaign —
+//            Beirut/Dahieh (Nasrallah HQ) bunker-busters appear only from 'arrows' onward, and
+//            front-line-village strikes only in the Oct-1 'ground' era. (2) The IDF ground front
+//            stays 0 (no blue control band drawn in Lebanon) through the whole Oct-2023→Sept-2024
+//            border war — 'arrows' front set 0.1→0; front only advances once ground:true (Oct 1).
+//            Hezbollah's own fire was already border-belt pre-escalation (v2.21.1). Verified:
+//            support1/creep strikes stay border (maxLat 33.16, no Dahieh), arrows hits Dahieh,
+//            front=0 across the entire border war.
 //   2.21.1 — Hezbollah summer geography corrected (user: 'в июне–сентябре Нагарию/Кармиэль не
 //            бомбили, иногда могли быть беспилотники в сторону Крайот — изучи историю тревог').
 //            A second alert-geography research pass (Wikipedia timeline subpages + ToI/AlJazeera)
@@ -2567,7 +2579,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.21.1';
+const GAME_VERSION = '2.21.2';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -18975,7 +18987,7 @@ const HEZ_WAR_PHASES = [
     desc:'Israel detonates thousands of booby-trapped Hezbollah pagers (Sep 17) then walkie-talkies (Sep 18) across Lebanon — ~42 killed, ~3,500 wounded, ~1,500 fighters out of action. Hezbollah is reeling.',
     news:['Thousands of Hezbollah pagers explode simultaneously across Lebanon','A day later, hundreds of walkie-talkies detonate — ~3,500 wounded','Hezbollah command and communications shattered'] },
   { id:'arrows', name:'Northern Arrows · Nasrallah Killed', dateLabel:'Sep 23–30, 2024',
-    durationMs:55000, rocket:0.72, tier:'haifa', droneRate:0.6, strike:1.0, front:0.1, ground:false, ballistic:true,
+    durationMs:55000, rocket:0.72, tier:'haifa', droneRate:0.6, strike:1.0, front:0, ground:false, ballistic:true,
     lebStart:1000, lebEnd:1700, ilStart:53, ilEnd:55,
     desc:'Israel launches Operation Northern Arrows — massive strikes on Hezbollah\'s missile stores. Now the range opens up: the first heavy rockets reach HAIFA and a ballistic missile is fired at Tel Aviv (Sep 25). On Sep 27 bunker-busters on the Dahieh HQ kill Hassan Nasrallah.',
     news:['Range opens up — first heavy rockets reach Haifa; a missile at Tel Aviv','★ HASSAN NASRALLAH killed in a bunker-buster strike on Dahieh, Beirut','Operation Northern Arrows: 800+ killed in Lebanon in the first week'] },
@@ -20063,10 +20075,21 @@ function hezIranSalvo() {
 // One IDF airstrike on a Lebanon target (Beirut/Dahieh + the advancing front).
 function hezLebanonStrike() {
   const w = state.hezWar;
-  // pick Dahieh (HQ) sometimes, else a front-line village at/behind the front
+  const ph = HEZ_WAR_PHASES[w.phaseIdx] || {};
+  // v2.21.2: BORDER WAR until the Sept air campaign — before then the IDF only hit launch cells
+  // RIGHT ON THE FRONTIER (no Beirut/Dahieh, no deep Lebanon). 'deep' opens with 'arrows' onward.
+  const deepOpen = (ph.id === 'arrows' || ph.id === 'ground' || ph.id === 'drones' || ph.id === 'ceasefire');
   let lat, lon;
-  if (Math.random() < 0.3) { lat = HEZ_DAHIEH.lat; lon = HEZ_DAHIEH.lon; }
-  else {
+  if (deepOpen && Math.random() < 0.3) {
+    // Operation Northern Arrows era — bunker-busters on the Dahieh HQ in Beirut
+    lat = HEZ_DAHIEH.lat; lon = HEZ_DAHIEH.lon;
+  } else if (!deepOpen) {
+    // border war: hit the immediate frontier strip just north of the Blue Line (near the belt)
+    const belt = OCT7_COMMUNITIES ? null : null; // (unused) — use a thin band ~2-6km into Lebanon
+    lat = 33.10 + Math.random() * 0.06;          // ~33.10–33.16N — the border villages
+    lon = 35.28 + Math.random() * 0.30;          // across the south-Lebanon frontier
+  } else {
+    // ground-war era: strike front-line villages at/behind the advancing front
     const sites = HEZ_LEBANON_SITES.filter(s => s.frontAt <= w.front + 0.25);
     const s = sites.length ? sites[Math.floor(Math.random() * sites.length)] : HEZ_LEBANON_SITES[0];
     lat = s.lat + (Math.random() - 0.5) * 0.05;
