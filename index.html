@@ -73,7 +73,9 @@ body::after {
   margin-bottom: 12px;
 }
 .menu-subtitle { font-size: 16px; color: var(--text-dim); letter-spacing: 6px; margin-bottom: 16px; }
-.menu-tagline { font-size: 12px; color: var(--amber); letter-spacing: 3px; margin-bottom: 50px; text-align: center; max-width: 680px; }
+.menu-tagline { font-size: 12px; color: var(--amber); letter-spacing: 3px; margin-bottom: 30px; text-align: center; max-width: 680px; }
+.menu-hint { font-size: 13px; color: var(--text); letter-spacing: 0.5px; line-height: 1.6; margin-bottom: 22px; text-align: center; max-width: 560px; opacity: 0.85; }
+.menu-button { border-radius: 10px; }
 .menu-version { position: absolute; bottom: 20px; font-size: 10px; color: var(--text-dim); letter-spacing: 2px; }
 
 .menu-button {
@@ -121,12 +123,13 @@ body::after {
 
 .panel {
   background: linear-gradient(180deg, var(--bg-panel) 0%, var(--bg-dark) 100%);
-  border: 1px solid var(--border); border-radius: 3px;
+  border: 1px solid var(--border); border-radius: 8px;
   position: relative; overflow: hidden;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.35);
 }
 .panel-header {
   background: var(--bg-panel-light);
-  padding: 6px 12px; border-bottom: 1px solid var(--border);
+  padding: 7px 12px; border-bottom: 1px solid var(--border);
   font-size: 11px; letter-spacing: 2px; color: var(--text-dim);
   text-transform: uppercase;
   display: flex; justify-content: space-between; align-items: center;
@@ -144,7 +147,7 @@ body::after {
 .logo small { display: block; font-size: 9px; letter-spacing: 3px; color: var(--text-dim); font-weight: normal; margin-top: 2px; }
 
 .hud-info { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.hud-item { display: flex; align-items: center; gap: 6px; padding: 4px 12px; background: rgba(0,0,0,0.4); border: 1px solid var(--border); border-radius: 3px; font-size: 11px; white-space: nowrap; }
+.hud-item { display: flex; align-items: center; gap: 6px; padding: 4px 12px; background: rgba(0,0,0,0.4); border: 1px solid var(--border); border-radius: 6px; font-size: 11px; white-space: nowrap; }
 .hud-item .label { color: var(--text-dim); letter-spacing: 1px; }
 .hud-item .value { color: var(--accent); font-weight: bold; }
 .hud-item .value.green { color: var(--green); }
@@ -174,9 +177,63 @@ body::after {
 .btn.active { background: var(--accent-dim); border-color: var(--accent); color: white; }
 .btn.danger:hover { border-color: var(--red); color: var(--red); }
 .btn.warn:hover { border-color: var(--amber); color: var(--amber); }
-.mode-switch { display: inline-flex; border: 1px solid var(--border); border-radius: 3px; overflow: hidden; }
+.mode-switch { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
 .mode-switch .btn { border: none; border-radius: 0; }
 .mode-switch .btn + .btn { border-left: 1px solid var(--border); }
+
+/* === v2.18.0 UI redesign: cleaner buttons, grouped controls, MORE dropdown, help overlay === */
+.btn { border-radius: 6px; }
+.seg-group { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.seg-group .btn { border: none; border-radius: 0; min-width: auto; padding: 6px 9px; }
+.seg-group .btn + .btn { border-left: 1px solid var(--border); }
+.seg-group #btn-speed { min-width: 42px; color: var(--accent); font-weight: bold; }
+.btn-strike { border-color: #ff6633; color: #ff8866; font-weight: bold; }
+.btn-strike:hover { background: rgba(255,102,51,0.18); border-color: #ff6633; color: #ffb59a; }
+.btn-help { width: 30px; min-width: 30px; padding: 6px 0; text-align: center; border-color: var(--accent-dim); color: var(--accent); font-weight: bold; border-radius: 50%; }
+.btn-help:hover { background: rgba(0,212,255,0.18); }
+.btn-exit { width: 34px; min-width: 34px; padding: 6px 0; text-align: center; }
+
+.more-wrap { position: relative; }
+.more-menu {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 200;
+  display: flex; flex-direction: column; gap: 4px;
+  background: rgba(10,21,40,0.98); border: 1px solid var(--border-light);
+  border-radius: 8px; padding: 6px; min-width: 190px;
+  box-shadow: 0 8px 26px rgba(0,0,0,0.6);
+}
+.more-menu .btn { width: 100%; text-align: left; border-color: transparent; background: rgba(255,255,255,0.02); }
+.more-menu .btn:hover { background: rgba(0,212,255,0.12); border-color: var(--border); }
+#btn-build-toggle { color: var(--amber); }
+#btn-mass-strike { color: #ff6b6b; }
+#btn-us-support { color: #fff; }
+#btn-request-funds { color: var(--green); }
+#btn-diplomacy { color: var(--purple); }
+
+/* How-to-play overlay */
+#help-overlay {
+  position: fixed; inset: 0; z-index: 100000;
+  background: rgba(3,6,13,0.82); backdrop-filter: blur(3px);
+  display: flex; align-items: center; justify-content: center;
+}
+.help-card {
+  background: linear-gradient(180deg, #0c1a30, #081120);
+  border: 1px solid var(--accent); border-radius: 14px;
+  padding: 26px 30px; max-width: 520px; width: 92%;
+  box-shadow: 0 12px 50px rgba(0,0,0,0.7), 0 0 40px rgba(0,212,255,0.12);
+}
+.help-title { font-size: 22px; font-weight: 900; letter-spacing: 6px; color: var(--accent); text-align: center; margin-bottom: 18px; text-shadow: 0 0 18px var(--accent-dim); }
+.help-grid { display: flex; flex-direction: column; gap: 13px; }
+.help-row { display: flex; gap: 12px; align-items: flex-start; font-size: 12.5px; line-height: 1.5; color: var(--text); }
+.help-row b { color: #eaf4ff; }
+.help-ico { font-size: 20px; flex-shrink: 0; width: 26px; text-align: center; }
+.help-start {
+  margin-top: 22px; width: 100%; padding: 13px;
+  background: linear-gradient(135deg, var(--accent-dim), var(--accent));
+  color: #04121c; border: none; border-radius: 8px;
+  font-family: inherit; font-weight: 900; font-size: 14px; letter-spacing: 3px;
+  cursor: pointer; text-transform: uppercase; transition: filter 0.15s;
+}
+.help-start:hover { filter: brightness(1.15); }
 
 #map-wrapper {
   position: absolute; inset: 0;
@@ -1019,9 +1076,10 @@ body.targeting-cursor #map-canvas {
   <div class="menu-subtitle">MULTI-LAYER DEFENSE · AIR DEFENSE SIMULATOR <span id="version-label" style="color:var(--accent);font-weight:bold;font-size:11px;letter-spacing:2px;margin-left:8px;">v2.5.0</span></div>
   <div class="menu-tagline">DISCLAIMER: Game simulator. All system characteristics and scenarios are approximate and fictional.<br>Map: CartoDB Dark Matter tiles (based on OpenStreetMap data).</div>
 
-  <button class="menu-button" id="btn-scenarios">▶ SCENARIOS</button>
-  <button class="menu-button" id="btn-sandbox" style="background:rgba(192,57,43,0.15);border-color:#c0392b;color:#ff8a76;">⚡ SANDBOX (no limits)</button>
-  <button class="menu-button" id="btn-info">ⓘ ABOUT THE SYSTEMS</button>
+  <div class="menu-hint">New here? Pick a scenario — defence runs itself, just watch and step in when you want. There's a how-to-play guide on your first game.</div>
+  <button class="menu-button" id="btn-scenarios">▶ PLAY · SCENARIOS</button>
+  <button class="menu-button" id="btn-sandbox" style="background:rgba(192,57,43,0.15);border-color:#c0392b;color:#ff8a76;">⚡ SANDBOX · FREE PLAY</button>
+  <button class="menu-button" id="btn-info">ⓘ ABOUT THE DEFENCE SYSTEMS</button>
 
   <div class="systems-info" id="systems-info-block" style="display:none;">
     <div class="system-card iron-dome">
@@ -1103,22 +1161,47 @@ body.targeting-cursor #map-canvas {
       <div class="hud-item"><span class="label">$:</span><span class="value green" id="money-display">$100K</span></div>
     </div>
     <div class="controls">
-      <div class="mode-switch idf-only">
+      <!-- Essentials — always visible -->
+      <button class="btn warn" id="btn-pause" title="Pause / resume (Space)">⏸ PAUSE</button>
+      <div class="seg-group" title="Game speed (←/→)">
+        <button class="btn" id="btn-speed-down">◀</button>
+        <button class="btn" id="btn-speed">× 1</button>
+        <button class="btn" id="btn-speed-up">▶</button>
+      </div>
+      <div class="mode-switch idf-only" title="AUTO: batteries fire themselves · MANUAL: you pick targets">
         <button class="btn active" id="btn-mode-auto">⚙ AUTO</button>
         <button class="btn" id="btn-mode-manual">✋ MANUAL</button>
       </div>
-      <button class="btn warn" id="btn-pause">⏸ PAUSE</button>
-      <button class="btn" id="btn-speed-down" title="Slower" style="padding:4px 8px;min-width:auto;">◀</button>
-      <button class="btn" id="btn-speed">× 1</button>
-      <button class="btn" id="btn-speed-up" title="Faster" style="padding:4px 8px;min-width:auto;">▶</button>
-      <button class="btn idf-only" id="btn-wave">▶ WAVE</button>
-      <button class="btn idf-only" id="btn-strike" style="border-color:#ff6633;color:#ff6633;">✈ STRIKE <span id="strike-count">12</span></button>
-      <button class="btn idf-only" id="btn-mass-strike" style="border-color:#ff3333;color:#ff3333;">⚡ MASS STRIKE</button>
-      <button class="btn idf-only" id="btn-us-support" style="border-color:#fff;color:#fff;">🇺🇸 USA <span id="us-count">3</span></button>
-      <button class="btn idf-only" id="btn-request-funds" style="border-color:#00ff88;color:#00ff88;">💰 $50K</button>
-      <button class="btn idf-only" id="btn-build-toggle" style="border-color:#ffb000;color:#ffb000;">🛠 BUILD</button>
-      <button class="btn idf-only" id="btn-diplomacy" style="border-color:#a070ff;color:#c8a0ff;">🕊 DIPLOMACY</button>
-      <button class="btn danger" id="btn-quit">⏏ EXIT</button>
+      <button class="btn idf-only btn-strike" id="btn-strike" title="Air strike on a ground target (S)">✈ STRIKE <span id="strike-count">12</span></button>
+      <!-- Advanced actions — tucked into a MORE dropdown to keep the bar clean -->
+      <div class="more-wrap idf-only">
+        <button class="btn" id="btn-more" title="More actions">⋯ MORE</button>
+        <div id="more-menu" class="more-menu" style="display:none;">
+          <button class="btn idf-only" id="btn-build-toggle">🛠 BUILD</button>
+          <button class="btn idf-only" id="btn-mass-strike">⚡ MASS STRIKE</button>
+          <button class="btn idf-only" id="btn-us-support">🇺🇸 USA <span id="us-count">3</span></button>
+          <button class="btn idf-only" id="btn-request-funds">💰 REQUEST $50K</button>
+          <button class="btn idf-only" id="btn-diplomacy">🕊 DIPLOMACY</button>
+          <button class="btn idf-only" id="btn-wave">▶ NEXT WAVE</button>
+        </div>
+      </div>
+      <button class="btn btn-help" id="btn-help" title="How to play">?</button>
+      <button class="btn danger btn-exit" id="btn-quit" title="Quit to menu">⏏</button>
+    </div>
+  </div>
+
+  <!-- ===== HOW TO PLAY overlay (first run + ? button) ===== -->
+  <div id="help-overlay" style="display:none;">
+    <div class="help-card">
+      <div class="help-title">HOW TO PLAY</div>
+      <div class="help-grid">
+        <div class="help-row"><span class="help-ico">🛡</span><div><b>Defence is automatic.</b> Your Iron Dome, David's Sling and Arrow batteries shoot down incoming rockets and missiles on their own. You can just watch.</div></div>
+        <div class="help-row"><span class="help-ico">🗺</span><div><b>Read the map.</b> Coloured arcs are interceptors meeting threats. Scroll to zoom, drag to pan. Red = incoming, cyan/green/blue = your defences.</div></div>
+        <div class="help-row"><span class="help-ico">✈</span><div><b>Strike back (optional).</b> Press the <b>STRIKE</b> button, then click a target to hit it.</div></div>
+        <div class="help-row"><span class="help-ico">⚙</span><div><b>Pause & speed.</b> Use <b>PAUSE</b> (Space) and the <b>×</b> speed control any time. <b>MORE</b> holds advanced actions.</div></div>
+        <div class="help-row"><span class="help-ico">✈</span><div><b>Fighters.</b> Click an airbase to scramble jets. Left-click a jet to select it, right-click the map to send it (right-click a drone to intercept).</div></div>
+      </div>
+      <button class="help-start" id="help-close">GOT IT — LET'S GO</button>
     </div>
   </div>
 
@@ -1837,6 +1920,19 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.18.0 — UI SIMPLIFICATION + redesign for newcomers (user: 'упрости/переделай интерфейс,
+//            новичку очень сложно, очень много лишних кнопок, улучши дизайн'). (1) TOP BAR
+//            decluttered: was 11+ loose buttons → now 7 grouped essentials (Pause, a segmented
+//            ×speed control, Auto/Manual, Strike, ⋯MORE, ?help, Exit). The advanced actions
+//            (Build, Mass Strike, USA, Request Funds, Diplomacy, Next Wave) moved into a tidy
+//            ⋯MORE dropdown — all original button IDs/handlers preserved, just relocated.
+//            (2) NEW HOW-TO-PLAY overlay: a ? button opens it any time, and it auto-shows once
+//            on the player's first game (localStorage shield_seen_help), pausing the game.
+//            Plain-language: defence is automatic, read the map, optional strike, fighters.
+//            (3) VISUAL POLISH: rounded panels (8px) + soft shadow, rounded buttons (6px) +
+//            segmented groups, rounded hud chips, friendlier start-menu copy + a one-line hint.
+//            No gameplay logic changed. Browser-verified: top bar = 7 items, help auto-shows
+//            + closes, MORE opens, moved buttons still bound, no console errors.
 //   2.17.2 — Fighter routes + multi-select + slower (user: 'отображение маршрута истребителя,
 //            не делай таким быстрым, много точек маршрута зажимая Shift+ПКМ, выбор нескольких
 //            истребителей Shift или ЛКМ-рамкой'). (1) SLOWER: cruise 0.16→0.085 deg/s (~2×),
@@ -2257,7 +2353,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.17.2';
+const GAME_VERSION = '2.18.0';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -19978,6 +20074,13 @@ function startScenario(name) {
   document.getElementById('btn-speed').textContent = '× 1';
   document.getElementById('btn-mode-auto').classList.add('active');
   document.getElementById('btn-mode-manual').classList.remove('active');
+  // v2.18.0: show the How-to-Play overlay automatically the first time the player ever starts a game
+  try {
+    if (!localStorage.getItem('shield_seen_help') && typeof window._openHelp === 'function') {
+      window._openHelp();
+      localStorage.setItem('shield_seen_help', '1');
+    }
+  } catch (e) {}
 
   // Принудительный layout + многократный resize против бага «канвас 0×0»
   document.getElementById('game-container').offsetHeight;
@@ -20166,6 +20269,27 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('scenario-menu').classList.add('hidden');
     document.getElementById('start-menu').classList.remove('hidden');
   };
+
+  // === v2.18.0: MORE dropdown (advanced actions) ===
+  const moreBtn = document.getElementById('btn-more');
+  const moreMenu = document.getElementById('more-menu');
+  if (moreBtn && moreMenu) {
+    moreBtn.onclick = (e) => { e.stopPropagation(); audio.click(); moreMenu.style.display = moreMenu.style.display === 'none' ? 'flex' : 'none'; };
+    // close after clicking any action inside, and on outside click
+    moreMenu.querySelectorAll('.btn').forEach(b => b.addEventListener('click', () => { moreMenu.style.display = 'none'; }));
+    document.addEventListener('click', (e) => { if (moreMenu.style.display !== 'none' && !moreMenu.contains(e.target) && e.target !== moreBtn) moreMenu.style.display = 'none'; });
+  }
+
+  // === v2.18.0: HOW TO PLAY overlay (? button + auto-show on first ever game) ===
+  const helpOverlay = document.getElementById('help-overlay');
+  const openHelp = () => { if (helpOverlay) { helpOverlay.style.display = 'flex'; state.paused = true; const pb = document.getElementById('btn-pause'); if (pb) pb.textContent = '▶ RESUME'; } };
+  const closeHelp = () => { if (helpOverlay) helpOverlay.style.display = 'none'; };
+  const helpBtn = document.getElementById('btn-help');
+  if (helpBtn) helpBtn.onclick = () => { audio.click(); openHelp(); };
+  const helpClose = document.getElementById('help-close');
+  if (helpClose) helpClose.onclick = () => { audio.click(); closeHelp(); };
+  // expose so startScenario can auto-show on the player's first game
+  window._openHelp = openHelp;
 
   // Игровые кнопки
   document.getElementById('btn-pause').onclick = () => {
