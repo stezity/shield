@@ -2053,6 +2053,16 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.21.5 — Hezbollah launches no longer come from INSIDE Israel (user: 'почему запускают
+//            беспилотники из израильской территории'). v2.21.4 placed the launch 'north of the
+//            target', but the Blue Line is not a flat latitude — the Metula finger & eastern
+//            Galilee panhandle jut deep into Lebanon, so 'north of a panhandle town' landed in
+//            Israeli territory. Fix: replaced the lat/lon math with a set of hand-placed Lebanese
+//            FRONTIER POINTS (coast north of Rosh Hanikra, Aita al-Shaab, Bint Jbeil, Markaba/
+//            Houla, Kfar Kila opposite Metula, Shebaa/Mt Dov) — all confirmed on the Lebanese
+//            side; the launch picks the nearest one to the target. Verified: every border-belt
+//            town now launches 2–5 km away from a Lebanese frontier point (Kiryat Shmona 3km,
+//            Metula 4km, Shtula 2km, Avivim 3km), never inside Israel or at sea. No console errors.
 //   2.21.4 — Hezbollah BORDER-LAUNCH override (user: 'из Тира стреляют буквально из моря; в Штулу
 //            не должно лететь от Сидона; пусть стреляют буквально с границы, ~5км'). The v2.21.3
 //            nearest-site pick still used the far named base centre + a ±6km spread, which (a) for
@@ -2598,7 +2608,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.21.4';
+const GAME_VERSION = '2.21.5';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -10172,21 +10182,30 @@ function spawnThreat(typeId, enemyId, targetCityId, explicitLat, explicitLon, ex
   let sLat = site.lat + (Math.random() - 0.5) * e.spread;
   let sLon = site.lon + (Math.random() - 0.5) * e.spread;
 
-  // === BORDER-LAUNCH OVERRIDE (v2.21.4) ===
-  // For Hezbollah firing AT a named northern target, ignore the far named base and launch from
-  // ~5km INTO LEBANON, directly across the border from the target — short, realistic frontier
-  // trajectories (and never out at sea). Skipped for the long-range ballistic at Tel Aviv.
+  // === BORDER-LAUNCH OVERRIDE (v2.21.5) ===
+  // For Hezbollah firing AT a named northern target, launch from a real Lebanese-side FRONTIER
+  // POINT nearest the target. These are hand-placed just NORTH of the actual Blue Line (which is
+  // not a flat latitude — the Metula finger & eastern panhandle jut deep into Lebanon), so a
+  // launch is NEVER inside Israeli territory and never out at sea. Ballistic at Tel Aviv is exempt.
   if (enemyId === 'hezbollah' && targetCityId && typeId !== 'tacBallistic' && typeId !== 'ballistic' && typeof explicitLat !== 'number') {
     const tgt = state.cities.find(c => c.id === targetCityId && c.alive);
     if (tgt) {
-      const BORDER_LAT = 33.07;                          // ~the Israel–Lebanon Blue Line latitude
-      // launch ~4–7 km NORTH of the target, but always at least just INSIDE Lebanon (border belt
-      // targets fire from ~5km over the frontier; deeper targets like Haifa fire from the border).
-      const km = 4 + Math.random() * 3;
-      sLat = Math.max(BORDER_LAT + 0.02, tgt.lat + km * 0.009);
-      // lateral: bias toward the target's longitude so the trajectory comes straight down, with a
-      // small jitter; clamp east of ~35.15 so coastal launches stay on Lebanese LAND (never sea).
-      sLon = Math.max(35.16, tgt.lon + (Math.random() - 0.5) * 0.05);
+      // Lebanese frontier firing positions (all confirmed north of the border, on land):
+      const FRONTIER = (typeof HEZ_FRONTIER_POINTS !== 'undefined') ? HEZ_FRONTIER_POINTS : [
+        { lat: 33.110, lon: 35.140 },  // coast, north of Rosh Hanikra (for Nahariya/Haifa axis)
+        { lat: 33.094, lon: 35.302 },  // Aita al-Shaab (for Shtula/Western Galilee)
+        { lat: 33.121, lon: 35.433 },  // Bint Jbeil (central frontier)
+        { lat: 33.115, lon: 35.520 },  // Markaba/Houla (for Margaliot/Manara)
+        { lat: 33.180, lon: 35.585 },  // Kfar Kila, opposite Metula (east panhandle)
+        { lat: 33.270, lon: 35.620 }   // Shebaa/Mt Dov sector (for the far NE)
+      ];
+      let best = FRONTIER[0], bd = Infinity;
+      for (const f of FRONTIER) {
+        const d = haversineKm(f.lat, f.lon, tgt.lat, tgt.lon);
+        if (d < bd) { bd = d; best = f; }
+      }
+      sLat = best.lat + (Math.random() - 0.5) * 0.02;   // tiny jitter (~±1km) along the frontier
+      sLon = best.lon + (Math.random() - 0.5) * 0.02;
     }
   }
 
