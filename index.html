@@ -2053,6 +2053,14 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.21.3 — NEAREST-SITE launch doctrine (user: 'если стреляет по городам, пусть стреляет из
+//            ближайшей точки к городу — с границы'). When a threat is fired AT a named city and
+//            no launch site was explicitly chosen, spawnThreat now picks the live launch site
+//            CLOSEST to that target instead of a random one — so the rocket crosses the border
+//            at the nearest point rather than arcing diagonally across the whole country. Applies
+//            to all factions. Verified: Kiryat Shmona←Bint Jbeil 16km, Metula←Marjayoun 11km,
+//            Nahariya←Tyre 33km, Haifa←Bint Jbeil 55km; Hamas Sderot←6km; random no-target
+//            spawns unaffected. No console errors.
 //   2.21.2 — Hezbollah pre-Oct-1 'border war' confined to the frontier (user: 'с 7 окт до 1 окт
 //            Хезболла стреляла ближе к границе — это их территория, ЦАХАЛ не заходил до 1 окт').
 //            Before the Oct-1-2024 ground invasion there were NO IDF troops in south Lebanon, so:
@@ -2579,7 +2587,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.21.2';
+const GAME_VERSION = '2.21.3';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -10110,6 +10118,22 @@ function spawnThreat(typeId, enemyId, targetCityId, explicitLat, explicitLon, ex
     const exp = disabledMap[enemyId + '_' + idx];
     return typeof exp === 'number' && exp > Date.now();
   };
+  // === NEAREST-SITE DOCTRINE (v2.21.3) ===
+  // When firing AT a named city (e.g. Hezbollah barrage on Kiryat Shmona) and no site was
+  // explicitly chosen, launch from the live launch site CLOSEST to that city — so the rocket
+  // crosses the border at the nearest point instead of arcing diagonally across the country.
+  if (typeof explicitSiteIndex !== 'number' && targetCityId && e.launchSites && e.launchSites.length) {
+    const tgt = state.cities.find(c => c.id === targetCityId && c.alive);
+    if (tgt) {
+      let bestI = -1, bestD = Infinity;
+      e.launchSites.forEach((s, i) => {
+        if (isSiteDisabled(i)) return;
+        const d = haversineKm(s.lat, s.lon, tgt.lat, tgt.lon);
+        if (d < bestD) { bestD = d; bestI = i; }
+      });
+      if (bestI >= 0) explicitSiteIndex = bestI;
+    }
+  }
   // Player-as-attacker firing as this faction → honor explicit choice (player picks their own base);
   // otherwise (AI doctrine, Hezbollah/Hamas pickers, etc.) the disabled filter applies.
   const isPlayerAttackerLaunch = (state.playAs === 'attacker'
