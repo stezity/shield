@@ -2053,6 +2053,17 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.21.4 — Hezbollah BORDER-LAUNCH override (user: 'из Тира стреляют буквально из моря; в Штулу
+//            не должно лететь от Сидона; пусть стреляют буквально с границы, ~5км'). The v2.21.3
+//            nearest-site pick still used the far named base centre + a ±6km spread, which (a) for
+//            coastal Tyre threw launch points into the SEA, and (b) still meant Shtula could fire
+//            from Sidon (~50km). Fix: for Hezbollah firing at a named northern target (non-
+//            ballistic), the launch point is now computed ~4–7 km NORTH of the target, just inside
+//            Lebanon (clamped to ≥ the Blue-Line latitude and ≥ lon 35.16 so coastal launches stay
+//            on LAND, never sea). Border-belt towns now fire from ~4–6 km across the frontier;
+//            deeper targets (Haifa) fire straight down from the border. Verified: Kiryat Shmona
+//            4km, Metula 5km, Shtula 6km (never from Sidon — all start-lats ~33.13), Nahariya/Haifa
+//            launch on land north of the border. No console errors.
 //   2.21.3 — NEAREST-SITE launch doctrine (user: 'если стреляет по городам, пусть стреляет из
 //            ближайшей точки к городу — с границы'). When a threat is fired AT a named city and
 //            no launch site was explicitly chosen, spawnThreat now picks the live launch site
@@ -2587,7 +2598,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.21.3';
+const GAME_VERSION = '2.21.4';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -10158,8 +10169,26 @@ function spawnThreat(typeId, enemyId, targetCityId, explicitLat, explicitLon, ex
   }
   const site = e.launchSites[siteIdx];
   // Сильнее «случайный гео-разброс» вокруг центра города запуска
-  const sLat = site.lat + (Math.random() - 0.5) * e.spread;
-  const sLon = site.lon + (Math.random() - 0.5) * e.spread;
+  let sLat = site.lat + (Math.random() - 0.5) * e.spread;
+  let sLon = site.lon + (Math.random() - 0.5) * e.spread;
+
+  // === BORDER-LAUNCH OVERRIDE (v2.21.4) ===
+  // For Hezbollah firing AT a named northern target, ignore the far named base and launch from
+  // ~5km INTO LEBANON, directly across the border from the target — short, realistic frontier
+  // trajectories (and never out at sea). Skipped for the long-range ballistic at Tel Aviv.
+  if (enemyId === 'hezbollah' && targetCityId && typeId !== 'tacBallistic' && typeId !== 'ballistic' && typeof explicitLat !== 'number') {
+    const tgt = state.cities.find(c => c.id === targetCityId && c.alive);
+    if (tgt) {
+      const BORDER_LAT = 33.07;                          // ~the Israel–Lebanon Blue Line latitude
+      // launch ~4–7 km NORTH of the target, but always at least just INSIDE Lebanon (border belt
+      // targets fire from ~5km over the frontier; deeper targets like Haifa fire from the border).
+      const km = 4 + Math.random() * 3;
+      sLat = Math.max(BORDER_LAT + 0.02, tgt.lat + km * 0.009);
+      // lateral: bias toward the target's longitude so the trajectory comes straight down, with a
+      // small jitter; clamp east of ~35.15 so coastal launches stay on Lebanese LAND (never sea).
+      sLon = Math.max(35.16, tgt.lon + (Math.random() - 0.5) * 0.05);
+    }
+  }
 
   // Выбор цели (близость к точке запуска, важность)
   let targetCity;
