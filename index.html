@@ -2053,6 +2053,16 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.21.6 — Fixed Lebanese map markers + launch points sitting on the Israeli side (user:
+//            'ливанские точки на израильской территории, исправь'). Several ENEMY_TARGETS
+//            Lebanese villages had inaccurate coords that fell inside the rendered Israel border
+//            polygon (esp. near the Metula finger): corrected Markaba (lon 35.505→35.398),
+//            Adaisseh, Kfar Kila (moved north of the finger to 33.301), Kfarchouba to real
+//            coordinates, and re-aligned the v2.21.5 frontier launch points to match. Validated
+//            with a point-in-polygon test against the game's actual Israel border ring: ALL 22
+//            Hezbollah targets now test OUTSIDE Israel, and 0 / 88 sampled rocket launches fall
+//            inside Israel (launch jitter biased north into Lebanon so it can't drift across the
+//            frontier). No console errors.
 //   2.21.5 — Hezbollah launches no longer come from INSIDE Israel (user: 'почему запускают
 //            беспилотники из израильской территории'). v2.21.4 placed the launch 'north of the
 //            target', but the Blue Line is not a flat latitude — the Metula finger & eastern
@@ -2608,7 +2618,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.21.5';
+const GAME_VERSION = '2.21.6';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -3224,13 +3234,13 @@ const ENEMY_TARGETS = [
   { id: 't_aita_shab',    name: 'Aita ash-Shab',            lat: 33.0938, lon: 35.3489, faction: 'hezbollah', importance: 4,  type: 'launch',   hardness: 0.30 },
   { id: 't_maroun_ras',   name: 'Maroun al-Ras',            lat: 33.1014, lon: 35.4115, faction: 'hezbollah', importance: 4,  type: 'launch',   hardness: 0.30 },
   { id: 't_yaroun',       name: 'Yaroun',                   lat: 33.0908, lon: 35.4458, faction: 'hezbollah', importance: 3,  type: 'city',     hardness: 0.20 },
-  { id: 't_markaba',      name: 'Markaba',                  lat: 33.2600, lon: 35.5050, faction: 'hezbollah', importance: 4,  type: 'city',     hardness: 0.20 },
+  { id: 't_markaba',      name: 'Markaba',                  lat: 33.2761, lon: 35.3983, faction: 'hezbollah', importance: 4,  type: 'city',     hardness: 0.20 },
   { id: 't_tibnin',       name: 'Tibnin',                   lat: 33.1956, lon: 35.4128, faction: 'hezbollah', importance: 4,  type: 'city',     hardness: 0.25 },
-  { id: 't_adaisseh',     name: 'Adaisseh',                 lat: 33.2542, lon: 35.5403, faction: 'hezbollah', importance: 4,  type: 'launch',   hardness: 0.25 },
-  { id: 't_kfar_kila',    name: 'Kfar Kila',                lat: 33.2497, lon: 35.5703, faction: 'hezbollah', importance: 4,  type: 'launch',   hardness: 0.25 },
+  { id: 't_adaisseh',     name: 'Adaisseh',                 lat: 33.2694, lon: 35.5208, faction: 'hezbollah', importance: 4,  type: 'launch',   hardness: 0.25 },
+  { id: 't_kfar_kila',    name: 'Kfar Kila',                lat: 33.3010, lon: 35.5850, faction: 'hezbollah', importance: 4,  type: 'launch',   hardness: 0.25 },
   { id: 't_jezzine',      name: 'Jezzine',                  lat: 33.5439, lon: 35.5847, faction: 'hezbollah', importance: 5,  type: 'city',     hardness: 0.25 },
   { id: 't_aitaroun',     name: 'Aitaroun',                 lat: 33.1086, lon: 35.4458, faction: 'hezbollah', importance: 3,  type: 'launch',   hardness: 0.25 },
-  { id: 't_kfarchouba',   name: 'Kfarchouba',               lat: 33.2606, lon: 35.6694, faction: 'hezbollah', importance: 3,  type: 'launch',   hardness: 0.25 },
+  { id: 't_kfarchouba',   name: 'Kfarchouba',               lat: 33.2950, lon: 35.6422, faction: 'hezbollah', importance: 3,  type: 'launch',   hardness: 0.25 },
 
   // === Iran ===
   { id: 't_tehran',       name: 'TEHRAN (capital)',         lat: 35.6892, lon: 51.3890, faction: 'iran',      importance: 10, type: 'capital',  hardness: 0.5 },
@@ -10192,20 +10202,21 @@ function spawnThreat(typeId, enemyId, targetCityId, explicitLat, explicitLon, ex
     if (tgt) {
       // Lebanese frontier firing positions (all confirmed north of the border, on land):
       const FRONTIER = (typeof HEZ_FRONTIER_POINTS !== 'undefined') ? HEZ_FRONTIER_POINTS : [
-        { lat: 33.110, lon: 35.140 },  // coast, north of Rosh Hanikra (for Nahariya/Haifa axis)
-        { lat: 33.094, lon: 35.302 },  // Aita al-Shaab (for Shtula/Western Galilee)
-        { lat: 33.121, lon: 35.433 },  // Bint Jbeil (central frontier)
-        { lat: 33.115, lon: 35.520 },  // Markaba/Houla (for Margaliot/Manara)
-        { lat: 33.180, lon: 35.585 },  // Kfar Kila, opposite Metula (east panhandle)
-        { lat: 33.270, lon: 35.620 }   // Shebaa/Mt Dov sector (for the far NE)
+        { lat: 33.110, lon: 35.110 },  // coast, north of Rosh Hanikra (for Nahariya/Haifa axis)
+        { lat: 33.108, lon: 35.300 },  // Aita al-Shaab (for Shtula/Western Galilee) — nudged N of the line
+        { lat: 33.128, lon: 35.433 },  // Bint Jbeil (central frontier)
+        { lat: 33.276, lon: 35.398 },  // Markaba (for Margaliot/Manara — NW of the panhandle)
+        { lat: 33.305, lon: 35.585 },  // Kfar Kila, north of the Metula finger (Lebanon)
+        { lat: 33.305, lon: 35.640 }   // Kfarchouba / Shebaa sector (for the far NE)
       ];
       let best = FRONTIER[0], bd = Infinity;
       for (const f of FRONTIER) {
         const d = haversineKm(f.lat, f.lon, tgt.lat, tgt.lon);
         if (d < bd) { bd = d; best = f; }
       }
-      sLat = best.lat + (Math.random() - 0.5) * 0.02;   // tiny jitter (~±1km) along the frontier
-      sLon = best.lon + (Math.random() - 0.5) * 0.02;
+      // jitter biased NORTH (into Lebanon) so a launch never drifts across the frontier into Israel
+      sLat = best.lat + Math.random() * 0.012;          // 0..+1.3km north only
+      sLon = best.lon + (Math.random() - 0.5) * 0.014;  // ±0.8km lateral
     }
   }
 
