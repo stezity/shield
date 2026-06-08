@@ -2053,6 +2053,23 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.21.0 — Hezbollah War HISTORICAL ACCURACY: range creep + drones (user: 'крайне НЕ
+//            реалистичный — с окт по дек 2023 Хезболла била только приграничье, почему
+//            стреляют так далеко если ЦАХАЛ ещё не заходил, добавь БПЛА'). From a Wikipedia
+//            research pass (Hezbollah–Israel conflict 2023–present). The war was a CONTAINED
+//            BORDER conflict Oct 2023 → mid-2024 (rockets ≤~15km, border belt only); deep
+//            rockets on Haifa began Sept 22 2024 and the first ballistic at Tel Aviv Sept 25.
+//            DRONES were the through-line — they out-ranged the rockets from day one (the real
+//            May-2024 drone reached Tiberias ~35km while rockets stayed at the fence).
+//            Rebuilt the phases: support1 (Oct23–Feb24) + support2 (Feb–Jun24) are BORDER-ONLY
+//            (Kiryat Shmona/Metula/Shtula/Margaliot/Manara/Avivim/Dovev/Shlomi), 'creep'
+//            (Jun–Sep) reaches the Western Galilee (Nahariya/Maalot/Safed/Karmiel), and Haifa
+//            heavy rockets + Tel Aviv ballistic ONLY unlock from the 'arrows' (Sept escalation)
+//            phase. New range tiers (border/galilee/haifa/deep, cumulative) + per-phase droneRate
+//            (drones every phase, deeper than rockets via HEZ_DRONE_TARGETS) + a ballistic flag
+//            gated to late phases. IDF ground front stays 0 until the Oct-1 invasion (no premature
+//            blue shading). Verified: phase 1 rockets hit only the belt (no Haifa/heavy/ballistic),
+//            drones reach Tiberias; 'arrows' adds Haifa heavy + Tel Aviv ballistic.
 //   2.20.1 — Smaller buttons + fix 'buttons don't work' (user: 'уменьши кнопки и сделай их
 //            рабочими, там много багов'). ROOT CAUSE: the v2.20.0 mobile media query was
 //            '(max-width:820px), (pointer:coarse)' — the (pointer:coarse) clause matched
@@ -2538,7 +2555,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.20.1';
+const GAME_VERSION = '2.21.0';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -18916,50 +18933,76 @@ const OCT7_WAR_PHASES = [
 //   strike = IDF airstrike rate on Lebanon ; front = IDF ground front 0..1
 //   (0 = at border, 1 = at the Litani) ; lebStart/End = cumulative Lebanese deaths.
 // ===========================================================================
+// === HISTORICALLY-ACCURATE RANGE CREEP (v2.21.0) ===
+// Oct 2023 → Aug 2024 was a CONTAINED BORDER war — Hezbollah hit only the border belt with
+// Katyushas, ATGMs and (heavily, from day one) DRONES. Range only crept to the Western Galilee
+// in summer 2024, and deep strikes on Haifa + ballistic missiles at Tel Aviv began ONLY with
+// the Sept 2024 escalation (Northern Arrows / Nasrallah). Each phase carries:
+//   tier      = how deep the rockets reach ('border' | 'galilee' | 'haifa' | 'deep')
+//   droneRate = drones are a constant feature — chance of a drone per barrage (0..1)
+//    ballistic = this phase can fire long-range ballistic at the centre (Tel Aviv) — late only
 const HEZ_WAR_PHASES = [
-  { id:'support', name:'The Support Front', dateLabel:'Oct 8 2023 – Jul 2024',
-    durationMs:60000, rocket:0.22, tier:'short', strike:0.4, front:0, ground:false,
-    lebStart:60, lebEnd:560, ilStart:0, ilEnd:33,
-    desc:'A day after Oct 7, Hezbollah opens a "support front" for Gaza — daily rockets, ATGMs and drones on the border belt. ~60,000 Israelis evacuate the north.',
-    news:['Hezbollah opens a "support front" — rockets on the Galilee border belt','Kiryat Shmona, Metula and Shtula under daily fire; 60,000 evacuated','Tit-for-tat: IDF artillery and airstrikes on south Lebanon launch sites'] },
-  { id:'majdal', name:'Majdal Shams & the Shukr Strike', dateLabel:'Jul 27 – Sep 16, 2024',
-    durationMs:45000, rocket:0.38, tier:'medium', strike:0.6, front:0, ground:false,
-    lebStart:560, lebEnd:900, ilStart:33, ilEnd:52,
-    desc:'A rocket hits a football pitch in Majdal Shams, killing 12 children. Israel assassinates senior commander Fuad Shukr in Beirut. The slide to open war begins.',
-    news:['Rocket kills 12 children on a football pitch in Majdal Shams','Israel kills senior Hezbollah commander Fuad Shukr in Beirut','Cross-border exchanges intensify across the whole front'] },
+  { id:'support1', name:'The Support Front', dateLabel:'Oct 8 2023 – Feb 2024',
+    durationMs:55000, rocket:0.18, tier:'border', droneRate:0.4, strike:0.35, front:0, ground:false,
+    lebStart:60, lebEnd:300, ilStart:0, ilEnd:18,
+    desc:'A day after Oct 7, Hezbollah opens a "support front" for Gaza. Fire is confined to the border belt — Katyushas, Kornet ATGMs and attack drones on Kiryat Shmona, Metula, Shtula and the border kibbutzim. ~60,000 Israelis evacuate the north.',
+    news:['Hezbollah opens a "support front" — fire confined to the border belt','Kiryat Shmona, Metula, Shtula, Margaliot under daily Katyusha + drone fire','60,000 evacuated from the northern border communities'] },
+  { id:'support2', name:'War of Attrition', dateLabel:'Feb – Jun 2024',
+    durationMs:55000, rocket:0.24, tier:'border', droneRate:0.5, strike:0.45, front:0, ground:false,
+    lebStart:300, lebEnd:480, ilStart:18, ilEnd:30,
+    desc:'Grinding tit-for-tat along the Blue Line. Heavier drone use and ATGM ambushes; IDF steps up airstrikes on south-Lebanon launch cells. Still border-only — nothing reaching past the immediate frontier.',
+    news:['Daily exchanges along the Blue Line — still border-confined','Hezbollah drone & ATGM attacks on IDF border posts intensify','IDF airstrikes push deeper into south Lebanon launch areas'] },
+  { id:'creep', name:'Range Creep · Western Galilee', dateLabel:'Jun – Sep 16, 2024',
+    durationMs:50000, rocket:0.34, tier:'galilee', droneRate:0.55, strike:0.6, front:0, ground:false,
+    lebStart:480, lebEnd:900, ilStart:30, ilEnd:52,
+    desc:'Escalation. Fire reaches deeper into the Western Galilee — Nahariya, Maalot, the Safed/Karmiel area. On Jul 27 a rocket hits a football pitch in Majdal Shams, killing 12 children; Israel kills commander Fuad Shukr in Beirut. Big drone swarms appear.',
+    news:['Range expands — rockets now reaching Nahariya, Maalot, the Safed area','Rocket kills 12 children on a football pitch in Majdal Shams','Israel kills senior Hezbollah commander Fuad Shukr in Beirut'] },
   { id:'pager', name:'Operation Grim Beeper · Device Attacks', dateLabel:'Sep 17–18, 2024',
-    durationMs:32000, rocket:0.3, tier:'medium', strike:0.7, front:0, ground:false,
+    durationMs:30000, rocket:0.3, tier:'galilee', droneRate:0.4, strike:0.7, front:0, ground:false,
     lebStart:900, lebEnd:1000, ilStart:52, ilEnd:53,
-    desc:'Israel detonates thousands of booby-trapped Hezbollah pagers (Sep 17) and walkie-talkies (Sep 18) across Lebanon — ~42 killed, ~3,500 wounded, ~1,500 fighters out of action.',
-    news:['Thousands of Hezbollah pagers explode simultaneously across Lebanon','A day later, hundreds of walkie-talkies detonate — ~3,500 wounded','Hezbollah reels — command and communications shattered'] },
-  { id:'arrows', name:'Operation Northern Arrows · Nasrallah Killed', dateLabel:'Sep 23–30, 2024',
-    durationMs:55000, rocket:0.7, tier:'heavy', strike:1.0, front:0.1, ground:false,
+    desc:'Israel detonates thousands of booby-trapped Hezbollah pagers (Sep 17) then walkie-talkies (Sep 18) across Lebanon — ~42 killed, ~3,500 wounded, ~1,500 fighters out of action. Hezbollah is reeling.',
+    news:['Thousands of Hezbollah pagers explode simultaneously across Lebanon','A day later, hundreds of walkie-talkies detonate — ~3,500 wounded','Hezbollah command and communications shattered'] },
+  { id:'arrows', name:'Northern Arrows · Nasrallah Killed', dateLabel:'Sep 23–30, 2024',
+    durationMs:55000, rocket:0.72, tier:'haifa', droneRate:0.6, strike:1.0, front:0.1, ground:false, ballistic:true,
     lebStart:1000, lebEnd:1700, ilStart:53, ilEnd:55,
-    desc:'Israel launches Operation Northern Arrows — massive strikes on Hezbollah\'s missile stores. On Sep 27, bunker-busters on the Dahieh HQ kill Hassan Nasrallah. Hezbollah fires 100+ rockets a day in reply.',
-    news:['Operation Northern Arrows: 800+ killed in Lebanon in the first week','★ HASSAN NASRALLAH killed in a bunker-buster strike on Dahieh, Beirut','Hezbollah retaliates with heavy rocket barrages on Haifa and the Galilee'] },
+    desc:'Israel launches Operation Northern Arrows — massive strikes on Hezbollah\'s missile stores. Now the range opens up: the first heavy rockets reach HAIFA and a ballistic missile is fired at Tel Aviv (Sep 25). On Sep 27 bunker-busters on the Dahieh HQ kill Hassan Nasrallah.',
+    news:['Range opens up — first heavy rockets reach Haifa; a missile at Tel Aviv','★ HASSAN NASRALLAH killed in a bunker-buster strike on Dahieh, Beirut','Operation Northern Arrows: 800+ killed in Lebanon in the first week'] },
   { id:'ground', name:'Ground Invasion + Iran\'s Missiles', dateLabel:'Oct 1 – mid-Oct 2024',
-    durationMs:60000, rocket:0.9, tier:'heavy', strike:1.0, front:0.4, ground:true,
-    lebStart:1700, lebEnd:2300, ilStart:55, ilEnd:70, iranSalvo:true,
+    durationMs:60000, rocket:0.88, tier:'haifa', droneRate:0.6, strike:1.0, front:0.4, ground:true, iranSalvo:true, ballistic:true,
+    lebStart:1700, lebEnd:2300, ilStart:55, ilEnd:70,
     desc:'IDF ground forces cross into south Lebanon. The same day, Iran fires ~180 ballistic missiles at Israel (True Promise II). An ambush at Odaisseh kills 8 soldiers — the deadliest day of the ground war.',
     news:['GROUND INVASION: IDF crosses into south Lebanon','★ IRAN fires ~180 ballistic missiles at Israel — intercepted by Arrow + Iron Dome','Egoz commandos ambushed at Odaisseh — 8 soldiers killed'] },
   { id:'drones', name:'Deep Strikes & the Binyamina Drone', dateLabel:'mid-Oct – mid-Nov 2024',
-    durationMs:55000, rocket:0.85, tier:'heavy', strike:1.0, front:0.7, ground:true, drones:true,
+    durationMs:55000, rocket:0.85, tier:'deep', droneRate:0.85, strike:1.0, front:0.7, ground:true,
     lebStart:2300, lebEnd:3000, ilStart:70, ilEnd:100,
-    desc:'Grinding combat in the border villages. Hezbollah\'s deepest strikes: 100+ rockets on Haifa, and a drone that evades defences to hit a Golani base near Binyamina, killing 4 soldiers.',
+    desc:'Grinding combat in the border villages. Hezbollah\'s deepest strikes: 100+ rockets on Haifa, and an attack drone that evades the defences to hit a Golani base near Binyamina, killing 4 soldiers.',
     news:['Heaviest barrage on Haifa yet — 100+ rockets in 30 minutes','★ Hezbollah drone evades defences, hits a Golani base near Binyamina — 4 killed','IDF razes border strongholds: Maroun al-Ras, Aita al-Shaab'] },
   { id:'ceasefire', name:'Final Barrages → Ceasefire', dateLabel:'mid-Nov – Nov 27, 2024',
-    durationMs:50000, rocket:0.95, tier:'heavy', strike:0.8, front:1.0, ground:true, truceAtEnd:true,
+    durationMs:50000, rocket:0.95, tier:'deep', droneRate:0.7, strike:0.8, front:1.0, ground:true, truceAtEnd:true,
     lebStart:3000, lebEnd:3800, ilStart:100, ilEnd:127,
     desc:'A last surge of heavy fire — up to 250 rockets in a day on Haifa, Tiberias, Acre and the Krayot — even as diplomacy closes in. On Nov 27 a 60-day ceasefire takes effect: Hezbollah north of the Litani, IDF south of the Blue Line.',
-    news:['Up to 250 rockets in a single day — Haifa, Tiberias, Acre, the Krayot','Ceasefire agreed under US-French mediation','CEASEFIRE in effect — Hezbollah withdraws north of the Litani; the guns fall silent'] }
+    news:['Up to 250 rockets in a single day — Haifa, Tiberias, Acre, the Krayot','Ceasefire agreed under US-French mediation','CEASEFIRE in effect — Hezbollah withdraws north of the Litani'] }
 ];
 
-// Hezbollah weapon tiers → which cities each can reach + the weapon used.
-// 'short' adds to 'medium' adds to 'heavy' (heavier phases can still fire short rockets too).
+// Hezbollah range tiers → which cities each can reach. Tiers are cumulative-by-depth:
+//   border  = ONLY the immediate border belt (Oct 2023 – mid 2024)
+//   galilee = border + Western Galilee (Nahariya/Maalot/Safed/Karmiel) — summer 2024
+//   haifa   = galilee + the Haifa bay / Krayot (heavy rockets) — Sept 2024 escalation onward
+//   deep    = haifa + deeper coast (Binyamina/Hadera) — late war
 const HEZ_TARGETS = {
-  short:  ['kiryat_shmona','metula','nahariya','shlomi','maalot','shtula'],
-  medium: ['safed','karmiel','tiberias','akko','nahariya'],
-  heavy:  ['haifa','kiryat_bialik','kiryat_yam','kiryat_motzkin','akko','karmiel','binyamina']
+  border:  ['kiryat_shmona','metula','shtula','margaliot','manara','avivim','dovev','shlomi'],
+  galilee: ['nahariya','maalot','safed','karmiel','akko'],
+  haifa:   ['haifa','kiryat_bialik','kiryat_yam','kiryat_motzkin','tiberias'],
+  deep:    ['hadera','binyamina']
+};
+// DRONES out-ranged the rockets the whole war. In the border phases, rockets stay on the belt
+// but explosive drones occasionally reach deeper (the real May-2024 Golani-Junction/Tiberias
+// drone, ~35km). Per-tier drone target pools (deeper than the same tier's rockets):
+const HEZ_DRONE_TARGETS = {
+  border:  ['kiryat_shmona','nahariya','tiberias','safed'],   // drones reach Tiberias/Safed even when rockets don't
+  galilee: ['nahariya','karmiel','akko','tiberias','haifa'],
+  haifa:   ['haifa','kiryat_bialik','binyamina','akko'],
+  deep:    ['binyamina','hadera','haifa']
 };
 // Tel Aviv / airbases reserved for the Iran ballistic salvo (boss wave).
 const HEZ_IRAN_TARGETS = ['telaviv','nevatim','tel_nof','gedera','rishon'];
@@ -19942,14 +19985,17 @@ function initHezbollahWar() {
 function hezFireBarrage(ph) {
   const gen = state.scenarioGen;
   const n = Math.max(2, Math.round((3 + Math.random() * 7) * ph.rocket));
-  // build the eligible target+weapon pool for this phase's tier
-  let pool = [];
-  if (ph.tier === 'short')  pool = HEZ_TARGETS.short.map(c => [c, 'rocket']);
-  else if (ph.tier === 'medium') pool = HEZ_TARGETS.short.map(c => [c,'rocket']).concat(HEZ_TARGETS.medium.map(c => [c,'rocket']));
-  else { // heavy: short + medium rockets + heavy rockets on Haifa belt
-    pool = HEZ_TARGETS.short.map(c => [c,'rocket'])
-      .concat(HEZ_TARGETS.medium.map(c => [c,'rocket']))
-      .concat(HEZ_TARGETS.heavy.map(c => [c,'heavyRocket']));
+  // === ROCKET POOL — cumulative by depth (v2.21.0) ===
+  // border/galilee fire short rockets; haifa/deep add HEAVY rockets onto the Haifa belt.
+  let pool = HEZ_TARGETS.border.map(c => [c, 'rocket']);
+  if (ph.tier === 'galilee' || ph.tier === 'haifa' || ph.tier === 'deep') {
+    pool = pool.concat(HEZ_TARGETS.galilee.map(c => [c, 'rocket']));
+  }
+  if (ph.tier === 'haifa' || ph.tier === 'deep') {
+    pool = pool.concat(HEZ_TARGETS.haifa.map(c => [c, 'heavyRocket']));
+  }
+  if (ph.tier === 'deep') {
+    pool = pool.concat(HEZ_TARGETS.deep.map(c => [c, 'heavyRocket']));
   }
   for (let i = 0; i < n; i++) {
     setTimeout(() => {
@@ -19959,12 +20005,25 @@ function hezFireBarrage(ph) {
       try { spawnThreat(pick[1], 'hezbollah', pick[0]); } catch (e) {}
     }, i * 160);
   }
-  // drones in the drone phase
-  if (ph.drones && Math.random() < 0.5) {
+  // === DRONES — a constant feature, and they reach DEEPER than the rockets (v2.21.0) ===
+  const droneRate = (ph.droneRate != null) ? ph.droneRate : 0.4;
+  if (Math.random() < droneRate) {
+    const dpool = HEZ_DRONE_TARGETS[ph.tier] || HEZ_DRONE_TARGETS.border;
+    const dn = 1 + (Math.random() < 0.3 ? 1 : 0);    // usually 1, sometimes 2 drones
+    for (let k = 0; k < dn; k++) {
+      setTimeout(() => {
+        if (state.scenarioGen !== gen || !state.active || state.paused) return;
+        const t = dpool[Math.floor(Math.random() * dpool.length)];
+        try { spawnThreat('drone', 'hezbollah', t); } catch (e) {}
+      }, 700 + k * 500);
+    }
+  }
+  // === BALLISTIC at the centre (Tel Aviv) — ONLY late phases flagged ballistic (Sept 25 2024+) ===
+  if (ph.ballistic && Math.random() < 0.25) {
     setTimeout(() => {
       if (state.scenarioGen !== gen || !state.active || state.paused) return;
-      try { spawnThreat('drone', 'hezbollah', Math.random() < 0.4 ? 'binyamina' : 'haifa'); } catch (e) {}
-    }, 900);
+      try { spawnThreat('tacBallistic', 'hezbollah', Math.random() < 0.5 ? 'telaviv' : 'haifa'); } catch (e) {}
+    }, 1100);
   }
 }
 
