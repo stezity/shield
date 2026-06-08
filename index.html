@@ -2053,6 +2053,18 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.21.1 — Hezbollah summer geography corrected (user: 'в июне–сентябре Нагарию/Кармиэль не
+//            бомбили, иногда могли быть беспилотники в сторону Крайот — изучи историю тревог').
+//            A second alert-geography research pass (Wikipedia timeline subpages + ToI/AlJazeera)
+//            confirmed: Jun–Aug 2024 rockets stayed on the BORDER BELT — Nahariya/Karmiel/Safed
+//            were NOT rocket-bombed; deep reach was DRONES only, and they hit the Nahariya/Acre
+//            coast + the Tiberias/Golani-Junction area (Camp Shraga Aug 6), NOT the Krayot
+//            (summer Haifa-Bay drone footage was reconnaissance). Krayot first hit Sept 22.
+//            Fixes: decoupled drone reach from rocket reach (new per-phase droneTier); the
+//            'creep' phase is now tier:'border' (rockets) + droneTier:'coast'
+//            (Nahariya/Acre/Tiberias drones) — no Galilee rockets, no summer Krayot. Krayot drone
+//            set moved to the Sept-escalation tiers. Verified: summer rockets hit only the belt,
+//            summer drones hit the coast (not Krayot); 'arrows' adds Haifa/Krayot heavy + drones.
 //   2.21.0 — Hezbollah War HISTORICAL ACCURACY: range creep + drones (user: 'крайне НЕ
 //            реалистичный — с окт по дек 2023 Хезболла била только приграничье, почему
 //            стреляют так далеко если ЦАХАЛ ещё не заходил, добавь БПЛА'). From a Wikipedia
@@ -2555,7 +2567,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.21.0';
+const GAME_VERSION = '2.21.1';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -18952,11 +18964,11 @@ const HEZ_WAR_PHASES = [
     lebStart:300, lebEnd:480, ilStart:18, ilEnd:30,
     desc:'Grinding tit-for-tat along the Blue Line. Heavier drone use and ATGM ambushes; IDF steps up airstrikes on south-Lebanon launch cells. Still border-only — nothing reaching past the immediate frontier.',
     news:['Daily exchanges along the Blue Line — still border-confined','Hezbollah drone & ATGM attacks on IDF border posts intensify','IDF airstrikes push deeper into south Lebanon launch areas'] },
-  { id:'creep', name:'Range Creep · Western Galilee', dateLabel:'Jun – Sep 16, 2024',
-    durationMs:50000, rocket:0.34, tier:'galilee', droneRate:0.55, strike:0.6, front:0, ground:false,
+  { id:'creep', name:'Escalating Attrition · Deeper Drones', dateLabel:'Jun – Sep 16, 2024',
+    durationMs:50000, rocket:0.32, tier:'border', droneTier:'coast', droneRate:0.7, strike:0.6, front:0, ground:false,
     lebStart:480, lebEnd:900, ilStart:30, ilEnd:52,
-    desc:'Escalation. Fire reaches deeper into the Western Galilee — Nahariya, Maalot, the Safed/Karmiel area. On Jul 27 a rocket hits a football pitch in Majdal Shams, killing 12 children; Israel kills commander Fuad Shukr in Beirut. Big drone swarms appear.',
-    news:['Range expands — rockets now reaching Nahariya, Maalot, the Safed area','Rocket kills 12 children on a football pitch in Majdal Shams','Israel kills senior Hezbollah commander Fuad Shukr in Beirut'] },
+    desc:'The summer of heavy drone use. Rockets still land on the border belt (a Falaq rocket hits a football pitch in Majdal Shams on Jul 27, killing 12 children; Israel kills commander Fuad Shukr). But explosive DRONES reach deeper — a strike on Camp Shraga near Nahariya (Aug 6) and the Tiberias / Golani-Junction area. Rocket range still does NOT reach Haifa or the Krayot.',
+    news:['Heavy drone summer — UAV strikes near Nahariya (Camp Shraga) & Tiberias','Falaq rocket kills 12 children on a football pitch in Majdal Shams','Israel kills senior Hezbollah commander Fuad Shukr in Beirut'] },
   { id:'pager', name:'Operation Grim Beeper · Device Attacks', dateLabel:'Sep 17–18, 2024',
     durationMs:30000, rocket:0.3, tier:'galilee', droneRate:0.4, strike:0.7, front:0, ground:false,
     lebStart:900, lebEnd:1000, ilStart:52, ilEnd:53,
@@ -18999,8 +19011,13 @@ const HEZ_TARGETS = {
 // but explosive drones occasionally reach deeper (the real May-2024 Golani-Junction/Tiberias
 // drone, ~35km). Per-tier drone target pools (deeper than the same tier's rockets):
 const HEZ_DRONE_TARGETS = {
-  border:  ['kiryat_shmona','nahariya','tiberias','safed'],   // drones reach Tiberias/Safed even when rockets don't
-  galilee: ['nahariya','karmiel','akko','tiberias','haifa'],
+  // Oct2023–early2024: anti-tank + a few drones near the fence; deepest = a base near Safed
+  border:  ['kiryat_shmona','nahariya','safed'],
+  // Jun–Sep 2024 (research-corrected): deep ATTACK drones hit the Nahariya/Acre COAST and the
+  // Tiberias/Golani-Junction area — NOT the Krayot (summer Haifa-Bay drone footage was recon).
+  coast:   ['nahariya','akko','tiberias','safed'],
+  // Sept 2024 escalation onward: now the Haifa Bay / Krayot are real drone targets too
+  krayot:  ['kiryat_bialik','kiryat_yam','kiryat_motzkin','haifa','akko','nahariya'],
   haifa:   ['haifa','kiryat_bialik','binyamina','akko'],
   deep:    ['binyamina','hadera','haifa']
 };
@@ -20006,9 +20023,11 @@ function hezFireBarrage(ph) {
     }, i * 160);
   }
   // === DRONES — a constant feature, and they reach DEEPER than the rockets (v2.21.0) ===
+  // v2.21.1: drone reach is DECOUPLED from rocket reach via ph.droneTier — so a border-only
+  // rocket phase can still send the occasional deep drone (the real Jun–Aug 2024 Krayot drones).
   const droneRate = (ph.droneRate != null) ? ph.droneRate : 0.4;
   if (Math.random() < droneRate) {
-    const dpool = HEZ_DRONE_TARGETS[ph.tier] || HEZ_DRONE_TARGETS.border;
+    const dpool = HEZ_DRONE_TARGETS[ph.droneTier || ph.tier] || HEZ_DRONE_TARGETS.border;
     const dn = 1 + (Math.random() < 0.3 ? 1 : 0);    // usually 1, sometimes 2 drones
     for (let k = 0; k < dn; k++) {
       setTimeout(() => {
