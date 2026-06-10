@@ -1933,10 +1933,10 @@ const CITIES_BASE = [
   { id: 'metula',      name: 'Metula',          lat: 33.2790, lon: 35.5790, importance: 3, population: 2,   type: 'city' },
   { id: 'margaliot',   name: 'Margaliot',       lat: 33.2165, lon: 35.5444, importance: 2, population: 1,   type: 'city' },
   { id: 'misgav_am',   name: 'Misgav Am',       lat: 33.2476, lon: 35.5485, importance: 2, population: 1,   type: 'city' },
-  { id: 'manara',      name: 'Manara',          lat: 33.1880, lon: 35.5300, importance: 2, population: 1,   type: 'city' },
-  { id: 'avivim',      name: 'Avivim',          lat: 33.0990, lon: 35.4470, importance: 2, population: 1,   type: 'city' },
+  { id: 'manara',      name: 'Manara',          lat: 33.1450, lon: 35.5300, importance: 2, population: 1,   type: 'city' },
+  { id: 'avivim',      name: 'Avivim',          lat: 33.0830, lon: 35.4470, importance: 2, population: 1,   type: 'city' },
   { id: 'yiftach',     name: 'Yiftach',         lat: 33.1340, lon: 35.5530, importance: 2, population: 1,   type: 'city' },
-  { id: 'dovev',       name: 'Dovev',           lat: 33.0840, lon: 35.4200, importance: 2, population: 1,   type: 'city' },
+  { id: 'dovev',       name: 'Dovev',           lat: 33.0560, lon: 35.4200, importance: 2, population: 1,   type: 'city' },
   { id: 'shtula',      name: 'Shtula',          lat: 33.0820, lon: 35.3010, importance: 2, population: 1,   type: 'city' },
   { id: 'shlomi',      name: 'Shlomi',          lat: 33.0727, lon: 35.1432, importance: 3, population: 7,   type: 'city' },
   { id: 'hanita',      name: 'Hanita',          lat: 33.0900, lon: 35.1750, importance: 2, population: 1,   type: 'city' },
@@ -2053,6 +2053,15 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.21.8 — Moved 3 Israeli border towns back onto Israeli soil (user: 'Довев, Авивим и Манара
+//            сместились — верни их на израильскую территорию'). Their CITIES_BASE coords fell
+//            just NORTH of the game's (downsampled) Israel border polygon, so they rendered on
+//            the Lebanese side. Nudged south to sit inside the polygon: Dovev 33.084→33.056,
+//            Avivim 33.099→33.083, Manara 33.188→33.145. Verified by point-in-polygon vs the
+//            actual border ring: all three now test INSIDE Israel; every other Israeli city
+//            still inside (the only 'outside' ones are West-Bank/Jordan-Valley settlements, which
+//            legitimately sit outside the pre-67 polygon and are unrelated); no Hezbollah target
+//            inside Israel. No console errors.
 //   2.21.7 — Two launch fixes (user: 'до сих пор стреляют из моря; и после того как ЦАХАЛ
 //            вошёл, они стреляют из захваченной зоны — бред'). (1) SEA: the coastal frontier
 //            launch point sat on the waterline (lon 35.11) so jitter dropped launches into the
@@ -2627,7 +2636,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.21.7';
+const GAME_VERSION = '2.21.8';
 
 const BATTERY_TYPES = {
   ironDome: {
