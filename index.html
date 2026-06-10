@@ -2075,6 +2075,13 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.23.6 — Cluster dispersal is now DIRECTIONAL (user: bomblets appeared at scattered "different
+//            points" over Syria; wanted the warhead intercepted → submunitions fly out from there
+//            CONTINUING the ballistic's heading). splitCluster now sends bomblets out along the
+//            bus's flight vector into a TIGHT absolute footprint centred on the target (±~4.5 km
+//            along-track, ±~2.5 km lateral) instead of a circular scatter around the city — so a
+//            far intercept no longer fans them across the map; they read as the warhead's pieces
+//            flying on to the target.
 //   2.23.5 — (1) Intercept/cluster-split SPARKS were flying ~7-10 km from the burst (velocities
 //            ~0.001 deg moved by dt/16 → big drift), looking "far from the intercept cloud" —
 //            cut spark/debris velocities ~5-8x so they stay a tight burst at the kill point.
@@ -2810,7 +2817,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.23.5';
+const GAME_VERSION = '2.23.6';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -11226,18 +11233,27 @@ function splitCluster(t, intercepted) {
   const baseN = (THREAT_TYPES.cluster && THREAT_TYPES.cluster.subCount) || 7;
   const n = intercepted ? Math.max(4, Math.round(baseN * 0.7)) : baseN;
   const sub = THREAT_TYPES.submunition;
-  const spread = 0.045;   // v2.23.3 — tighter spread (~5 km) so the bomblets read as a swarm
-                          // coming off the warhead, not scattered far from it; they fly FAST.
+  // v2.23.6 — the bomblets fly out from the split point CONTINUING along the bus's flight vector
+  // (the same heading the ballistic was on), landing in an elongated DOWNRANGE footprint around
+  // the target — not a circular scatter that reads as "submunitions at random points".
+  let dLat = t.targetLat - t.startLat, dLon = t.targetLon - t.startLon;
+  const dlen = Math.hypot(dLat, dLon) || 1e-6;
+  dLat /= dlen; dLon /= dlen;                 // unit flight direction
+  const pLat = -dLon, pLon = dLat;            // perpendicular (lateral)
+  const rem = Math.hypot(t.targetLat - t.curLat, t.targetLon - t.curLon);   // distance left to target
   // bomblets descend from the bus's split altitude (visual) → recompute the lift on zoom
   const descLift = {
     aLat: t.startLat, aLon: t.startLon, bLat: t.targetLat, bLon: t.targetLon,
     arcR: t.arcRatio || 0.30, frac: -Math.sin(t.progress * Math.PI)
   };
   for (let k = 0; k < n; k++) {
-    // ALWAYS aim at the original target city (wide spread) — the bomblets fly there, never fall
-    // back at the kill point.
-    const gLat = t.targetLat + (Math.random() - 0.5) * spread * 2;
-    const gLon = t.targetLon + (Math.random() - 0.5) * spread * 2;
+    // continue downrange along the flight vector and land in a TIGHT footprint centred on the
+    // target: ±~4.5 km along-track, ±~2.5 km lateral (absolute, so a far intercept doesn't fan
+    // them across the whole map). They read as the warhead's pieces flying on to the target.
+    const along = Math.max(0.01, rem + (Math.random() - 0.5) * 0.08);
+    const lateral = (Math.random() - 0.5) * 0.045;
+    const gLat = t.curLat + dLat * along + pLat * lateral;
+    const gLon = t.curLon + dLon * along + pLon * lateral;
     let tc = t.targetCity, bestD = Infinity;
     if (state.cities) {
       for (const c of state.cities) {
