@@ -1761,7 +1761,14 @@ function getArcHeight(t) {
   const [sx0, sy0] = geoToScreen(t.startLat, t.startLon);
   const [sxT, syT] = geoToScreen(t.targetLat, t.targetLon);
   const screenDist = Math.hypot(sxT - sx0, syT - sy0);
-  return screenDist * (t.arcRatio || 0.25);
+  const raw = screenDist * (t.arcRatio || 0.25);
+  // v2.22.0 — APEX CAP. The arc "lift" is a stylised altitude cue drawn in screen-Y.
+  // For long-range threats (e.g. a 778 km ballistic) viewed at high zoom the chord is
+  // thousands of px wide, so raw apex was ~1000 px — far above the viewport. You then saw
+  // only the two near-vertical legs ("stupid spike lines"). Cap the apex to a sane fraction
+  // of the viewport so the WHOLE arc stays on-screen as one shallow, realistic bow.
+  const cap = Math.max(60, (canvasH || 600) * 0.32);
+  return Math.min(raw, cap);
 }
 
 // Точка, удалённая от (lat, lon) на distKm по азимуту bearing (рад.)
@@ -2053,6 +2060,23 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.22.0 — Realism + perf pass (user: start in clean view, it lags on launch; interceptors
+//            draw stupid lines; make smoke/intercept FX realistic; shift style toward realism).
+//            (1) CLEAN VIEW IS NOW THE DEFAULT: the heavy static layers (coverage rings, radar
+//            sweep, hostile-region fills, OREF labels, targeting lines, factories) start OFF —
+//            that was the launch lag. The realistic combat FX (trajectories, interceptor trails,
+//            smoke, particles) stay ON; checkboxes are synced to match on load.
+//            (2) FIXED THE 'STUPID SPIKE LINES': getArcHeight/getInterceptorArc returned an apex
+//            of screenDist*arcRatio with NO bound, so a long-range threat (e.g. 778 km ballistic)
+//            at high zoom got a ~1000 px apex far above the viewport — you saw only the two
+//            near-vertical legs. Capped the apex to ~0.32*viewport so the whole arc stays on
+//            screen as one shallow, realistic bow (interceptor altitude tracks it, so trails
+//            follow too). Short-range arcs are unchanged.
+//            (3) REALISTIC FX: burning cities now throw a tall grey-brown smoke column that leans
+//            with the wind over a flickering fire glow; ground-blast smoke is warm brown-grey
+//            (soot/dirt) while airburst intercept puffs stay neutral cordite-grey; low-altitude
+//            intercept bursts are now a hot orange-white proximity-fuze detonation (was sci-fi
+//            blue) — exo/Arrow-3 kills stay blue (vacuum).
 //   2.21.8 — Moved 3 Israeli border towns back onto Israeli soil (user: 'Довев, Авивим и Манара
 //            сместились — верни их на израильскую территорию'). Their CITIES_BASE coords fell
 //            just NORTH of the game's (downsampled) Israel border polygon, so they rendered on
@@ -2636,7 +2660,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.21.8';
+const GAME_VERSION = '2.22.0';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -6308,29 +6332,44 @@ function drawTargetingLines() {
 
 // Дымовые столбы от повреждённых городов
 function drawSmokeColumns() {
+  // v2.22.0 — realism pass: a real burning site throws a tall grey-brown column that leans
+  // with the wind, darker & denser at the base, thinning and greying as it rises and cools,
+  // over a flickering orange fire glow. Height/density scale with battle damage.
+  const now = Date.now();
   state.cities.forEach(c => {
     if (!c.damage || c.damage <= 0) return;
     const [sx, sy] = geoToScreen(c.lat, c.lon);
     const intensity = Math.min(1, c.damage / 80);
-    const t = (Date.now() / 1500) % 1;
-    // Несколько клубов восходящего дыма
-    for (let i = 0; i < Math.ceil(intensity * 4); i++) {
-      const phase = (t + i * 0.25) % 1;
-      const yOff = -phase * 60;
-      const r = 6 + phase * 10;
+    const puffs = Math.ceil(intensity * 5) + 1;
+    const colH = 42 + intensity * 80;          // taller column with more damage
+    const wind = 0.24;                          // gentle rightward drift
+    for (let i = 0; i < puffs; i++) {
+      const phase = ((now / 1900) + i / puffs) % 1;
+      const yOff = -phase * colH;
+      const xOff = phase * colH * wind + Math.sin(phase * 6 + i) * 2.5;
+      const r = 5 + phase * (8 + intensity * 11);
       const a = (1 - phase) * 0.5 * intensity;
-      const grad = ctx.createRadialGradient(sx, sy + yOff, 0, sx, sy + yOff, r);
-      const shade = 50 + Math.floor(phase * 40);
-      grad.addColorStop(0, `rgba(${shade},${shade},${shade},${a})`);
-      grad.addColorStop(1, `rgba(${shade},${shade},${shade},0)`);
+      if (a <= 0.01) continue;
+      // warm brown-grey near the base → cooler light grey aloft
+      const sh = 36 + Math.floor(phase * 72);
+      const rC = sh + 16, gC = sh + 7, bC = sh;
+      const px = sx + xOff, py = sy + yOff;
+      const grad = ctx.createRadialGradient(px, py, 0, px, py, r);
+      grad.addColorStop(0, `rgba(${rC},${gC},${bC},${a})`);
+      grad.addColorStop(1, `rgba(${rC},${gC},${bC},0)`);
       ctx.fillStyle = grad;
-      ctx.beginPath(); ctx.arc(sx, sy + yOff, r, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI * 2); ctx.fill();
     }
-    // Маленькое пламя у основания
-    if (c.alive === false || intensity > 0.5) {
-      const flicker = 0.7 + Math.random() * 0.3;
-      ctx.fillStyle = `rgba(255, 120, 40, ${0.8 * flicker})`;
-      ctx.beginPath(); ctx.arc(sx, sy - 2, 3 * flicker, 0, Math.PI * 2); ctx.fill();
+    // Flickering fire glow at the base (scales with damage)
+    if (c.alive === false || intensity > 0.4) {
+      const flicker = 0.65 + Math.random() * 0.35;
+      const fr = (2.5 + intensity * 3.5) * flicker;
+      const fg = ctx.createRadialGradient(sx, sy - 1, 0, sx, sy - 1, fr * 2.2);
+      fg.addColorStop(0, `rgba(255, 185, 75, ${0.85 * flicker})`);
+      fg.addColorStop(0.5, `rgba(255, 110, 30, ${0.5 * flicker})`);
+      fg.addColorStop(1, 'rgba(120, 30, 0, 0)');
+      ctx.fillStyle = fg;
+      ctx.beginPath(); ctx.arc(sx, sy - 1, fr * 2.2, 0, Math.PI * 2); ctx.fill();
     }
   });
 }
@@ -9760,7 +9799,9 @@ function getInterceptorArc(i) {
   const [sx0, sy0] = geoToScreen(i.startLat, i.startLon);
   const [sxT, syT] = geoToScreen(i.targetLat, i.targetLon);
   const dist = Math.hypot(sxT - sx0, syT - sy0);
-  return dist * (i.arcRatio || 0.08);
+  // v2.22.0 — same apex cap as threats so interceptor trails never spike off-screen.
+  const cap = Math.max(40, (canvasH || 600) * 0.28);
+  return Math.min(dist * (i.arcRatio || 0.08), cap);
 }
 
 // Линии прогноза для перехватчиков (v2.17.0 — REWRITTEN)
@@ -10016,24 +10057,26 @@ function drawExplosions() {
       return;
     }
 
-    // === MID-AIR INTERCEPT BURST (NEW v2.14.0) — crisp white-blue, distinct from a ground hit ===
+    // === MID-AIR INTERCEPT BURST — v2.22.0 realism: warm proximity-fuze detonation ===
+    // A real Tamir/Stunner kill is a hot orange-white fireball (it detonates the rocket's
+    // warhead), not a sci-fi blue flash. Exo/Arrow-3 kills are handled above (blue, vacuum).
     if (e.intercept) {
-      const iOuter = ctx.createRadialGradient(sx, sy, 0, sx, sy, radius * 2.2);
-      iOuter.addColorStop(0, `rgba(255, 255, 255, ${t * 0.8})`);
-      iOuter.addColorStop(0.4, `rgba(180, 225, 255, ${t * 0.45})`);
-      iOuter.addColorStop(1, 'rgba(120, 180, 255, 0)');
+      const iOuter = ctx.createRadialGradient(sx, sy, 0, sx, sy, radius * 2.3);
+      iOuter.addColorStop(0, `rgba(255, 244, 210, ${t * 0.8})`);
+      iOuter.addColorStop(0.4, `rgba(255, 175, 85, ${t * 0.42})`);
+      iOuter.addColorStop(1, 'rgba(255, 120, 40, 0)');
       ctx.fillStyle = iOuter;
-      ctx.beginPath(); ctx.arc(sx, sy, radius * 2.2, 0, Math.PI * 2); ctx.fill();
-      // hot white core
+      ctx.beginPath(); ctx.arc(sx, sy, radius * 2.3, 0, Math.PI * 2); ctx.fill();
+      // hot white-yellow core
       const iCore = ctx.createRadialGradient(sx, sy, 0, sx, sy, radius);
-      iCore.addColorStop(0, `rgba(255, 255, 255, ${t})`);
-      iCore.addColorStop(0.5, `rgba(220, 240, 255, ${t * 0.7})`);
-      iCore.addColorStop(1, 'rgba(150, 200, 255, 0)');
+      iCore.addColorStop(0, `rgba(255, 255, 248, ${t})`);
+      iCore.addColorStop(0.5, `rgba(255, 228, 150, ${t * 0.72})`);
+      iCore.addColorStop(1, 'rgba(255, 150, 60, 0)');
       ctx.fillStyle = iCore;
       ctx.beginPath(); ctx.arc(sx, sy, radius, 0, Math.PI * 2); ctx.fill();
       // instant overflash
       if (e.flash > 0) {
-        ctx.fillStyle = `rgba(255, 255, 255, ${e.flash * 0.9})`;
+        ctx.fillStyle = `rgba(255, 255, 240, ${e.flash * 0.9})`;
         ctx.beginPath(); ctx.arc(sx, sy, radius * 2.8, 0, Math.PI * 2); ctx.fill();
       }
       return;
@@ -10079,9 +10122,14 @@ function drawParticles() {
     const a = (p.life / p.maxLife) * (p.kind === 'ismoke' ? 0.55 : 0.45);
     if (a <= 0) return;
     const r = p.size;
+    // v2.22.0 — ground blast smoke gets a warm brown-grey tint (dirt + soot); the airburst
+    // intercept puff ('ismoke') stays neutral light grey like real cordite/warhead smoke.
+    const rC = p.kind === 'ismoke' ? p.shade : p.shade + 16;
+    const gC = p.kind === 'ismoke' ? p.shade : p.shade + 6;
+    const bC = p.kind === 'ismoke' ? p.shade : p.shade - 2;
     const grad = ctx.createRadialGradient(sx, sy, 0, sx, sy, r);
-    grad.addColorStop(0, `rgba(${p.shade}, ${p.shade}, ${p.shade}, ${a * 0.7})`);
-    grad.addColorStop(1, `rgba(${p.shade}, ${p.shade}, ${p.shade}, 0)`);
+    grad.addColorStop(0, `rgba(${rC}, ${gC}, ${bC}, ${a * 0.7})`);
+    grad.addColorStop(1, `rgba(${rC}, ${gC}, ${bC}, 0)`);
     ctx.fillStyle = grad;
     ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI * 2); ctx.fill();
   });
@@ -21151,8 +21199,23 @@ document.addEventListener('DOMContentLoaded', () => {
     showNotification('Map', `Layer: ${TILE_LAYERS[currentLayer].name}`, 'success');
   };
   // === Layers panel toggle + checkbox handlers ===
-  state.layers = state.layers || {};
   const layersPanel = document.getElementById('layers-panel');
+  // v2.22.0 — START IN CLEAN VIEW (perf: the heavy static layers — coverage rings, radar sweep,
+  // hostile-region fills, OREF labels, targeting lines, factories — caused the launch lag the
+  // user reported). The realistic combat FX (trajectories, interceptor trails, smoke, particles)
+  // stay ON. The single source of truth lives here and we sync the checkboxes to match on load.
+  const DEFAULT_LAYERS = {
+    coverage: false, hostileRegions: false, radarSweep: false, orefLabels: false,
+    targetingLines: false, factories: false,
+    territories: true, orefZones: true, enemyTargets: true, airbases: true,
+    cities: true, trajectories: true, interceptors: true, smoke: true, particles: true
+  };
+  state.layers = Object.assign({}, DEFAULT_LAYERS, state.layers || {});
+  // Reflect the defaults onto the checkboxes so the panel matches what's actually drawn.
+  layersPanel.querySelectorAll('input[type=checkbox]').forEach(cb => {
+    const k = cb.dataset.layer;
+    if (k in state.layers) cb.checked = !!state.layers[k];
+  });
   document.getElementById('layers-toggle').onclick = () => {
     audio.click();
     layersPanel.style.display = (layersPanel.style.display === 'none') ? 'block' : 'none';
