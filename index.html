@@ -2075,6 +2075,14 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.24.4 — Alert CORRIDOR along the approach path (user: the alert should start from where the
+//            missile is coming FROM — e.g. Tabriz→Caesarea lights the Golan→Coast diagonal, per
+//            the Tzofar reference). triggerOrefZoneAlert takes an optional approach {fromLat,
+//            fromLon}: for ballistic/cluster/submunition (and tacBallistic) the regional alert now
+//            selects zones within ~18 km of the LAST ~110 km of the flight line (segPointDistDeg)
+//            instead of a circle around the target — an elongated siren band from the entry side
+//            down to the target. Callers (terminal alert in updateThreats, splitCluster dispersal
+//            alert) pass the launch point. No approach info → falls back to the radial footprint.
 //   2.24.3 — REGIONAL red alert for ballistic / cluster (user: with bomblets dispersing and plain
 //            ballistic the alert must be LARGE-SCALE after the early warning, not just per-city —
 //            like real Tzofar pushes covering the whole Galilee / Gush Dan corridor). The
@@ -2874,7 +2882,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.24.3';
+const GAME_VERSION = '2.24.4';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -11019,7 +11027,11 @@ function lookupOrefCity(gameCityName) {
   _lookupOrefCache.set(key, null);
   return null;
 }
-function triggerOrefZoneAlert(targetCity, threatType) {
+function triggerOrefZoneAlert(targetCity, threatType, approach) {
+  // approach (v2.24.4, optional): {fromLat, fromLon} — where the threat is coming FROM. For
+  // ballistic/cluster the regional alert then forms a CORRIDOR along the approach path (sirens
+  // start from where the missile enters and run down to the target — real Tzofar pattern, e.g.
+  // Tabriz→Caesarea lights the Golan→Coast diagonal), instead of a circle around the target.
   if (typeof OREF_CITIES === 'undefined' || typeof OREF_POLYS === 'undefined') {
     console.warn('[OREF] Data not loaded');
     return;
@@ -11124,11 +11136,26 @@ function triggerOrefZoneAlert(targetCity, threatType) {
       const _big = (threatType === 'ballistic' || threatType === 'cluster' || threatType === 'submunition');
       const nbRadiusKm = _big ? 35 : (threatType === 'tacBallistic' ? 20 : 7);
       const nbMax      = _big ? 130 : (threatType === 'tacBallistic' ? 60 : 5);
+      // v2.24.4 — APPROACH CORRIDOR: for ballistic/cluster (and tacBallistic) with known heading,
+      // alert the zones along the LAST ~110 km of the flight path (width ~18 km), so the sirens
+      // run from where the missile comes in down to the target — not a circle around the target.
+      let segB = null, corW = 0;
+      if ((_big || threatType === 'tacBallistic') && approach && typeof approach.fromLat === 'number') {
+        const adLat = approach.fromLat - orefCity.lat, adLon = approach.fromLon - orefCity.lng;
+        const alen = Math.hypot(adLat, adLon);
+        if (alen > 1e-6) {
+          const Ldeg = Math.min(_big ? 1.0 : 0.7, alen);   // corridor length back along the approach
+          segB = { lat: orefCity.lat + adLat / alen * Ldeg, lon: orefCity.lng + adLon / alen * Ldeg };
+          corW = _big ? 18 : 14;                            // corridor half-width, km
+        }
+      }
       const near = [];
       for (const oc of idxN.all) {
         if (!oc || oc.id === orefCity.id || typeof oc.lat !== 'number') continue;
-        const dKm = haversineKm(orefCity.lat, orefCity.lng, oc.lat, oc.lng);
-        if (dKm <= nbRadiusKm) near.push({ oc: oc, dKm: dKm });
+        const dKm = segB
+          ? segPointDistDeg(orefCity.lat, orefCity.lng, segB.lat, segB.lon, oc.lat, oc.lng) * 111
+          : haversineKm(orefCity.lat, orefCity.lng, oc.lat, oc.lng);
+        if (dKm <= (segB ? corW : nbRadiusKm)) near.push({ oc: oc, dKm: dKm });
       }
       near.sort(function(a, b) { return a.dKm - b.dKm; });
       near.slice(0, nbMax).forEach(function(o) {
@@ -11362,7 +11389,7 @@ function splitCluster(t, intercepted) {
   // (bomblets carry alertFired:true, and an early split can happen before the bus's own terminal
   // alert at progress 0.82 — without this, a far-released swarm arrived with no siren at all).
   // 'submunition' maps to the wide ~35 km footprint; triggerOrefZoneAlert dedupes repeats.
-  try { if (t.targetCity) triggerOrefZoneAlert(t.targetCity, 'submunition'); } catch (e) {}
+  try { if (t.targetCity) triggerOrefZoneAlert(t.targetCity, 'submunition', { fromLat: t.startLat, fromLon: t.startLon }); } catch (e) {}
   try { if (t.targetCity && t.targetCity.population > 0) triggerAlert(t.targetCity); } catch (e) {}
   if (!intercepted) { t.impacted = true; t._consumed = true; }   // natural dispersal consumes the bus
   try {
@@ -11503,7 +11530,8 @@ function updateThreats(dt) {
     const threshold = ALERT_PROGRESS[t.type] || 0.75;
     if (!t.alertFired && t.progress >= threshold) {
       t.alertFired = true;
-      triggerOrefZoneAlert(t.targetCity, t.type);
+      // v2.24.4 — pass the launch point so ballistic alerts form a corridor along the approach
+      triggerOrefZoneAlert(t.targetCity, t.type, { fromLat: t.startLat, fromLon: t.startLon });
       // For drones (which suppress launch-time alert), also fire shelter alert NOW
       if (t.type === 'drone' && t.targetCity && t.targetCity.population > 0) {
         triggerAlert(t.targetCity);
