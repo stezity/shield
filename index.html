@@ -2075,6 +2075,14 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.23.4 — OPFOR follow-ups (user): (1) cluster bomblets fly FAST (submunition speed 0.05→0.095)
+//            and split TIGHTER (~5 km, was ~10) so they read as a swarm off the warhead — harder
+//            to intercept. (2) Removed the IAEA "ballistic launch blocked" gate (no more 45-90 s
+//            no-launch after firing one ballistic). (3) IDF retaliation strikes now trigger off
+//            ACTUAL IMPACTS (pressure accrues in handleImpact, not from in-flight threats) — a
+//            fully-intercepted salvo provokes nothing; only leaks that LAND draw a response.
+//            (4) Counter-battery reframed as an IDF INTELLIGENCE STRIKE — it detects the pad the
+//            player is prepping/using and FREEZES it (offline), naming the site; relocate to fire.
 //   2.23.3 — Cluster missile rework (user): (1) cluster is no longer a separate weapon — it's a
 //            WARHEAD TOGGLE on the MRBM (ballistic): pick MRBM → choose NORMAL or ✸ CLUSTER. The
 //            bus is a real ballistic (early warning fires). (2) Bomblets are interceptable THREATS
@@ -2796,7 +2804,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.23.3';
+const GAME_VERSION = '2.23.4';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -3055,7 +3063,7 @@ const THREAT_TYPES = {
   // that's much harder to fully stop. splitProgress/subCount drive the dispersal (see updateThreats).
   cluster:      { name: 'Cluster ballistic',    shortName: 'MIRV',  color: '#d11a6a', speed: 0.075, altitude: '50–200 km',  arcRatio: 0.30, damage: 35, detectionDifficulty: 0.9,  radius: 6, icon: '✸', cluster: true, splitKm: 45, subCount: 7 },
   // bomblet released by a cluster bus — small, falls fast, low individual damage but there are many
-  submunition:  { name: 'Cluster bomblet',      shortName: 'BOMB',  color: '#ff6a3d', speed: 0.05,  altitude: '<20 km',     arcRatio: 0.06, damage: 12, detectionDifficulty: 0.4,  radius: 3, icon: '•' }
+  submunition:  { name: 'Cluster bomblet',      shortName: 'BOMB',  color: '#ff6a3d', speed: 0.095, altitude: '<20 km',     arcRatio: 0.06, damage: 12, detectionDifficulty: 0.4,  radius: 3, icon: '•' }
 };
 
 // === Faction × weapon → max geographic reach (lat band) ===
@@ -11180,7 +11188,8 @@ function splitCluster(t, intercepted) {
   const baseN = (THREAT_TYPES.cluster && THREAT_TYPES.cluster.subCount) || 7;
   const n = intercepted ? Math.max(4, Math.round(baseN * 0.7)) : baseN;
   const sub = THREAT_TYPES.submunition;
-  const spread = 0.09;   // WIDE spread (~10 km) across the target area
+  const spread = 0.045;   // v2.23.3 — tighter spread (~5 km) so the bomblets read as a swarm
+                          // coming off the warhead, not scattered far from it; they fly FAST.
   // bomblets descend from the bus's split altitude (visual) → recompute the lift on zoom
   const descLift = {
     aLat: t.startLat, aLon: t.startLon, bLat: t.targetLat, bLon: t.targetLon,
@@ -11500,6 +11509,12 @@ function handleImpact(threat, smallBlast) {
   }
   state.stats.missed++;
   state.stats.cityDamage += damage;
+  // v2.23.3 — OPFOR: an impact that LANDS builds IDF retaliation pressure (the IDF responds to
+  // damage done, not to launches). Intercepted threats never reach here, so a fully-defended
+  // salvo provokes nothing.
+  if (state.playAs === 'attacker') {
+    state.idfPressure = (state.idfPressure || 0) + (IDF_IMPACT_PRESSURE[threat.type] || 3);
+  }
   // Track ISRAELI civilian casualties from Hamas rocket impact on Israeli city.
   // BUG FIX (v2.6.0): was incrementing state.gaza.civDeaths (Palestinian casualty counter)
   // when an Israeli city was hit — wrong attribution. Now only israeliCasualties incremented.
@@ -12853,30 +12868,21 @@ function gameLoop(time) {
 // Israel doesn't sit still while the player carpet-bombs Tel Aviv.
 // Each new player launch adds "pressure"; periodically the IAF picks the
 // faction's most provocative target (HQ/leader/launch site) and strikes it.
-// v2.23.2 — pressure each live threat adds per second. A lone border DRONE barely registers
-// (so the IDF doesn't level Dahiyeh over one UAV); a ballistic is the heaviest. Proportional,
-// so only sustained / heavy fire provokes a real response.
-const IDF_PRESSURE_WEIGHT = {
-  drone: 0.12, mortar: 0.15, rocket: 0.30, heavyRocket: 0.50,
-  cruise: 0.60, tacBallistic: 0.80, cluster: 0.90, ballistic: 1.0, submunition: 0
+// v2.23.3 — pressure each IMPACT adds (handleImpact). The IDF retaliates in RESPONSE TO DAMAGE
+// that actually lands — NOT the instant you launch. If everything is intercepted, no retaliation;
+// only leaks/impacts provoke a strike. A ballistic hit hurts far more than a drone scratch.
+const IDF_IMPACT_PRESSURE = {
+  drone: 2.0, mortar: 1.2, rocket: 2.5, heavyRocket: 4.0,
+  cruise: 4.0, tacBallistic: 6.0, cluster: 6.0, ballistic: 8.0, submunition: 1.0
 };
 function updateIDFRetaliation(dt) {
   if (state.playAs !== 'attacker') return;
-  state.idfPressure  = state.idfPressure  || 0;
-  state.idfRetalCD   = state.idfRetalCD   || 0;
-  // Pressure builds PROPORTIONALLY to what's actually in the air (not 1/threat flat).
-  let pw = 0;
-  state.threats.forEach(t => {
-    if (t.intercepted || t.impacted) return;
-    pw += (IDF_PRESSURE_WEIGHT[t.type] != null ? IDF_PRESSURE_WEIGHT[t.type] : 0.30);
-  });
-  state.idfPressure += pw * (dt / 1000);
-  state.idfRetalCD  -= dt;
-  // Higher threshold + longer cooldown: a single border drone takes ~100 s of loitering to
-  // earn ONE counter-strike; a ballistic ~12 s. Heavy salvos still escalate quickly.
-  if (state.idfPressure >= 12 && state.idfRetalCD <= 0) {
-    state.idfPressure = Math.max(0, state.idfPressure - 12);
-    state.idfRetalCD = 14000;
+  state.idfPressure = state.idfPressure || 0;
+  state.idfRetalCD  = (state.idfRetalCD || 0) - dt;
+  // Threshold + cooldown gate; pressure itself only grows on impacts (see handleImpact).
+  if (state.idfPressure >= 10 && state.idfRetalCD <= 0) {
+    state.idfPressure = Math.max(0, state.idfPressure - 10);
+    state.idfRetalCD = 12000;
     fireIDFRetaliationStrike();
   }
 }
@@ -16619,8 +16625,9 @@ function attackerCanLaunch(weapon, siteIdx) {
   if (!a || !a.factionId) return false;
   if (!a.arsenal[weapon] || a.arsenal[weapon] <= 0) return false;
   if (typeof siteIdx === 'number' && (a.damagedSites[siteIdx] || 0) >= 100) return false;
-  // Iran event: IAEA inspection blocks ballistic launches
-  if (weapon === 'ballistic' && state.gameTime < (a._ballisticBlockedUntil || 0)) return false;
+  // v2.23.3 — removed the IAEA "ballistic launch blocked" gate: being unable to fire ballistic
+  // for 45-90 s after a launch felt dumb. Iran sanction/IAEA events still slow REGEN (for
+  // non-cheat play) but never hard-block the player from launching.
   return true;
 }
 
@@ -16765,34 +16772,33 @@ function tickAttackerCampaign(dt) {
     a.damagedSites[k] = Math.max(0, a.damagedSites[k] - 0.045 * (dt / 1000));
     if (a.damagedSites[k] <= 0.1) delete a.damagedSites[k];
   }
-  // --- IDF COUNTER-BATTERY (v2.23.2) — strike the launch sites the player is ACTUALLY firing
-  //     from, so spamming one spot gets it knocked OFFLINE and forces the player to relocate.
-  //     Recently-used sites are hit hard (often offline); others occasionally, lightly. ---
+  // --- IDF INTELLIGENCE STRIKE (v2.23.3) — the IDF DETECTS launch preparations at the sites the
+  //     player is firing from and strikes them PRE-EMPTIVELY, FREEZING that pad (offline) so the
+  //     player must relocate. A cold/unused site is only lightly damaged if hit. ---
   if (a.launches >= 5 && now >= a.nextIdfStrikeAt && !cheats.noIDFRetal) {
-    a.nextIdfStrikeAt = now + (40000 + Math.random() * 30000);
+    a.nextIdfStrikeAt = now + (45000 + Math.random() * 35000);
     const sites = (ENEMIES[a.factionId] && ENEMIES[a.factionId].launchSites) || [];
     if (sites.length > 0) {
       const lastUse = a.lastSiteUse || {};
       const recent = Object.keys(lastUse)
         .map(k => ({ idx: +k, t: lastUse[k] }))
-        .filter(o => (state.gameTime - o.t) < 90000 && (a.damagedSites[o.idx] || 0) < 100)
+        .filter(o => (state.gameTime - o.t) < 100000 && (a.damagedSites[o.idx] || 0) < 100)
         .sort((x, y) => y.t - x.t)
         .map(o => o.idx);
-      const count = 1 + Math.floor(Math.random() * 2);   // 1-2 sites per wave
+      const count = recent.length ? 1 : 0;   // only strike if intel actually flagged a prepping pad
       const targets = [];
-      for (let i = 0; i < count; i++) {
-        targets.push(recent.length ? recent.shift() : Math.floor(Math.random() * sites.length));
-      }
+      for (let i = 0; i < count; i++) targets.push(recent.shift());
+      let frozenName = null;
       targets.forEach(idx => {
         const site = sites[idx];
-        const wasRecent = (state.gameTime - (lastUse[idx] || -1e9)) < 90000;
-        const dmg = wasRecent ? (60 + Math.random() * 45) : (22 + Math.random() * 28);  // hard if active
-        a.damagedSites[idx] = Math.min(100, (a.damagedSites[idx] || 0) + dmg);
+        a.damagedSites[idx] = 100;   // FREEZE: launch prep detected → pad knocked out
+        frozenName = site.name;
         try { createExplosion(site.lat, site.lon, 32, 1500, true); audio.impact(); } catch (e) {}
       });
-      const offlined = targets.filter(idx => (a.damagedSites[idx] || 0) >= 100).length;
-      showNotification('IDF COUNTER-BATTERY', `IAF struck ${targets.length} ${f.name} launch site${targets.length>1?'s':''}${offlined?` — ${offlined} OFFLINE`:''}.`, 'danger');
-      logEvent(`>>> IDF counter-battery: ${targets.length} site${targets.length>1?'s':''} hit${offlined?`, ${offlined} suppressed — relocate fire`:''}`, 'danger');
+      if (frozenName) {
+        showNotification('IDF INTELLIGENCE STRIKE', `${f.name} launch prep detected — IAF struck ${frozenName}. Pad FROZEN — relocate your fire.`, 'danger');
+        logEvent(`>>> IDF intel: ${f.name} preparations detected at ${frozenName} → pad struck & frozen`, 'danger');
+      }
     }
   }
   // --- Faction-specific events ---
