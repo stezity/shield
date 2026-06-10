@@ -2075,6 +2075,11 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.23.8 — Cluster only scatters bomblets if hit in the TERMINAL phase (user: intercepting the
+//            bus far out over Iraq sent bomblets flying with wild scatter across the region —
+//            remove that). The intercept-split now requires the bus be within ~60 km of the
+//            target; a far-out Arrow-3/THAAD kill is a CLEAN KILL (no bomblets). Natural terminal
+//            dispersal (~45 km) is unchanged, so the warhead still scatters near the target.
 //   2.23.7 — Cluster bomblets now fly a real BALLISTIC arc out of the warhead (user: submunitions
 //            should leave the main warhead on a BALLISTIC trajectory, not the flat descent I had).
 //            Each bomblet continues the PARENT bus's parabola from the split point onward
@@ -2823,7 +2828,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.23.7';
+const GAME_VERSION = '2.23.8';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -12580,9 +12585,11 @@ function updateInterceptors(dt) {
       if (Math.random() < i.accuracy) {
         threat.intercepted = true;
         state.stats.intercepted++;
-        // v2.23.0 — CLUSTER: killing the bus doesn't fully stop it — it scatters bomblets that
-        // still rain down. This is what makes a cluster warhead so hard to defend against.
-        if (threat.clusterWarhead && !threat._split) {
+        // v2.23.8 — CLUSTER: a cluster warhead only scatters bomblets if it's hit in the TERMINAL
+        // phase (already dispensing, within ~60 km of the target). Intercepting it far out (e.g.
+        // an Arrow-3 kill over Iraq/Syria) is a CLEAN KILL — no region-wide bomblet scatter.
+        if (threat.clusterWarhead && !threat._split &&
+            haversineKm(threat.curLat, threat.curLon, threat.targetLat, threat.targetLon) < 60) {
           try { splitCluster(threat, true); } catch (e) {}
         }
         // === GAZA campaign tracker (FIX v2.9: was init but never written) ===
