@@ -2061,6 +2061,17 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.22.4 — Faster catch-up + FULLER continuous smoke (user: interceptors visually don't catch
+//            the target; the smoke is too thin like a strip — I wanted the full, non-detached
+//            smoke from the photo). (1) Bumped interceptor ratios so the catch-up is clearly
+//            visible while staying well under the old blur: ironDome 2.2→3.5x, davidsSling
+//            2.0→2.6x, arrow3 2.2→2.8x, thaad 2.0→2.6x (floors raised to match). 3.5x reads as
+//            'clearly faster, chases down the rocket', not the old 9.5x teleport. (2) Rewrote the
+//            daytime contrail from a thin 2-line strip into a FULL, continuous, fluffy column:
+//            a wide soft feathered halo + overlapping soft puffs (every 2nd trail point, so they
+//            overlap and never look detached, bigger toward the tail where smoke billows) + a
+//            bright continuous core toward the head. Trail lengthened 36→46 points for a longer
+//            lingering contrail like the reference.
 //   2.22.3 — Interceptor speed synced to the threat + thinner, photo-accurate contrail (user: the
 //            interceptor flies way too fast vs the slow rocket; the white smoke is ugly — make it
 //            like a real Iron Dome contrail [reference photo: thin white trail + orange flash]).
@@ -2697,7 +2708,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.22.3';
+const GAME_VERSION = '2.22.4';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -9950,31 +9961,51 @@ function drawInterceptors() {
         const drift = Math.min(8, (now - (p.t || now)) / 250);   // smoke rises slowly
         return { sx: tsx, sy: tsy - drift };
       });
+      const N = pts.length;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
-      // v2.22.3 — a real Tamir leaves a THIN, clean white contrail with a soft feathered halo,
-      // NOT a fat white blob. Two passes: (1) a faint diffuse halo for the wispy edge, then
-      // (2) a crisp thin white core line, brightening toward the head.
-      ctx.strokeStyle = 'rgb(244, 247, 251)';
-      ctx.lineWidth = 2.6;
+      // v2.22.4 — a FULL, billowy white smoke contrail (was reading as a thin strip). It's built
+      // from big OVERLAPPING soft puffs (the smoke body) whose size varies point-to-point so the
+      // edge is irregular/lumpy like real smoke — not a flat ribbon — and which billow wider &
+      // airier toward the tail (older smoke spreads). A wide soft halo sits under them and a
+      // crisp bright core runs through the middle. All unbroken so the smoke never looks detached.
+      // Soft outer halo
+      ctx.strokeStyle = 'rgb(236, 241, 247)';
+      ctx.lineWidth = 8;
       ctx.beginPath();
       pts.forEach((p, idx) => {
-        ctx.globalAlpha = 0.05 + (idx / pts.length) * 0.16;
+        ctx.globalAlpha = 0.04 + (idx / N) * 0.12;
         if (idx === 0) ctx.moveTo(p.sx, p.sy); else ctx.lineTo(p.sx, p.sy);
       });
       ctx.stroke();
+      // Billowy overlapping puffs — the body of the smoke
+      for (let idx = 0; idx < N; idx += 2) {
+        const p = pts[idx];
+        const f = idx / N;
+        const lump = 0.78 + 0.42 * Math.abs(Math.sin(idx * 1.7));   // 0.78..1.2 lumpiness
+        const r = (3.4 + (1 - f) * 6.2) * lump;                     // head ~3px → tail ~10px, lumpy
+        const a = 0.08 + f * 0.15;
+        const g = ctx.createRadialGradient(p.sx, p.sy, 0, p.sx, p.sy, r);
+        g.addColorStop(0, `rgba(247, 250, 254, ${a})`);
+        g.addColorStop(0.6, `rgba(244, 248, 253, ${a * 0.5})`);
+        g.addColorStop(1, 'rgba(244, 248, 253, 0)');
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = g;
+        ctx.beginPath(); ctx.arc(p.sx, p.sy, r, 0, Math.PI * 2); ctx.fill();
+      }
+      // Crisp bright continuous core (the dense fresh smoke ridge, brightest at the head)
       ctx.strokeStyle = 'rgb(252, 253, 255)';
-      ctx.lineWidth = 1.3;
+      ctx.lineWidth = 1.8;
       ctx.beginPath();
       pts.forEach((p, idx) => {
-        ctx.globalAlpha = 0.18 + (idx / pts.length) * 0.7;
+        ctx.globalAlpha = 0.18 + (idx / N) * 0.6;
         if (idx === 0) ctx.moveTo(p.sx, p.sy); else ctx.lineTo(p.sx, p.sy);
       });
       ctx.stroke();
       ctx.globalAlpha = 1;
       ctx.lineCap = 'butt';
       ctx.lineJoin = 'miter';
-      // (no missile dot in daylight — only the thin smoke trail is visible)
+      // (the dense bright head is the interceptor itself — no separate dot needed in daylight)
     }
 
     if (isNight) {
@@ -11784,8 +11815,8 @@ function launchInterceptor(battery, threat) {
   // Stunner ~Mach 7.5, Arrow-3 / THAAD ~Mach 9 — NOT 10x. The old fixed battery speed made
   // Iron Dome (0.095) blur past a rocket (0.010) at 9.5x. Now we scale the interceptor off the
   // threat's own speed by a realistic per-battery ratio, with a floor so it always converges.
-  const _SPEED_MULT  = { ironDome: 2.2, davidsSling: 2.0, arrow3: 2.2, thaad: 2.0 };
-  const _SPEED_FLOOR = { ironDome: 0.020, davidsSling: 0.06, arrow3: 0.10, thaad: 0.085 };
+  const _SPEED_MULT  = { ironDome: 3.5, davidsSling: 2.6, arrow3: 2.8, thaad: 2.6 };
+  const _SPEED_FLOOR = { ironDome: 0.028, davidsSling: 0.07, arrow3: 0.11, thaad: 0.095 };
   const _threatSpeed = (THREAT_TYPES[threat.type] && THREAT_TYPES[threat.type].speed) || 0.01;
   const _ispeed = Math.max(_SPEED_FLOOR[battery.type] || 0.016,
                            _threatSpeed * (_SPEED_MULT[battery.type] || 1.9));
@@ -11923,8 +11954,8 @@ function updateInterceptors(dt) {
       _altOffset = -Math.sin(_prog * Math.PI) * getInterceptorArc(i);
     }
     i.trail.push({ lat: i.curLat, lon: i.curLon, prog: _prog, altOffset: _altOffset, t: Date.now() });
-    // Longer trail for a more visible contrail (was 18 ≈ 0.3s — too short for a fast interceptor)
-    if (i.trail.length > 36) i.trail.shift();
+    // Longer trail for a fuller, lingering contrail (v2.22.4)
+    if (i.trail.length > 46) i.trail.shift();
 
     // РЕАЛЬНАЯ проверка контакта
     const realDist = Math.hypot(threat.curLat - i.curLat, threat.curLon - i.curLon);
