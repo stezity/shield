@@ -2075,6 +2075,15 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.24.1 — Iron Dome vs cluster bomblets (user: the Dome shouldn't manage to catch the fast
+//            bomblets, and the Tamir should fly 360° maneuvers trying). (1) Tamir speed vs a
+//            submunition capped at 1.12× the bomblet (was 3.5×) — it barely outruns one and
+//            usually can't converge in the ~4-5 s before impact; contact accuracy ×0.40 on top
+//            (tiny fast target). David's Sling keeps full speed/accuracy — it's the proper
+//            counter. (2) TAMIR TERMINAL MANEUVER: chasing a bomblet the Tamir flies violent 360°
+//            corkscrew loops (closed-circle offset, zero net drift — guidance still converges on
+//            average); the trail records the loops so the maneuvering is visible, and the wasted
+//            path makes the miss organic rather than a dice roll.
 //   2.24.0 — Cluster: pre-intercept dispensing chance + ballistic bomblet TRAILS (user: add a
 //            chance the warhead opens BEFORE the Hetz-3 kill so bomblets can still reach the
 //            territory; and the bomblets must trace the same ballistic trajectory as the missile
@@ -2847,7 +2856,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.24.0';
+const GAME_VERSION = '2.24.1';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -12448,8 +12457,14 @@ function launchInterceptor(battery, threat) {
   const _SPEED_MULT  = { ironDome: 3.5, davidsSling: 2.6, arrow3: 2.8, thaad: 2.6 };
   const _SPEED_FLOOR = { ironDome: 0.028, davidsSling: 0.07, arrow3: 0.11, thaad: 0.095 };
   const _threatSpeed = (THREAT_TYPES[threat.type] && THREAT_TYPES[threat.type].speed) || 0.01;
-  const _ispeed = Math.max(_SPEED_FLOOR[battery.type] || 0.016,
-                           _threatSpeed * (_SPEED_MULT[battery.type] || 1.9));
+  let _ispeed = Math.max(_SPEED_FLOOR[battery.type] || 0.016,
+                         _threatSpeed * (_SPEED_MULT[battery.type] || 1.9));
+  // v2.24.1 — cluster bomblets are FAST (0.095) and tiny: a Tamir barely outruns one and mostly
+  // CAN'T converge in the few seconds before impact — Iron Dome was never built for this. The
+  // Stunner (David's Sling) keeps its full speed and remains the effective counter.
+  if (threat.type === 'submunition' && battery.type === 'ironDome') {
+    _ispeed = Math.min(_ispeed, _threatSpeed * 1.12);
+  }
   state.interceptors.push({
     id: nextId++, batteryType: battery.type, batteryId: battery.id,
     threatId: threat.id,
@@ -12464,7 +12479,10 @@ function launchInterceptor(battery, threat) {
     threatArcRatio: threat.arcRatio || (THREAT_TYPES[threat.type] && THREAT_TYPES[threat.type].arcRatio) || 0.25,
     speed: _ispeed,
     alive: true,
-    accuracy: BATTERY_TYPES[battery.type].accuracy * (Date.now() < (state.accuracyDebuffUntil || 0) ? 0.80 : 1.0),
+    accuracy: BATTERY_TYPES[battery.type].accuracy
+              * (Date.now() < (state.accuracyDebuffUntil || 0) ? 0.80 : 1.0)
+              // v2.24.1 — a Tamir that DOES reach a bomblet still mostly misses the tiny fast target
+              * ((threat.type === 'submunition' && battery.type === 'ironDome') ? 0.40 : 1.0),
     trail: [],
     bornAt: Date.now(),
     bornAtGameTime: state.gameTime,   // FIX v2.12.3: game-time clock for flight-timeout (see updateInterceptors)
@@ -12597,6 +12615,23 @@ function updateInterceptors(dt) {
       const step = Math.min(moveDist, dToLead);
       i.curLat += (dLatI / dToLead) * step;
       i.curLon += (dLonI / dToLead) * step;
+    }
+    // v2.24.1 — TAMIR TERMINAL MANEUVER vs cluster bomblets: the Tamir flies violent 360°
+    // corkscrew loops trying to line up on the tiny fast target (the famous Iron Dome loop
+    // footage). The offset is a closed circle (sin/cos deltas, zero net drift) so guidance still
+    // converges on average — but the wasted path + the bomblet's speed mean it usually CAN'T
+    // catch one before impact. The trail records the loops, so you SEE the maneuvering.
+    if (i.batteryType === 'ironDome' && threat.type === 'submunition' && dToLead > 0.0001) {
+      const w = 9;                                   // roll rate, rad/s
+      const prevPh = (i._mPhase == null ? (i._mPhase = Math.random() * Math.PI * 2) : i._mPhase);
+      i._mPhase = prevPh + (dt / 1000) * w;
+      const fwLat = dLatI / dToLead, fwLon = dLonI / dToLead;
+      const ppLat = -fwLon, ppLon = fwLat;           // perpendicular to the pursuit axis
+      const R = 0.022;                               // peak lateral speed ≈1.9× forward → real 360° loops
+      i.curLat += ppLat * (Math.sin(i._mPhase) - Math.sin(prevPh)) * R
+                + fwLat * (Math.cos(i._mPhase) - Math.cos(prevPh)) * R * 0.7;
+      i.curLon += ppLon * (Math.sin(i._mPhase) - Math.sin(prevPh)) * R
+                + fwLon * (Math.cos(i._mPhase) - Math.cos(prevPh)) * R * 0.7;
     }
     // === STORE EXACT VISUAL ALTITUDE OFFSET in the trail point ===
     // (Was: trail rendered using interceptor's own arc but the live dot used the threat's arc — caused the trail to detach vertically from the moving icon. Now both share the same altitude.)
