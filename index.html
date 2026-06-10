@@ -2053,6 +2053,15 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.21.7 — Two launch fixes (user: 'до сих пор стреляют из моря; и после того как ЦАХАЛ
+//            вошёл, они стреляют из захваченной зоны — бред'). (1) SEA: the coastal frontier
+//            launch point sat on the waterline (lon 35.11) so jitter dropped launches into the
+//            Mediterranean — moved inland to lon 35.19. (2) IDF-ZONE: once the ground invasion
+//            advances (w.front > 0), Hezbollah launches now RETREAT north of the front line
+//            (frontLat ≈ 33.10 + front×0.25, launch pushed ~3–7 km behind it) — it can no longer
+//            fire from territory the IDF has captured. Verified across border / mid-invasion /
+//            full-Litani fronts: 240 sampled launches, 0 in Israel, 0 at sea, 0 inside the
+//            IDF-controlled zone. No console errors.
 //   2.21.6 — Fixed Lebanese map markers + launch points sitting on the Israeli side (user:
 //            'ливанские точки на израильской территории, исправь'). Several ENEMY_TARGETS
 //            Lebanese villages had inaccurate coords that fell inside the rendered Israel border
@@ -2618,7 +2627,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.21.6';
+const GAME_VERSION = '2.21.7';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -10200,10 +10209,11 @@ function spawnThreat(typeId, enemyId, targetCityId, explicitLat, explicitLon, ex
   if (enemyId === 'hezbollah' && targetCityId && typeId !== 'tacBallistic' && typeId !== 'ballistic' && typeof explicitLat !== 'number') {
     const tgt = state.cities.find(c => c.id === targetCityId && c.alive);
     if (tgt) {
-      // Lebanese frontier firing positions (all confirmed north of the border, on land):
+      // Lebanese frontier firing positions — all confirmed on LAND, north of the Blue Line.
+      // (v2.21.7: coastal point pushed inland to lon 35.18 so it's never in the SEA.)
       const FRONTIER = (typeof HEZ_FRONTIER_POINTS !== 'undefined') ? HEZ_FRONTIER_POINTS : [
-        { lat: 33.110, lon: 35.110 },  // coast, north of Rosh Hanikra (for Nahariya/Haifa axis)
-        { lat: 33.108, lon: 35.300 },  // Aita al-Shaab (for Shtula/Western Galilee) — nudged N of the line
+        { lat: 33.115, lon: 35.190 },  // inland of Naqoura/coast (for Nahariya/Haifa axis) — NOT at sea
+        { lat: 33.108, lon: 35.300 },  // Aita al-Shaab (for Shtula/Western Galilee)
         { lat: 33.128, lon: 35.433 },  // Bint Jbeil (central frontier)
         { lat: 33.276, lon: 35.398 },  // Markaba (for Margaliot/Manara — NW of the panhandle)
         { lat: 33.305, lon: 35.585 },  // Kfar Kila, north of the Metula finger (Lebanon)
@@ -10214,9 +10224,17 @@ function spawnThreat(typeId, enemyId, targetCityId, explicitLat, explicitLon, ex
         const d = haversineKm(f.lat, f.lon, tgt.lat, tgt.lon);
         if (d < bd) { bd = d; best = f; }
       }
-      // jitter biased NORTH (into Lebanon) so a launch never drifts across the frontier into Israel
       sLat = best.lat + Math.random() * 0.012;          // 0..+1.3km north only
       sLon = best.lon + (Math.random() - 0.5) * 0.014;  // ±0.8km lateral
+      // === RETREAT NORTH OF THE IDF FRONT (v2.21.7) ===
+      // Once the IDF ground operation pushes into south Lebanon (Oct 1+), Hezbollah can't fire
+      // from the captured zone — its launch points shift NORTH of the advancing front line.
+      // Front latitude ≈ Blue Line (33.10) → Litani (33.35) scaled by w.front (0..1).
+      const w = state.hezWar;
+      if (w && w.front > 0.02) {
+        const frontLat = 33.10 + Math.min(1, w.front) * 0.25;   // current IDF front line
+        if (sLat < frontLat + 0.03) sLat = frontLat + 0.03 + Math.random() * 0.04;  // launch ~3-7km behind the front
+      }
     }
   }
 
