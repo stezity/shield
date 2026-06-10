@@ -2075,6 +2075,18 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.23.2 — OPFOR fixes (user, 4 items): (1) INTERCEPT FX — all of an intercept's FX (flash,
+//            sparks, shockwave, smoke cloud) share ONE zoom-recomputed altitude via fxLiftOffset()
+//            so sparks no longer detach from the cloud on zoom; per-battery trail size (Iron Dome
+//            small, D-Sling bigger, Arrow-3 biggest); Arrow-3 exo intercept is now a PURPLE/violet
+//            plume (ref photo), bigger, day & night. (2) REAL-TIME DRONE CONTROL — left-click a
+//            launched drone (no weapon armed) to select (white box), right-click = new destination,
+//            Shift+right-click = extend route; UAV alerts fire wherever a routed drone overflies a
+//            populated OREF zone. (3) IDF COUNTER-BATTERY — strikes the launch SITES actually being
+//            used (tracked); spamming one knocks it OFFLINE (slower repair), forcing relocation.
+//            (4) IDF RETALIATION toned down — proportional pressure (border drone barely registers,
+//            ballistic heaviest), higher threshold + longer cooldown, counter-battery target bias
+//            (low-value sites, not Dahiyeh) — one drone no longer levels Beirut.
 //   2.23.1 — Cluster bomblets are now a falling EFFECT, not separate threat objects (user: the
 //            submunitions should be an effect, not a separate object, and they spawned far from
 //            the bus). Root cause: spawning them as new threats started them at ~0 arc altitude
@@ -2776,7 +2788,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.23.1';
+const GAME_VERSION = '2.23.2';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -9714,6 +9726,26 @@ function drawDroneRoutes() {
       ctx.restore();
     });
   }
+  // (c) v2.23.2 — white selection box around the drone the attacker is steering in real time
+  if (state.playAs === 'attacker' && state.selectedDrone && state.threats) {
+    const d = state.threats.find(t => t.id === state.selectedDrone && t.type === 'drone' && !t.intercepted && !t.impacted);
+    if (d) {
+      const [dsx, dsy] = geoToScreen(d.curLat, d.curLon);
+      const r = 11, br = 4, pulse = (Math.sin(Date.now() / 200) + 1) / 2;
+      ctx.save();
+      ctx.strokeStyle = `rgba(255,255,255,${0.6 + pulse * 0.4})`;
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.moveTo(dsx - r, dsy - r + br); ctx.lineTo(dsx - r, dsy - r); ctx.lineTo(dsx - r + br, dsy - r);
+      ctx.moveTo(dsx + r - br, dsy - r); ctx.lineTo(dsx + r, dsy - r); ctx.lineTo(dsx + r, dsy - r + br);
+      ctx.moveTo(dsx + r, dsy + r - br); ctx.lineTo(dsx + r, dsy + r); ctx.lineTo(dsx + r - br, dsy + r);
+      ctx.moveTo(dsx - r + br, dsy + r); ctx.lineTo(dsx - r, dsy + r); ctx.lineTo(dsx - r, dsy + r - br);
+      ctx.stroke();
+      ctx.restore();
+    } else {
+      state.selectedDrone = null;
+    }
+  }
 }
 
 function drawTrajectories() {
@@ -10130,6 +10162,11 @@ function drawInterceptors() {
         return { sx: tsx, sy: tsy0 + lift - drift };
       });
       const N = pts.length;
+      // v2.23.2 — bigger trail for the bigger interceptors: Iron Dome (Tamir) small, David's
+      // Sling bigger, Arrow-3 (huge exo booster) biggest.
+      const trailMul = i.batteryType === 'arrow3' ? 2.1
+                     : i.batteryType === 'thaad' ? 1.75
+                     : i.batteryType === 'davidsSling' ? 1.55 : 1.0;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       // v2.22.6 — TRANSLUCENT diffuse SMOKE, not an opaque white strip. The old version had a
@@ -10139,7 +10176,7 @@ function drawInterceptors() {
       // that keeps it continuous. No opaque core — the map shows through it.
       // (1) Faint continuous haze — unbroken continuity at any zoom, but barely visible
       ctx.strokeStyle = 'rgb(230, 237, 245)';
-      ctx.lineWidth = 4;
+      ctx.lineWidth = 4 * trailMul;
       ctx.beginPath();
       pts.forEach((p, idx) => {
         ctx.globalAlpha = (0.025 + (idx / N) * 0.06) * fadeMul;
@@ -10152,7 +10189,7 @@ function drawInterceptors() {
         const p = pts[idx];
         const f = idx / N;
         const lump = 0.6 + 0.6 * Math.abs(Math.sin(idx * 1.5 + idx * idx * 0.02));
-        const r = (3.6 + (1 - f) * 8.0) * lump;        // head ~3-4px → tail ~10-13px, irregular
+        const r = (3.6 + (1 - f) * 8.0) * lump * trailMul;   // head→tail, scaled per battery
         const a = (0.045 + f * 0.085) * fadeMul;       // LOW → translucent; overlap builds it up
         const g = ctx.createRadialGradient(p.sx, p.sy, 0, p.sx, p.sy, r);
         g.addColorStop(0, `rgba(245, 248, 252, ${a})`);
@@ -10167,7 +10204,7 @@ function drawInterceptors() {
       const headStart = Math.max(0, N - 6);
       ctx.strokeStyle = 'rgb(248, 251, 255)';
       ctx.lineCap = 'round';
-      ctx.lineWidth = 2.4;
+      ctx.lineWidth = 2.4 * trailMul;
       ctx.beginPath();
       for (let idx = headStart; idx < N; idx++) {
         const p = pts[idx];
@@ -10199,15 +10236,15 @@ function drawInterceptors() {
       ctx.beginPath(); ctx.arc(sx, sy, 1.6, 0, Math.PI * 2); ctx.fill();
     }
 
-    // Экзоатмосферный эффект для Arrow-3 (space burn — bright point, shown at night)
-    if (i.exo && isNight) {
-      // v2.22.1 — bright white-hot exo plume (was blue). High-altitude burn against dark space.
-      const exoGrad = ctx.createRadialGradient(sx, sy, 0, sx, sy, 22);
-      exoGrad.addColorStop(0, 'rgba(255, 255, 255, 0.75)');
-      exoGrad.addColorStop(0.5, 'rgba(255, 244, 210, 0.32)');
-      exoGrad.addColorStop(1, 'rgba(255, 228, 160, 0)');
+    // Экзоатмосферный эффект для Arrow-3 — v2.23.2 PURPLE plume, shown day & night (the high-
+    // altitude burn glows violet-pink like the real twilight exo trail in the reference photo).
+    if (i.exo) {
+      const exoGrad = ctx.createRadialGradient(sx, sy, 0, sx, sy, 24);
+      exoGrad.addColorStop(0, 'rgba(255, 220, 255, 0.85)');
+      exoGrad.addColorStop(0.45, 'rgba(210, 130, 245, 0.4)');
+      exoGrad.addColorStop(1, 'rgba(130, 60, 200, 0)');
       ctx.fillStyle = exoGrad;
-      ctx.beginPath(); ctx.arc(sx, sy, 22, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(sx, sy, 24, 0, Math.PI * 2); ctx.fill();
 
       // Вращающиеся «звёздочки»
       const phase = Date.now() / 600;
@@ -10215,7 +10252,7 @@ function drawInterceptors() {
         const a = (Math.PI * 2 * k / 5) + phase;
         const dx = Math.cos(a) * 16;
         const dy = Math.sin(a) * 16;
-        ctx.fillStyle = '#ffffff';
+        ctx.fillStyle = 'rgba(255, 225, 255, 0.95)';
         ctx.fillRect(sx + dx - 1, sy + dy - 1, 2, 2);
       }
 
@@ -10230,12 +10267,20 @@ function drawInterceptors() {
   });
 }
 
+// v2.23.2 — one altitude-offset for ALL intercept FX. If the FX carries lift info (threat
+// endpoints + frac) it's recomputed at the CURRENT zoom — so the flash, sparks, shockwave and
+// smoke cloud stay locked together even if the player zooms mid-intercept (was: baked px drifted).
+function fxLiftOffset(o) {
+  if (o && o.lift) return o.lift.frac * arcHeightFromEndpoints(o.lift.aLat, o.lift.aLon, o.lift.bLat, o.lift.bLon, o.lift.arcR);
+  return (o && o.screenYOffset) || 0;
+}
+
 function drawExplosions() {
   // Сначала ударные волны (под взрывами)
   state.shockwaves.forEach(s => {
     if (s.delay > 0) return;
     const [sx, sy0] = geoToScreen(s.lat, s.lon);
-    const sy = sy0 + (s.screenYOffset || 0);
+    const sy = sy0 + fxLiftOffset(s);
     const radius = (1 - s.life) * s.maxRadius;
     const alpha = s.life * 0.6;
     ctx.strokeStyle = `rgba(255, 220, 180, ${alpha})`;
@@ -10250,35 +10295,42 @@ function drawExplosions() {
   // Огненные шары
   state.explosions.forEach(e => {
     const [sx, sy0] = geoToScreen(e.lat, e.lon);
-    const sy = sy0 + (e.screenYOffset || 0);
+    const sy = sy0 + fxLiftOffset(e);
     const t = e.life / e.maxLife;
     const radius = (1 - t * 0.4) * e.maxRadius;
 
-    // === Экзоатмосферный взрыв (Arrow-3, в космосе) — бело-голубой ===
+    // === Экзоатмосферный взрыв (Arrow-3) — v2.23.2 PURPLE/violet high-altitude plume (like the
+    // real SpaceX-style twilight exo burst): violet halo, magenta-pink mid, white-pink core. ===
     if (e.exo) {
-      // Холодное свечение
-      const exoOuter = ctx.createRadialGradient(sx, sy, 0, sx, sy, radius * 2.5);
-      exoOuter.addColorStop(0, `rgba(220, 240, 255, ${t * 0.7})`);
-      exoOuter.addColorStop(0.4, `rgba(140, 200, 255, ${t * 0.4})`);
-      exoOuter.addColorStop(1, 'rgba(60, 100, 200, 0)');
+      // wide violet halo (the expanding upper-atmosphere cloud)
+      const exoOuter = ctx.createRadialGradient(sx, sy, 0, sx, sy, radius * 3.0);
+      exoOuter.addColorStop(0, `rgba(220, 150, 255, ${t * 0.55})`);
+      exoOuter.addColorStop(0.45, `rgba(150, 80, 230, ${t * 0.34})`);
+      exoOuter.addColorStop(1, 'rgba(90, 40, 170, 0)');
       ctx.fillStyle = exoOuter;
-      ctx.beginPath(); ctx.arc(sx, sy, radius * 2.5, 0, Math.PI * 2); ctx.fill();
-      // Яркое ядро
+      ctx.beginPath(); ctx.arc(sx, sy, radius * 3.0, 0, Math.PI * 2); ctx.fill();
+      // magenta-pink mid glow
+      const exoMid = ctx.createRadialGradient(sx, sy, 0, sx, sy, radius * 1.7);
+      exoMid.addColorStop(0, `rgba(255, 200, 255, ${t * 0.7})`);
+      exoMid.addColorStop(0.5, `rgba(230, 120, 230, ${t * 0.45})`);
+      exoMid.addColorStop(1, 'rgba(150, 60, 200, 0)');
+      ctx.fillStyle = exoMid;
+      ctx.beginPath(); ctx.arc(sx, sy, radius * 1.7, 0, Math.PI * 2); ctx.fill();
+      // bright white-pink core
       const exoCore = ctx.createRadialGradient(sx, sy, 0, sx, sy, radius);
       exoCore.addColorStop(0, `rgba(255, 255, 255, ${t * 0.95})`);
-      exoCore.addColorStop(0.4, `rgba(180, 220, 255, ${t * 0.8})`);
-      exoCore.addColorStop(1, 'rgba(60, 120, 200, 0)');
+      exoCore.addColorStop(0.4, `rgba(255, 210, 255, ${t * 0.8})`);
+      exoCore.addColorStop(1, 'rgba(210, 130, 240, 0)');
       ctx.fillStyle = exoCore;
       ctx.beginPath(); ctx.arc(sx, sy, radius, 0, Math.PI * 2); ctx.fill();
-      // Стартовая мега-вспышка
+      // startup megaflash (pink-white)
       if (e.flash > 0) {
-        ctx.fillStyle = `rgba(255, 255, 255, ${e.flash * 0.95})`;
-        ctx.beginPath(); ctx.arc(sx, sy, radius * 3, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = `rgba(255, 235, 255, ${e.flash * 0.95})`;
+        ctx.beginPath(); ctx.arc(sx, sy, radius * 3.4, 0, Math.PI * 2); ctx.fill();
       }
-      // Метка «ЭКЗОАТМОСФЕРНЫЙ ПЕРЕХВАТ»
       if (t > 0.4) {
         ctx.font = 'bold 9px Consolas';
-        ctx.fillStyle = `rgba(180, 220, 255, ${t})`;
+        ctx.fillStyle = `rgba(230, 170, 255, ${t})`;
         ctx.textAlign = 'center';
         ctx.fillText('◯ EXO-ATMOSPHERIC INTERCEPT', sx, sy - radius - 4);
         ctx.textAlign = 'left';
@@ -10347,11 +10399,8 @@ function drawParticles() {
     if (p.kind !== 'smoke' && p.kind !== 'ismoke') return;
     const [sx, sy0] = geoToScreen(p.lat, p.lon);
     // v2.22.7 — lingering intercept clouds recompute their altitude lift at the CURRENT zoom
-    // (from the stored threat endpoints), so they don't drift vertically when the map is zoomed.
-    const off = (p.lift)
-      ? p.lift.frac * arcHeightFromEndpoints(p.lift.aLat, p.lift.aLon, p.lift.bLat, p.lift.bLon, p.lift.arcR)
-      : (p.screenYOffset || 0);
-    const sy = sy0 + off;
+    // (shared with all other intercept FX via fxLiftOffset) so everything stays locked together.
+    const sy = sy0 + fxLiftOffset(p);
     const a = (p.life / p.maxLife) * (p.kind === 'ismoke' ? 0.55 : 0.45);
     if (a <= 0) return;
     const r = p.size;
@@ -10370,7 +10419,7 @@ function drawParticles() {
   state.particles.forEach(p => {
     if (p.kind === 'smoke' || p.kind === 'ismoke') return;
     const [sx, sy0] = geoToScreen(p.lat, p.lon);
-    const sy = sy0 + (p.screenYOffset || 0);   // v2.17.0: airburst sparks/debris draw at altitude
+    const sy = sy0 + fxLiftOffset(p);   // v2.23.2 — sparks/debris share the cloud's recomputed altitude
     const a = p.life / p.maxLife;
     const sz = (p.size || 1.5);
     ctx.fillStyle = p.color.replace(')', `, ${a})`).replace('rgb', 'rgba');
@@ -11254,12 +11303,21 @@ function updateThreats(dt) {
       }
       const remD = Math.hypot(t.targetLat - t.curLat, t.targetLon - t.curLon);
       t.progress = Math.max(0, Math.min(0.999, 1 - remD / totalD));
-      // late OREF/shelter alert as it closes on the target (same doctrine as a normal drone)
-      const dThr = ALERT_PROGRESS['drone'] || 0.85;
-      if (!t.alertFired && t.progress >= dThr) {
-        t.alertFired = true;
-        try { triggerOrefZoneAlert(t.targetCity, 'drone'); } catch (e) {}
-        if (t.targetCity && t.targetCity.population > 0) triggerAlert(t.targetCity);
+      // v2.23.2 — UAV alert fires WHEREVER the drone overflies a populated OREF zone, not just at
+      // the target (throttled, one zone per check) — a routed drone weaving inland sets off sirens
+      // along its whole path, like reality.
+      if (!t._lastOverflightCheck || (state.gameTime - t._lastOverflightCheck) >= 1500) {
+        t._lastOverflightCheck = state.gameTime;
+        if (state.cities) {
+          for (const c of state.cities) {
+            if (!c.alive || c.population <= 0) continue;
+            if (haversineKm(t.curLat, t.curLon, c.lat, c.lon) < 10) {
+              try { triggerOrefZoneAlert(c, 'drone'); } catch (e) {}
+              try { triggerAlert(c); } catch (e) {}
+              break;
+            }
+          }
+        }
       }
       t.trail.push({ lat: t.curLat, lon: t.curLon, progress: t.progress });
       if (t.trail.length > 28) t.trail.shift();
@@ -11912,6 +11970,12 @@ function attackerLaunchAt(lat, lon) {
     }
   }
   const site = e.launchSites[siteIdx];
+  // v2.23.2 — remember which sites are firing, so IDF counter-battery can target them (and the
+  // player learns to rotate sites instead of mass-launching from one spot).
+  if (state.attacker) {
+    state.attacker.lastSiteUse = state.attacker.lastSiteUse || {};
+    state.attacker.lastSiteUse[siteIdx] = state.gameTime;
+  }
   const distKm = haversineKm(site.lat, site.lon, lat, lon);
   const maxKm = WEAPON_MAX_RANGE[state.attackMode.type] || 99999;
   if (distKm > maxKm) {
@@ -12545,16 +12609,16 @@ function createInterceptFlash(lat, lon, screenYOffset, exo, lift) {
   const isNight = (state.dayNight === 'night');
   // bright instant flash (reuses the explosion list with a short, flashy profile)
   state.explosions.push({
-    lat, lon, life: 1, maxLife: exo ? 600 : 420,
-    maxRadius: exo ? 26 : (isNight ? 20 : 13),
+    lat, lon, life: 1, maxLife: exo ? 750 : 420,
+    maxRadius: exo ? 42 : (isNight ? 20 : 13),   // v2.23.2 — Arrow-3 exo burst much bigger
     flash: 1, big: false, exo: !!exo, intercept: true, night: isNight,
-    screenYOffset: screenYOffset || 0
+    screenYOffset: screenYOffset || 0, lift: lift || null
   });
   // a couple of fast rings
   for (let i = 0; i < 2; i++) {
     state.shockwaves.push({
-      lat, lon, life: 1, maxLife: 380 + i * 120, maxRadius: (exo ? 28 : 20) * (1.2 + i * 0.6),
-      delay: i * 40, screenYOffset: screenYOffset || 0, intercept: true
+      lat, lon, life: 1, maxLife: 380 + i * 120, maxRadius: (exo ? 44 : 20) * (1.2 + i * 0.6),
+      delay: i * 40, screenYOffset: screenYOffset || 0, intercept: true, lift: lift || null
     });
   }
   if (exo) { state.shake = Math.max(state.shake, 3); return; }   // exo has its own visuals
@@ -12566,7 +12630,7 @@ function createInterceptFlash(lat, lon, screenYOffset, exo, lift) {
       const a = Math.random() * Math.PI * 2;
       const sp = (0.4 + Math.random() * 1.6) * 0.0009;
       state.particles.push({
-        kind: 'debris', lat, lon,
+        kind: 'debris', lat, lon, screenYOffset: screenYOffset || 0, lift: lift || null,
         vLat: Math.sin(a) * sp * 0.5 - 0.0004,    // outward + slight upward, gravity takes over
         vLon: Math.cos(a) * sp,
         life: 900 + Math.random() * 1000, maxLife: 1900,
@@ -12579,7 +12643,7 @@ function createInterceptFlash(lat, lon, screenYOffset, exo, lift) {
       const a = Math.random() * Math.PI * 2;
       const sp = (0.8 + Math.random() * 1.8) * 0.0011;
       state.particles.push({
-        kind: 'spark', lat, lon, screenYOffset: screenYOffset || 0,
+        kind: 'spark', lat, lon, screenYOffset: screenYOffset || 0, lift: lift || null,
         vLat: Math.sin(a) * sp, vLon: Math.cos(a) * sp,
         life: 300 + Math.random() * 380, maxLife: 680,
         color: Math.random() < 0.6 ? 'rgb(255, 230, 140)' : 'rgb(255, 170, 70)',
@@ -12612,7 +12676,7 @@ function createInterceptFlash(lat, lon, screenYOffset, exo, lift) {
       const a = Math.random() * Math.PI * 2;
       const sp = (0.6 + Math.random() * 1.3) * 0.0010;
       state.particles.push({
-        kind: 'spark', lat, lon, screenYOffset: screenYOffset || 0,
+        kind: 'spark', lat, lon, screenYOffset: screenYOffset || 0, lift: lift || null,
         vLat: Math.sin(a) * sp, vLon: Math.cos(a) * sp,
         life: 260 + Math.random() * 300, maxLife: 560,
         color: Math.random() < 0.6 ? 'rgb(255, 210, 110)' : 'rgb(255, 150, 60)', size: 1 + Math.random() * 1.3
@@ -12733,18 +12797,30 @@ function gameLoop(time) {
 // Israel doesn't sit still while the player carpet-bombs Tel Aviv.
 // Each new player launch adds "pressure"; periodically the IAF picks the
 // faction's most provocative target (HQ/leader/launch site) and strikes it.
+// v2.23.2 — pressure each live threat adds per second. A lone border DRONE barely registers
+// (so the IDF doesn't level Dahiyeh over one UAV); a ballistic is the heaviest. Proportional,
+// so only sustained / heavy fire provokes a real response.
+const IDF_PRESSURE_WEIGHT = {
+  drone: 0.12, mortar: 0.15, rocket: 0.30, heavyRocket: 0.50,
+  cruise: 0.60, tacBallistic: 0.80, cluster: 0.90, ballistic: 1.0, submunition: 0
+};
 function updateIDFRetaliation(dt) {
   if (state.playAs !== 'attacker') return;
   state.idfPressure  = state.idfPressure  || 0;
   state.idfRetalCD   = state.idfRetalCD   || 0;
-  // Pressure builds 1 unit per active player threat per second
-  const liveAttacks = state.threats.filter(t => !t.intercepted && !t.impacted).length;
-  state.idfPressure += liveAttacks * (dt / 1000);
+  // Pressure builds PROPORTIONALLY to what's actually in the air (not 1/threat flat).
+  let pw = 0;
+  state.threats.forEach(t => {
+    if (t.intercepted || t.impacted) return;
+    pw += (IDF_PRESSURE_WEIGHT[t.type] != null ? IDF_PRESSURE_WEIGHT[t.type] : 0.30);
+  });
+  state.idfPressure += pw * (dt / 1000);
   state.idfRetalCD  -= dt;
-  // Threshold-based retaliation, with a hard 8s cooldown so we don't spam strikes
-  if (state.idfPressure >= 4 && state.idfRetalCD <= 0) {
-    state.idfPressure = Math.max(0, state.idfPressure - 4);
-    state.idfRetalCD = 8000;
+  // Higher threshold + longer cooldown: a single border drone takes ~100 s of loitering to
+  // earn ONE counter-strike; a ballistic ~12 s. Heavy salvos still escalate quickly.
+  if (state.idfPressure >= 12 && state.idfRetalCD <= 0) {
+    state.idfPressure = Math.max(0, state.idfPressure - 12);
+    state.idfRetalCD = 14000;
     fireIDFRetaliationStrike();
   }
 }
@@ -12765,11 +12841,15 @@ function fireIDFRetaliationStrike() {
   // Pick a still-alive target from ANY active faction, weighted by recency × importance²
   const candidates = (state.enemyTargets || []).filter(t => t.alive !== false && activeIds.includes(t.faction));
   if (candidates.length === 0) return;
-  // Weighted pick: importance^2 — leaders/HQs preferred over basic launch sites
-  const totalW = candidates.reduce((s, t) => s + Math.pow(t.importance, 2), 0);
+  // v2.23.2 — COUNTER-BATTERY bias: prefer LOW-value targets (launch sites / depots) over
+  // leadership/HQs. Was importance^2 (always hit Dahiyeh) — a border drone shouldn't get the
+  // IDF to flatten Beirut. Weight = 1/importance, so minor sites are hit far more often; the
+  // leadership only gets struck occasionally (and the higher pressure threshold gates it anyway).
+  const wOf = (t) => 1 / Math.max(1, t.importance || 1);
+  const totalW = candidates.reduce((s, t) => s + wOf(t), 0);
   let pick = Math.random() * totalW, target = candidates[0];
   for (const t of candidates) {
-    pick -= Math.pow(t.importance, 2);
+    pick -= wOf(t);
     if (pick <= 0) { target = t; break; }
   }
   // Closest IL airbase with fighters left
@@ -16598,53 +16678,65 @@ function tickAttackerCampaign(dt) {
   const now = state.gameTime;
   const f = ATTACKER_FACTIONS[a.factionId];
 
-  // === SANDBOX CHEAT: skip arsenal regen tick entirely if infinite-ammo enabled (perf) ===
+  // === SANDBOX CHEAT: infinite-ammo tops arsenals up and SKIPS regen — but v2.23.2 the IDF
+  // counter-battery + site self-repair below must STILL run (they're independent of the player's
+  // ammo). Previously this early-returned, so counter-battery never fired with the default cheat. ===
   const cheats = readAttackerCheats();
   if (cheats.noArsenal) {
-    // Just keep arsenals topped up so UI shows non-zero stocks
     for (const w of Object.keys(a.arsenal || {})) a.arsenal[w] = a.arsenalCap[w] || 999;
-    return;   // skip the rest of regen logic entirely
-  }
-
-  // --- Arsenal regen (per-second × dt × event modifiers) ---
-  let regenMul = 1.0;
-  if (now < (a._regenBoostUntil || 0)) regenMul *= 2.0;
-  if (now < (a._regenHalvedUntil || 0)) regenMul *= 0.5;
-  if (now < (a._regenDisabledUntil || 0)) regenMul = 0;
-  for (const w of Object.keys(a.arsenalRegen)) {
-    const cap = a.arsenalCap[w] || 0;
-    if ((a.arsenal[w] || 0) < cap) {
-      let weaponMul = regenMul;
-      // Iran-specific: Ballistic-halved or blocked from Israeli strikes / IAEA
-      if (w === 'ballistic') {
-        if (now < (a._ballisticBlockedUntil || 0)) weaponMul = 0;
-        else if (now < (a._ballisticHalvedUntil || 0)) weaponMul *= 0.5;
+  } else {
+    // --- Arsenal regen (per-second × dt × event modifiers) ---
+    let regenMul = 1.0;
+    if (now < (a._regenBoostUntil || 0)) regenMul *= 2.0;
+    if (now < (a._regenHalvedUntil || 0)) regenMul *= 0.5;
+    if (now < (a._regenDisabledUntil || 0)) regenMul = 0;
+    for (const w of Object.keys(a.arsenalRegen)) {
+      const cap = a.arsenalCap[w] || 0;
+      if ((a.arsenal[w] || 0) < cap) {
+        let weaponMul = regenMul;
+        // Iran-specific: Ballistic-halved or blocked from Israeli strikes / IAEA
+        if (w === 'ballistic') {
+          if (now < (a._ballisticBlockedUntil || 0)) weaponMul = 0;
+          else if (now < (a._ballisticHalvedUntil || 0)) weaponMul *= 0.5;
+        }
+        a.arsenal[w] = Math.min(cap, (a.arsenal[w] || 0) + a.arsenalRegen[w] * weaponMul * (dt / 1000));
       }
-      a.arsenal[w] = Math.min(cap, (a.arsenal[w] || 0) + a.arsenalRegen[w] * weaponMul * (dt / 1000));
     }
   }
-  // --- Damaged sites self-repair (5 dmg/min = 0.083/sec) ---
+  // --- Damaged sites self-repair — v2.23.2 slower so a suppressed site stays down longer
+  //     ("a day or two" feel) before it can fire again ---
   for (const k of Object.keys(a.damagedSites)) {
-    a.damagedSites[k] = Math.max(0, a.damagedSites[k] - 0.083 * (dt / 1000));
+    a.damagedSites[k] = Math.max(0, a.damagedSites[k] - 0.045 * (dt / 1000));
     if (a.damagedSites[k] <= 0.1) delete a.damagedSites[k];
   }
-  // --- IDF retaliation: every 60s game-time, if at least 5 launches, hit a random site ---
-  // Skip entirely if cheat enabled (player wants no retaliation)
+  // --- IDF COUNTER-BATTERY (v2.23.2) — strike the launch sites the player is ACTUALLY firing
+  //     from, so spamming one spot gets it knocked OFFLINE and forces the player to relocate.
+  //     Recently-used sites are hit hard (often offline); others occasionally, lightly. ---
   if (a.launches >= 5 && now >= a.nextIdfStrikeAt && !cheats.noIDFRetal) {
-    a.nextIdfStrikeAt = now + (45000 + Math.random() * 30000);
+    a.nextIdfStrikeAt = now + (40000 + Math.random() * 30000);
     const sites = (ENEMIES[a.factionId] && ENEMIES[a.factionId].launchSites) || [];
     if (sites.length > 0) {
-      // Hit 1-3 random sites with some damage
-      const count = 1 + Math.floor(Math.random() * 3);
+      const lastUse = a.lastSiteUse || {};
+      const recent = Object.keys(lastUse)
+        .map(k => ({ idx: +k, t: lastUse[k] }))
+        .filter(o => (state.gameTime - o.t) < 90000 && (a.damagedSites[o.idx] || 0) < 100)
+        .sort((x, y) => y.t - x.t)
+        .map(o => o.idx);
+      const count = 1 + Math.floor(Math.random() * 2);   // 1-2 sites per wave
+      const targets = [];
       for (let i = 0; i < count; i++) {
-        const idx = Math.floor(Math.random() * sites.length);
-        const site = sites[idx];
-        const dmg = 25 + Math.random() * 35;
-        a.damagedSites[idx] = Math.min(100, (a.damagedSites[idx] || 0) + dmg);
-        try { createExplosion(site.lat, site.lon, 32, 1500, true); audio.impact(); } catch(e) {}
+        targets.push(recent.length ? recent.shift() : Math.floor(Math.random() * sites.length));
       }
-      showNotification('IDF AIRSTRIKE', `IAF struck ${count} ${f.name} launch site${count>1?'s':''}.`, 'danger');
-      logEvent(`>>> IDF retaliation: ${count} launch site${count>1?'s':''} hit`, 'danger');
+      targets.forEach(idx => {
+        const site = sites[idx];
+        const wasRecent = (state.gameTime - (lastUse[idx] || -1e9)) < 90000;
+        const dmg = wasRecent ? (60 + Math.random() * 45) : (22 + Math.random() * 28);  // hard if active
+        a.damagedSites[idx] = Math.min(100, (a.damagedSites[idx] || 0) + dmg);
+        try { createExplosion(site.lat, site.lon, 32, 1500, true); audio.impact(); } catch (e) {}
+      });
+      const offlined = targets.filter(idx => (a.damagedSites[idx] || 0) >= 100).length;
+      showNotification('IDF COUNTER-BATTERY', `IAF struck ${targets.length} ${f.name} launch site${targets.length>1?'s':''}${offlined?` — ${offlined} OFFLINE`:''}.`, 'danger');
+      logEvent(`>>> IDF counter-battery: ${targets.length} site${targets.length>1?'s':''} hit${offlined?`, ${offlined} suppressed — relocate fire`:''}`, 'danger');
     }
   }
   // --- Faction-specific events ---
@@ -19272,6 +19364,19 @@ function setupCanvasInteraction() {
             attackerLaunchAt(lat, lon);
           }
         }
+        // === ATTACKER, no weapon armed → SELECT a launched drone to fly it in real time ===
+        // (v2.23.2) click a drone to select it (white box), then right-click to steer/redirect it.
+        else if (state.playAs === 'attacker') {
+          let best = null, bestD = 18;
+          for (const t of state.threats) {
+            if (t.type !== 'drone' || t.intercepted || t.impacted) continue;
+            const [dsx, dsy] = geoToScreen(t.curLat, t.curLon);
+            const d = Math.hypot(dsx - sx, dsy - sy);
+            if (d < bestD) { bestD = d; best = t; }
+          }
+          if (best) { state.selectedDrone = best.id; audio.click(); }
+          else { state.selectedDrone = null; }
+        }
         // === РАЗМЕЩЕНИЕ БАТАРЕИ (фаза развёртывания ИЛИ панель «Строить») ===
         else if ((state.buildPhase || buildPanelOpen) && state.placeMode) {
           const [lat, lon] = screenToGeo(sx, sy);
@@ -19379,6 +19484,32 @@ function setupCanvasInteraction() {
         commandSelectedFighters(lat, lon, 'patrol', null, append);
       }
       return;
+    }
+    // === ATTACKER: steer the SELECTED drone in real time (v2.23.2) ===
+    //   right-click       → new destination (fly straight there; nearest city becomes the target)
+    //   Shift+right-click → append a waypoint (build/extend the route on the fly)
+    if (state.playAs === 'attacker' && state.selectedDrone) {
+      const drone = state.threats.find(t => t.id === state.selectedDrone && t.type === 'drone' && !t.intercepted && !t.impacted);
+      if (drone) {
+        const rect = canvas.getBoundingClientRect();
+        const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
+        const [lat, lon] = screenToGeo(sx, sy);
+        drone.routed = true;
+        if (e.shiftKey) {
+          drone.waypoints = drone.waypoints || [];
+          drone.waypoints.push({ lat, lon });
+        } else {
+          drone.waypoints = [];
+          drone.targetLat = lat; drone.targetLon = lon;
+          let tc = drone.targetCity, bd = Infinity;
+          if (state.cities) { for (const c of state.cities) { if (!c.alive) continue; const d = Math.hypot(c.lat - lat, c.lon - lon); if (d < bd) { bd = d; tc = c; } } }
+          drone.targetCity = tc;
+        }
+        audio.click();
+        return;
+      } else {
+        state.selectedDrone = null;
+      }
     }
     if (state.buildPhase && state.placeMode) {
       state.placeMode = null;
@@ -21001,6 +21132,7 @@ function startScenario(name) {
   state.currentWave = 0;
   state.threats = [];
   state.bomblets = [];   // v2.23.1 — clear any leftover cluster bomblet effects
+  state.selectedDrone = null;   // v2.23.2 — clear real-time drone selection
   state.interceptors = [];
   state.explosions = [];
   state.particles = [];
