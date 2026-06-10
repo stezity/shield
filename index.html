@@ -2075,6 +2075,14 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.23.3 — Cluster missile rework (user): (1) cluster is no longer a separate weapon — it's a
+//            WARHEAD TOGGLE on the MRBM (ballistic): pick MRBM → choose NORMAL or ✸ CLUSTER. The
+//            bus is a real ballistic (early warning fires). (2) Bomblets are interceptable THREATS
+//            again (type 'submunition', in Iron Dome + David's Sling canTarget) — not effects —
+//            so they can be shot down. (3) They ALWAYS fly to a WIDE spread (~10 km) around the
+//            ORIGINAL target city and DESCEND from the bus's split altitude (descLift), instead of
+//            falling at the kill point over Syria — even an intercepted bus still rains bomblets on
+//            the target. (4) Rendered as bright glowing dots. Removed the old falling-effect path.
 //   2.23.2 — OPFOR fixes (user, 4 items): (1) INTERCEPT FX — all of an intercept's FX (flash,
 //            sparks, shockwave, smoke cloud) share ONE zoom-recomputed altitude via fxLiftOffset()
 //            so sparks no longer detach from the cloud on zoom; per-battery trail size (Iron Dome
@@ -2788,7 +2796,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.23.2';
+const GAME_VERSION = '2.23.3';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -3494,7 +3502,7 @@ const ENEMIES = {
       { name: 'Natanz',        lat: 33.7228, lon: 51.7271 }
     ],
     spread: 0.15,
-    threats: ['ballistic', 'cluster', 'tacBallistic', 'cruise', 'drone', 'heavyRocket']
+    threats: ['ballistic', 'tacBallistic', 'cruise', 'drone', 'heavyRocket']   // cluster = MRBM warhead toggle (v2.23.3)
   },
   houthi: {
     name: 'Houthis', region: 'Yemen', color: '#f5b041',
@@ -9925,7 +9933,11 @@ function drawThreats() {
     const type = THREAT_TYPES[t.type];
     const arcH = getArcHeight(t);
     const [sx0, sy0] = geoToScreen(t.curLat, t.curLon);
-    const arc = -Math.sin(t.progress * Math.PI) * arcH;
+    // v2.23.3 — cluster bomblets DESCEND from the bus's split altitude (descLift) down to the
+    // ground at their target; everything else uses the standard up-and-over arc.
+    const arc = t.descLift
+      ? t.descLift.frac * (1 - t.progress) * arcHeightFromEndpoints(t.descLift.aLat, t.descLift.aLon, t.descLift.bLat, t.descLift.bLon, t.descLift.arcR)
+      : -Math.sin(t.progress * Math.PI) * arcH;
     const sx = sx0, sy = sy0 + arc;
     if (sx < -80 || sx > canvasW + 80 || sy < -80 || sy > canvasH + 80) return;
 
@@ -10008,12 +10020,24 @@ function drawThreats() {
 
     // Ядро (увеличенное под иконку)
     const r = type.radius + 3;
-    ctx.fillStyle = type.color;
-    ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = '#000'; ctx.lineWidth = 1.5; ctx.stroke();
-
-    // Уникальная иконка по типу угрозы
-    drawThreatIcon(sx, sy, t.type, r);
+    if (t.type === 'submunition') {
+      // v2.23.3 — cluster bomblet: a bright glowing mote (no missile silhouette)
+      const pulseS = 0.75 + 0.25 * Math.sin(Date.now() / 90 + (t.id || 0));
+      const gr = ctx.createRadialGradient(sx, sy, 0, sx, sy, 6.5);
+      gr.addColorStop(0, `rgba(255, 246, 205, ${0.95 * pulseS})`);
+      gr.addColorStop(0.4, `rgba(255, 175, 75, ${0.7 * pulseS})`);
+      gr.addColorStop(1, 'rgba(255, 120, 40, 0)');
+      ctx.fillStyle = gr;
+      ctx.beginPath(); ctx.arc(sx, sy, 6.5, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath(); ctx.arc(sx, sy, 1.7, 0, Math.PI * 2); ctx.fill();
+    } else {
+      ctx.fillStyle = type.color;
+      ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#000'; ctx.lineWidth = 1.5; ctx.stroke();
+      // Уникальная иконка по типу угрозы
+      drawThreatIcon(sx, sy, t.type, r);
+    }
 
     // Выбор / назначение
     if (state.selectedThreat === t.id) {
@@ -11145,36 +11169,29 @@ const ALERT_PROGRESS = {
   submunition:   2.0      // never (>1) — bomblets are already in terminal, no fresh siren
 };
 
-// === v2.23.1 — CLUSTER MUNITION DISPERSAL (as a falling EFFECT, not separate threat objects) ===
-// The bus breaks apart into bomblets that FALL from the bus's exact position down to the ground.
-// They are lightweight visual effects (state.bomblets), NOT interceptable threats — so they
-// originate right at the missile (no offset) and read as "the warhead scattering", per the user.
-//   intercepted=false → natural terminal dispersal: bomblets rain onto the target city (tight).
-//   intercepted=true  → the bus was killed: bomblets scatter around the KILL POINT and fall there
-//                       (wider) — so intercepting early drops them harmlessly away from cities,
-//                       but the warhead is never "fully" stopped.
+// === v2.23.3 — CLUSTER MUNITION DISPERSAL (interceptable bomblet THREATS that FLY to the target) ===
+// The MRBM bus breaks apart into many bomblets that DESCEND from the bus toward a WIDE spread
+// around the ORIGINAL target city — they always continue to the target (never fall locally at the
+// kill point), so even an intercepted bus still rains bomblets on the city. They're real threats,
+// so Iron Dome / David's Sling can pick them off near the target. Bright glowing-dot visuals.
 function splitCluster(t, intercepted) {
   if (t._split) return;
   t._split = true;
-  const cfg = THREAT_TYPES.cluster || {};
-  const baseN = cfg.subCount || 7;
-  const n = intercepted ? Math.max(3, Math.round(baseN * 0.6)) : baseN;
+  const baseN = (THREAT_TYPES.cluster && THREAT_TYPES.cluster.subCount) || 7;
+  const n = intercepted ? Math.max(4, Math.round(baseN * 0.7)) : baseN;
   const sub = THREAT_TYPES.submunition;
-  const spread = intercepted ? 0.05 : 0.03;
-  // bomblets fall toward the ground near the city (natural) or near the kill point (intercepted)
-  const baseLat = intercepted ? t.curLat : t.targetLat;
-  const baseLon = intercepted ? t.curLon : t.targetLon;
-  // shared origin (the bus's split position + altitude) so every bomblet starts AT the missile
-  // and its altitude rescales correctly on zoom (same trick the contrail uses).
-  const origin = {
-    sLat: t.startLat, sLon: t.startLon, tLat: t.targetLat, tLon: t.targetLon,
-    arcR: t.arcRatio || 0.30, liftFrac0: -Math.sin(t.progress * Math.PI)
+  const spread = 0.09;   // WIDE spread (~10 km) across the target area
+  // bomblets descend from the bus's split altitude (visual) → recompute the lift on zoom
+  const descLift = {
+    aLat: t.startLat, aLon: t.startLon, bLat: t.targetLat, bLon: t.targetLon,
+    arcR: t.arcRatio || 0.30, frac: -Math.sin(t.progress * Math.PI)
   };
-  state.bomblets = state.bomblets || [];
   for (let k = 0; k < n; k++) {
-    const gLat = baseLat + (Math.random() - 0.5) * spread * 2;
-    const gLon = baseLon + (Math.random() - 0.5) * spread * 2;
-    let tc = null, bestD = Infinity;
+    // ALWAYS aim at the original target city (wide spread) — the bomblets fly there, never fall
+    // back at the kill point.
+    const gLat = t.targetLat + (Math.random() - 0.5) * spread * 2;
+    const gLon = t.targetLon + (Math.random() - 0.5) * spread * 2;
+    let tc = t.targetCity, bestD = Infinity;
     if (state.cities) {
       for (const c of state.cities) {
         if (!c.alive) continue;
@@ -11184,20 +11201,28 @@ function splitCluster(t, intercepted) {
     }
     const sLat = t.curLat, sLon = t.curLon;
     const dist = Math.max(1e-6, Math.hypot(gLat - sLat, gLon - sLon));
-    state.bomblets.push({
+    const distKm = haversineKm(sLat, sLon, gLat, gLon);
+    state.threats.push({
+      id: nextId++, type: 'submunition', enemy: t.enemy,
+      siteName: t.siteName, weaponName: 'bomblet', isCluster: false, isSubmunition: true,
       startLat: sLat, startLon: sLon, curLat: sLat, curLon: sLon,
-      targetLat: gLat, targetLon: gLon, cityId: (tc && bestD < 0.18) ? tc.id : null,
-      enemy: t.enemy, progress: 0, speed: sub.speed, dist: dist,
-      origin: origin, color: sub.color, size: 1.8 + Math.random() * 1.4,
-      trail: [], done: false
+      targetLat: gLat, targetLon: gLon, targetCity: tc,
+      speed: sub.speed, arcRatio: sub.arcRatio || 0.06,
+      arcKm: distKm, progress: 0, distance: dist, distanceKm: distKm,
+      eta: dist / sub.speed * 1000,
+      intercepted: false, impacted: false, assigned: false, assignedBattery: null,
+      isFalseAlarm: false, spawnTime: state.gameTime,
+      populated: !!(tc && tc.population > 0), trail: [],
+      alertFired: true,        // the city was already alerted for the inbound cluster
+      descLift: descLift       // visual: descend from the bus's split altitude → ground at target
     });
+    state.stats.threatsTotal++;
   }
-  // dispersal burst at the split altitude (originates at the bus)
-  const arc = origin.liftFrac0 * getArcHeight(t);
+  const arc = descLift.frac * getArcHeight(t);
   try { createClusterSplitFX(t.curLat, t.curLon, arc, n); } catch (e) {}
   if (!intercepted) { t.impacted = true; t._consumed = true; }   // natural dispersal consumes the bus
   try {
-    logEvent(`✸ ${intercepted ? 'Cluster warhead hit — bomblets scattered anyway' : 'Cluster munition dispersed'}: ${n} bomblets over ${t.targetCity ? t.targetCity.name : 'target'}`, 'danger');
+    logEvent(`✸ ${intercepted ? 'Cluster warhead hit — bomblets released, still inbound' : 'Cluster munition dispersed'}: ${n} bomblets → ${t.targetCity ? t.targetCity.name : 'target'}`, 'danger');
   } catch (e) {}
 }
 
@@ -11352,10 +11377,11 @@ function updateThreats(dt) {
     t.curLon = t.startLon + dLon * t.progress;
     // v2.23.0 — cluster bus dispenses its bomblets in the TERMINAL phase, ~45 km from the target
     // (distance-based so it works at any range — for an Iran shot 0.62 progress is still ~500 km out).
-    const _ttype = THREAT_TYPES[t.type];
-    if (_ttype && _ttype.cluster && !t._split) {
+    // v2.23.3 — a cluster-warhead MRBM (ballistic + clusterWarhead flag) dispenses its bomblets
+    // in the terminal phase, ~45 km from the target.
+    if (t.clusterWarhead && !t._split) {
       const kmToTgt = haversineKm(t.curLat, t.curLon, t.targetLat, t.targetLon);
-      if (kmToTgt < (_ttype.splitKm || 45)) { splitCluster(t, false); return; }
+      if (kmToTgt < 45) { splitCluster(t, false); return; }
     }
     t.trail.push({ lat: t.curLat, lon: t.curLon, progress: t.progress });
     if (t.trail.length > 28) t.trail.shift();
@@ -11889,6 +11915,32 @@ function renderAttackerWeapons() {
     };
     wrap.appendChild(btn);
   });
+  // v2.23.3 — MRBM WARHEAD TOGGLE: when ballistic is armed, choose NORMAL or CLUSTER (cluster
+  // splits in the terminal phase into a wide spread of bomblets that Iron Dome / D-Sling must catch).
+  if (state.attackMode.type === 'ballistic') {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:6px;margin-top:6px;width:100%;align-items:center;flex-wrap:nowrap;';
+    const lbl = document.createElement('span');
+    lbl.textContent = 'WARHEAD';
+    lbl.style.cssText = 'font-size:10px;letter-spacing:1px;color:#f0b8a8;white-space:nowrap;';
+    row.appendChild(lbl);
+    [['normal', 'NORMAL'], ['cluster', '✸ CLUSTER']].forEach(function(pair) {
+      const b = document.createElement('button');
+      b.className = 'weapon-btn';
+      b.style.cssText = 'flex:1;padding:5px 4px;font-size:11px;';
+      const isClusterBtn = pair[0] === 'cluster';
+      if (isClusterBtn === !!state.attackMode.clusterWarhead) b.classList.add('active');
+      b.textContent = pair[1];
+      b.onclick = function() {
+        audio.click();
+        state.attackMode.clusterWarhead = isClusterBtn;
+        renderAttackerWeapons();
+        updateAttackerStatus();
+      };
+      row.appendChild(b);
+    });
+    wrap.appendChild(row);
+  }
 }
 
 function updateAttackerStatus() {
@@ -12030,8 +12082,12 @@ function attackerLaunchAt(lat, lon) {
   const droneRoute = (state.attackMode.type === 'drone' && state.attackMode.droneRoute && state.attackMode.droneRoute.length)
     ? state.attackMode.droneRoute.map(w => ({ lat: w.lat, lon: w.lon }))
     : null;
+  // v2.23.3 — cluster warhead is a toggle on the MRBM (ballistic), not a separate weapon
+  const useCluster = (state.attackMode.type === 'ballistic' && state.attackMode.clusterWarhead);
   const applyRoute = (th) => {
-    if (th && droneRoute) { th.waypoints = droneRoute.map(w => ({ lat: w.lat, lon: w.lon })); th.routed = true; }
+    if (!th) return;
+    if (droneRoute) { th.waypoints = droneRoute.map(w => ({ lat: w.lat, lon: w.lon })); th.routed = true; }
+    if (useCluster) { th.clusterWarhead = true; }
   };
   for (let i = 0; i < salvoCount; i++) {
     const offLat = (Math.random() - 0.5) * spreadDeg * 2;
@@ -12440,7 +12496,7 @@ function updateInterceptors(dt) {
         state.stats.intercepted++;
         // v2.23.0 — CLUSTER: killing the bus doesn't fully stop it — it scatters bomblets that
         // still rain down. This is what makes a cluster warhead so hard to defend against.
-        if (THREAT_TYPES[threat.type] && THREAT_TYPES[threat.type].cluster && !threat._split) {
+        if (threat.clusterWarhead && !threat._split) {
           try { splitCluster(threat, true); } catch (e) {}
         }
         // === GAZA campaign tracker (FIX v2.9: was init but never written) ===
