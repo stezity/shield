@@ -2061,6 +2061,15 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.22.5 — Interceptor detonates RIGHT AT the target (user: it visually doesn't reach the
+//            target and explodes ~800 m away). Root cause measured: HIT_RANGE_DEG was 0.045
+//            (~5 km), so the interceptor registered a 'hit' while still ~4.9 km from the threat,
+//            then snapped to it and exploded — leaving the contrail head ~5 km short of the
+//            blast. Shrunk the hit radius to 0.005 (~0.5 km) so the interceptor visually reaches
+//            the threat before detonating. To keep fast interceptors (Arrow-3 steps ~1 km/frame)
+//            from tunnelling past such a small radius, contact is now a SWEPT segment test —
+//            closest distance from the threat to the path the interceptor traced this frame —
+//            via new segPointDistDeg(). Verified: intercept rate holds, blast sits on the trail.
 //   2.22.4 — Faster catch-up + FULLER continuous smoke (user: interceptors visually don't catch
 //            the target; the smoke is too thin like a strip — I wanted the full, non-detached
 //            smoke from the photo). (1) Bumped interceptor ratios so the catch-up is clearly
@@ -2708,7 +2717,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.22.4';
+const GAME_VERSION = '2.22.5';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -9924,8 +9933,19 @@ function drawInterceptorPaths() {
 }
 
 function drawInterceptors() {
+  const isNight = (state.dayNight === 'night');
+  const now = Date.now();
   state.interceptors.forEach(i => {
-    if (!i.alive) return;
+    let fadeMul = 1;
+    if (!i.alive) {
+      // v2.22.5 — let the smoke trail LINGER & fade after detonation so it reads as leading
+      // INTO the intercept puff (like the reference photo) rather than vanishing instantly.
+      // Night has no smoke trail, so dead night interceptors draw nothing.
+      if (isNight) return;
+      const age = now - (i.deadAt || now);
+      if (age > 1400 || !i.trail || i.trail.length < 2) return;
+      fadeMul = 1 - age / 1400;
+    }
     const t = BATTERY_TYPES[i.batteryType];
     const prog = getInterceptorProgress(i);
     const arcH = getInterceptorArc(i);   // for trail point altitude
@@ -9951,10 +9971,7 @@ function drawInterceptors() {
     //  DAY / DUSK: a continuous bright-WHITE smoke contrail; the missile itself is NOT visible
     //             (in daylight footage you only ever see the smoke trail, not the rocket).
     //  NIGHT:     no smoke at all — just a bright yellow-orange-white motor point streaking up.
-    const isNight = (state.dayNight === 'night');
-
     if (!isNight && i.trail && i.trail.length > 1) {
-      const now = Date.now();
       const pts = i.trail.map((p) => {
         const [tsx, tsy0] = geoToScreen(p.lat, p.lon);
         const tsy = tsy0 + (typeof p.altOffset === 'number' ? p.altOffset : -Math.sin((p.prog || 0) * Math.PI) * arcH);
@@ -9974,7 +9991,7 @@ function drawInterceptors() {
       ctx.lineWidth = 8;
       ctx.beginPath();
       pts.forEach((p, idx) => {
-        ctx.globalAlpha = 0.04 + (idx / N) * 0.12;
+        ctx.globalAlpha = (0.04 + (idx / N) * 0.12) * fadeMul;
         if (idx === 0) ctx.moveTo(p.sx, p.sy); else ctx.lineTo(p.sx, p.sy);
       });
       ctx.stroke();
@@ -9984,7 +10001,7 @@ function drawInterceptors() {
         const f = idx / N;
         const lump = 0.78 + 0.42 * Math.abs(Math.sin(idx * 1.7));   // 0.78..1.2 lumpiness
         const r = (3.4 + (1 - f) * 6.2) * lump;                     // head ~3px → tail ~10px, lumpy
-        const a = 0.08 + f * 0.15;
+        const a = (0.08 + f * 0.15) * fadeMul;
         const g = ctx.createRadialGradient(p.sx, p.sy, 0, p.sx, p.sy, r);
         g.addColorStop(0, `rgba(247, 250, 254, ${a})`);
         g.addColorStop(0.6, `rgba(244, 248, 253, ${a * 0.5})`);
@@ -9998,7 +10015,7 @@ function drawInterceptors() {
       ctx.lineWidth = 1.8;
       ctx.beginPath();
       pts.forEach((p, idx) => {
-        ctx.globalAlpha = 0.18 + (idx / N) * 0.6;
+        ctx.globalAlpha = (0.18 + (idx / N) * 0.6) * fadeMul;
         if (idx === 0) ctx.moveTo(p.sx, p.sy); else ctx.lineTo(p.sx, p.sy);
       });
       ctx.stroke();
@@ -11659,7 +11676,24 @@ const WEAPON_MAX_RANGE = {
 };
 
 // Global proximity-fuze radius for interceptor hits (degrees ≈ Mercator)
-const HIT_RANGE_DEG = 0.045;     // ~5 km — reliable contact, no tunneling
+// v2.22.5 — was 0.045 (~5 km): the interceptor detonated while still ~5 km from the threat,
+// then snapped to it, so the contrail head ended ~5 km short of the blast ("doesn't reach the
+// target, explodes ~800 m away"). Now ~0.5 km — the interceptor visually reaches the threat
+// before detonating. Tunneling (a fast interceptor stepping past in one frame) is prevented by
+// the SWEPT segment-distance check in updateInterceptors, not by a fat radius.
+const HIT_RANGE_DEG = 0.005;     // ~0.5 km — contact right at the target
+
+// Minimal distance (in degrees) from point P to the segment A→B. Planar approximation, exact
+// enough over the few-km of one interceptor step. Used for swept (anti-tunnel) contact testing.
+function segPointDistDeg(aLat, aLon, bLat, bLon, pLat, pLon) {
+  const dLat = bLat - aLat, dLon = bLon - aLon;
+  const len2 = dLat * dLat + dLon * dLon;
+  let t = len2 > 1e-12 ? ((pLat - aLat) * dLat + (pLon - aLon) * dLon) / len2 : 0;
+  t = t < 0 ? 0 : (t > 1 ? 1 : t);
+  const cLat = aLat + t * dLat, cLon = aLon + t * dLon;
+  const eLat = pLat - cLat, eLon = pLon - cLon;
+  return Math.sqrt(eLat * eLat + eLon * eLon);
+}
 
 // Per-battery intercept doctrine — where along the threat's trajectory to intercept
 function predictInterceptPoint(battery, threat) {
@@ -11937,6 +11971,7 @@ function updateInterceptors(dt) {
     const dLonI = i.targetLon - i.curLon;
     const dToLead = Math.hypot(dLatI, dLonI);
     const moveDist = i.speed * dt / 1000;
+    const prevLat = i.curLat, prevLon = i.curLon;   // v2.22.5 — for swept contact test
     if (dToLead > 0.0001) {
       const step = Math.min(moveDist, dToLead);
       i.curLat += (dLatI / dToLead) * step;
@@ -11957,8 +11992,9 @@ function updateInterceptors(dt) {
     // Longer trail for a fuller, lingering contrail (v2.22.4)
     if (i.trail.length > 46) i.trail.shift();
 
-    // РЕАЛЬНАЯ проверка контакта
-    const realDist = Math.hypot(threat.curLat - i.curLat, threat.curLon - i.curLon);
+    // РЕАЛЬНАЯ проверка контакта — SWEPT: closest distance from the threat to the path the
+    // interceptor traced THIS frame (prev→cur), so a fast interceptor can't tunnel past it.
+    const realDist = segPointDistDeg(prevLat, prevLon, i.curLat, i.curLon, threat.curLat, threat.curLon);
     if (realDist < HIT_RANGE_DEG) {
       i.alive = false; i.deadAt = Date.now();
       // Снап позиции к угрозе для корректного визуала «попадание»
@@ -12019,7 +12055,8 @@ function updateInterceptors(dt) {
       threat.assigned = false;
     }
   });
-  state.interceptors = state.interceptors.filter(i => i.alive || (Date.now() - (i.deadAt || 0)) < 200);
+  // v2.22.5 — keep dead interceptors ~1.5 s so their smoke trail can linger & fade (drawInterceptors)
+  state.interceptors = state.interceptors.filter(i => i.alive || (Date.now() - (i.deadAt || 0)) < 1500);
 }
 
 function updateBatteries(dt) {
