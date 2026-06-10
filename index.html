@@ -2075,6 +2075,12 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.23.7 — Cluster bomblets now fly a real BALLISTIC arc out of the warhead (user: submunitions
+//            should leave the main warhead on a BALLISTIC trajectory, not the flat descent I had).
+//            Each bomblet continues the PARENT bus's parabola from the split point onward
+//            (parentArc: parentProg = splitProg→1, arc = -sin(parentProg·π)·parentArcHeight) — so
+//            it leaves the warhead at the bus's altitude and arcs down (or up-and-over if released
+//            before apogee) to its target, like a mini ballistic. Replaced the descLift flat-descent.
 //   2.23.6 — Cluster dispersal is now DIRECTIONAL (user: bomblets appeared at scattered "different
 //            points" over Syria; wanted the warhead intercepted → submunitions fly out from there
 //            CONTINUING the ballistic's heading). splitCluster now sends bomblets out along the
@@ -2817,7 +2823,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.23.6';
+const GAME_VERSION = '2.23.7';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -9954,11 +9960,17 @@ function drawThreats() {
     const type = THREAT_TYPES[t.type];
     const arcH = getArcHeight(t);
     const [sx0, sy0] = geoToScreen(t.curLat, t.curLon);
-    // v2.23.3 — cluster bomblets DESCEND from the bus's split altitude (descLift) down to the
-    // ground at their target; everything else uses the standard up-and-over arc.
-    const arc = t.descLift
-      ? t.descLift.frac * (1 - t.progress) * arcHeightFromEndpoints(t.descLift.aLat, t.descLift.aLon, t.descLift.bLat, t.descLift.bLon, t.descLift.arcR)
-      : -Math.sin(t.progress * Math.PI) * arcH;
+    // v2.23.7 — cluster bomblets follow the PARENT's BALLISTIC arc: from the split point onward
+    // they continue the same parabola the bus was on (splitProg → 1), so they fly out of the
+    // warhead on a real ballistic trajectory (arc up-and-over if released early, descending if
+    // released late) — not a flat descent. Everything else uses the standard arc.
+    let arc;
+    if (t.parentArc) {
+      const pp = t.parentArc.splitProg + (1 - t.parentArc.splitProg) * t.progress;
+      arc = -Math.sin(pp * Math.PI) * arcHeightFromEndpoints(t.parentArc.aLat, t.parentArc.aLon, t.parentArc.bLat, t.parentArc.bLon, t.parentArc.arcR);
+    } else {
+      arc = -Math.sin(t.progress * Math.PI) * arcH;
+    }
     const sx = sx0, sy = sy0 + arc;
     if (sx < -80 || sx > canvasW + 80 || sy < -80 || sy > canvasH + 80) return;
 
@@ -11241,10 +11253,10 @@ function splitCluster(t, intercepted) {
   dLat /= dlen; dLon /= dlen;                 // unit flight direction
   const pLat = -dLon, pLon = dLat;            // perpendicular (lateral)
   const rem = Math.hypot(t.targetLat - t.curLat, t.targetLon - t.curLon);   // distance left to target
-  // bomblets descend from the bus's split altitude (visual) → recompute the lift on zoom
-  const descLift = {
+  // bomblets continue the PARENT's ballistic parabola from the split point (splitProg) to impact
+  const parentArc = {
     aLat: t.startLat, aLon: t.startLon, bLat: t.targetLat, bLon: t.targetLon,
-    arcR: t.arcRatio || 0.30, frac: -Math.sin(t.progress * Math.PI)
+    arcR: t.arcRatio || 0.34, splitProg: t.progress
   };
   for (let k = 0; k < n; k++) {
     // continue downrange along the flight vector and land in a TIGHT footprint centred on the
@@ -11277,11 +11289,11 @@ function splitCluster(t, intercepted) {
       isFalseAlarm: false, spawnTime: state.gameTime,
       populated: !!(tc && tc.population > 0), trail: [],
       alertFired: true,        // the city was already alerted for the inbound cluster
-      descLift: descLift       // visual: descend from the bus's split altitude → ground at target
+      parentArc: parentArc     // visual: continue the parent's ballistic parabola to impact
     });
     state.stats.threatsTotal++;
   }
-  const arc = descLift.frac * getArcHeight(t);
+  const arc = -Math.sin(t.progress * Math.PI) * getArcHeight(t);   // split FX at the bus's altitude
   try { createClusterSplitFX(t.curLat, t.curLon, arc, n); } catch (e) {}
   if (!intercepted) { t.impacted = true; t._consumed = true; }   // natural dispersal consumes the bus
   try {
