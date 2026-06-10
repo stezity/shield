@@ -2075,6 +2075,20 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.24.0 — Cluster: pre-intercept dispensing chance + ballistic bomblet TRAILS (user: add a
+//            chance the warhead opens BEFORE the Hetz-3 kill so bomblets can still reach the
+//            territory; and the bomblets must trace the same ballistic trajectory as the missile
+//            — the trail was an ugly thick orange fan).
+//            (1) TRAIL FIX: drawThreats' trail layers used the bomblet's OWN tiny arc while the
+//            live dot flew the parent's parabola (v2.23.7) — dot and trail diverged into the fat
+//            fan. New shared arcAt(prog) helper: every trail point now uses the SAME parentArc
+//            parabola as the dot → clean ballistic traces. Submunition trail widths ×0.4 (thin,
+//            like mini missiles); submunitions skipped in drawTrajectories (no dashed-line/launch-
+//            marker clutter at a mid-air split point).
+//            (2) PRE-INTERCEPT DISPENSING: on a far Arrow-3/THAAD kill there's now a 40% chance
+//            the warhead dispensed just before the hit — bomblets continue ballistically to the
+//            target footprint (notification shown). Terminal (<60 km) hit still always releases;
+//            otherwise clean kill. A cluster MRBM is now only ~60% stoppable even by a good kill.
 //   2.23.9 — Interceptors no longer engage BEYOND their battery's range (user: an Iron Dome in
 //            Haifa was intercepting over Syria — that's not a 70 km weapon). The lead-pursuit aim
 //            is now clamped to within rangeKm*1.05 of the launch site, so the interceptor holds at
@@ -2833,7 +2847,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.23.9';
+const GAME_VERSION = '2.24.0';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -9799,6 +9813,9 @@ function drawTrajectories() {
   const adaptiveSteps = liveCount > 30 ? 20 : (liveCount > 15 ? 30 : 48);
   state.threats.forEach(t => {
     if (t.intercepted || t.impacted) return;
+    // v2.24.0 — no prediction clutter for cluster bomblets: 5-7 dashed lines + ground "launch"
+    // markers at a mid-air split point looked wrong; their ballistic trail tells the story.
+    if (t.type === 'submunition') return;
     const type = THREAT_TYPES[t.type];
     const arcH = getArcHeight(t);
 
@@ -9970,31 +9987,35 @@ function drawThreats() {
     const type = THREAT_TYPES[t.type];
     const arcH = getArcHeight(t);
     const [sx0, sy0] = geoToScreen(t.curLat, t.curLon);
-    // v2.23.7 — cluster bomblets follow the PARENT's BALLISTIC arc: from the split point onward
-    // they continue the same parabola the bus was on (splitProg → 1), so they fly out of the
-    // warhead on a real ballistic trajectory (arc up-and-over if released early, descending if
-    // released late) — not a flat descent. Everything else uses the standard arc.
-    let arc;
-    if (t.parentArc) {
-      const pp = t.parentArc.splitProg + (1 - t.parentArc.splitProg) * t.progress;
-      arc = -Math.sin(pp * Math.PI) * arcHeightFromEndpoints(t.parentArc.aLat, t.parentArc.aLon, t.parentArc.bLat, t.parentArc.bLon, t.parentArc.arcR);
-    } else {
-      arc = -Math.sin(t.progress * Math.PI) * arcH;
-    }
+    // v2.24.0 — ONE arc function for the dot AND the trail. Cluster bomblets follow the PARENT's
+    // ballistic parabola from the split point (v2.23.7), but the trail was still drawn with the
+    // bomblet's own tiny arc — dot and trail diverged into the ugly thick fan. Now every trail
+    // point uses the same parentArc math as the live dot, so a bomblet leaves a clean ballistic
+    // trace exactly like the missile it came from.
+    const arcAt = (prog) => {
+      if (t.parentArc) {
+        const pp = t.parentArc.splitProg + (1 - t.parentArc.splitProg) * prog;
+        return -Math.sin(pp * Math.PI) * arcHeightFromEndpoints(t.parentArc.aLat, t.parentArc.aLon, t.parentArc.bLat, t.parentArc.bLon, t.parentArc.arcR);
+      }
+      return -Math.sin(prog * Math.PI) * arcH;
+    };
+    const arc = arcAt(t.progress);
     const sx = sx0, sy = sy0 + arc;
     if (sx < -80 || sx > canvasW + 80 || sy < -80 || sy > canvasH + 80) return;
 
     // Дымный шлейф — три слоя для максимальной заметности
+    // v2.24.0 — submunitions get THIN trails (small bomblet, not a fat orange ribbon)
+    const wMul = (t.type === 'submunition') ? 0.4 : 1;
     if (t.trail && t.trail.length > 1) {
       // 1. Широкий дымный ореол (серо-белёсый)
       ctx.strokeStyle = 'rgba(220, 220, 220, 0.25)';
-      ctx.lineWidth = 8;
+      ctx.lineWidth = 8 * wMul;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       ctx.beginPath();
       t.trail.forEach((p, i) => {
         const [tsx, tsy0] = geoToScreen(p.lat, p.lon);
-        const tarc = -Math.sin(p.progress * Math.PI) * arcH;
+        const tarc = arcAt(p.progress);
         ctx.globalAlpha = i / t.trail.length * 0.4;
         if (i === 0) ctx.moveTo(tsx, tsy0 + tarc);
         else ctx.lineTo(tsx, tsy0 + tarc);
@@ -10003,11 +10024,11 @@ function drawThreats() {
 
       // 2. Тёмная подложка (контраст с тайлами)
       ctx.strokeStyle = 'rgba(0, 0, 0, 0.5)';
-      ctx.lineWidth = 4;
+      ctx.lineWidth = 4 * wMul;
       ctx.beginPath();
       t.trail.forEach((p, i) => {
         const [tsx, tsy0] = geoToScreen(p.lat, p.lon);
-        const tarc = -Math.sin(p.progress * Math.PI) * arcH;
+        const tarc = arcAt(p.progress);
         ctx.globalAlpha = i / t.trail.length * 0.5;
         if (i === 0) ctx.moveTo(tsx, tsy0 + tarc);
         else ctx.lineTo(tsx, tsy0 + tarc);
@@ -10016,11 +10037,11 @@ function drawThreats() {
 
       // 3. Яркий цветной след
       ctx.strokeStyle = type.color;
-      ctx.lineWidth = 3;
+      ctx.lineWidth = 3 * wMul;
       ctx.beginPath();
       t.trail.forEach((p, i) => {
         const [tsx, tsy0] = geoToScreen(p.lat, p.lon);
-        const tarc = -Math.sin(p.progress * Math.PI) * arcH;
+        const tarc = arcAt(p.progress);
         ctx.globalAlpha = Math.min(1, (i / t.trail.length + 0.3));
         if (i === 0) ctx.moveTo(tsx, tsy0 + tarc);
         else ctx.lineTo(tsx, tsy0 + tarc);
@@ -10029,11 +10050,11 @@ function drawThreats() {
 
       // 4. Внутренняя яркая жилка
       ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 1;
+      ctx.lineWidth = 1 * wMul;
       ctx.beginPath();
       t.trail.forEach((p, i) => {
         const [tsx, tsy0] = geoToScreen(p.lat, p.lon);
-        const tarc = -Math.sin(p.progress * Math.PI) * arcH;
+        const tarc = arcAt(p.progress);
         ctx.globalAlpha = i / t.trail.length * 0.7;
         if (i === 0) ctx.moveTo(tsx, tsy0 + tarc);
         else ctx.lineTo(tsx, tsy0 + tarc);
@@ -12605,12 +12626,20 @@ function updateInterceptors(dt) {
       if (Math.random() < i.accuracy) {
         threat.intercepted = true;
         state.stats.intercepted++;
-        // v2.23.8 — CLUSTER: a cluster warhead only scatters bomblets if it's hit in the TERMINAL
-        // phase (already dispensing, within ~60 km of the target). Intercepting it far out (e.g.
-        // an Arrow-3 kill over Iraq/Syria) is a CLEAN KILL — no region-wide bomblet scatter.
-        if (threat.clusterWarhead && !threat._split &&
-            haversineKm(threat.curLat, threat.curLon, threat.targetLat, threat.targetLon) < 60) {
-          try { splitCluster(threat, true); } catch (e) {}
+        // v2.24.0 — CLUSTER vs Arrow-3: a TERMINAL hit (<60 km) always finds the warhead already
+        // dispensing → bomblets release. On a FAR kill there's a 40% chance the warhead managed
+        // to dispense a beat BEFORE the interceptor arrived — the bomblets then continue the
+        // parent's ballistic parabola the rest of the way to the target (clean ballistic traces,
+        // tight footprint at the city). Otherwise it's a clean kill. This is what makes a cluster
+        // MRBM worth firing: even a successful Hetz-3 kill is only ~60% "fully stopped".
+        if (threat.clusterWarhead && !threat._split) {
+          const _kmToTgt = haversineKm(threat.curLat, threat.curLon, threat.targetLat, threat.targetLon);
+          if (_kmToTgt < 60) {
+            try { splitCluster(threat, true); } catch (e) {}
+          } else if (Math.random() < 0.40) {
+            try { splitCluster(threat, true); } catch (e) {}
+            try { showNotification('✸ WARHEAD DISPENSED', 'Cluster opened just before the intercept — submunitions still inbound on a ballistic track', 'danger'); } catch (e) {}
+          }
         }
         // === GAZA campaign tracker (FIX v2.9: was init but never written) ===
         if (state.gaza) state.gaza.interceptsTotal = (state.gaza.interceptsTotal || 0) + 1;
