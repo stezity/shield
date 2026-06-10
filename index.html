@@ -2075,6 +2075,14 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.24.3 — REGIONAL red alert for ballistic / cluster (user: with bomblets dispersing and plain
+//            ballistic the alert must be LARGE-SCALE after the early warning, not just per-city —
+//            like real Tzofar pushes covering the whole Galilee / Gush Dan corridor). The
+//            neighbouring-zone footprint in triggerOrefZoneAlert now scales with the weapon:
+//            ballistic/cluster/submunition → ~35 km radius, up to 130 zones (regional); tac-
+//            ballistic → ~20 km / 60 zones; rockets/drones keep the local ~7 km / 5 zones. Also
+//            splitCluster now fires the regional alert + shelter alert AT DISPERSAL — an early
+//            (pre-0.82) split used to arrive with no siren at all (bomblets carry alertFired).
 //   2.24.2 — Bomblet engagement over ISRAEL only + realistic Tamir weave + faster bomblets (user:
 //            the Dome was intercepting over Syria — engage over Israeli territory; the 360° loops
 //            looked ugly — make the maneuver realistic; make submunitions land fast-fast).
@@ -2866,7 +2874,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.24.2';
+const GAME_VERSION = '2.24.3';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -11106,19 +11114,24 @@ function triggerOrefZoneAlert(targetCity, threatType) {
 
   // v2.23.5 — NEIGHBOURING ZONES: rockets/missiles aren't precise — a strike aimed at one town
   // can land on a neighbour (the player's Yarka→Tamra example). Light up nearby Pikud HaOref
-  // zones too (within ~7 km) so the whole area's sirens go off — matching real OREF doctrine.
-  // Limited to the closest few, deduped against already-active alerts.
+  // zones too so the whole area's sirens go off — matching real OREF doctrine.
+  // v2.24.3 — the footprint SCALES with the weapon (real Tzofar pushes): a ballistic / cluster
+  // impact zone is uncertain across a whole REGION → after the early warning, the red alert
+  // covers hundreds of zones (~35 km); tacBallistic ~20 km; short-range fire stays local (~7 km).
   try {
     const idxN = buildOrefIndex();
     if (idxN && idxN.all) {
+      const _big = (threatType === 'ballistic' || threatType === 'cluster' || threatType === 'submunition');
+      const nbRadiusKm = _big ? 35 : (threatType === 'tacBallistic' ? 20 : 7);
+      const nbMax      = _big ? 130 : (threatType === 'tacBallistic' ? 60 : 5);
       const near = [];
       for (const oc of idxN.all) {
         if (!oc || oc.id === orefCity.id || typeof oc.lat !== 'number') continue;
         const dKm = haversineKm(orefCity.lat, orefCity.lng, oc.lat, oc.lng);
-        if (dKm <= 7) near.push({ oc: oc, dKm: dKm });
+        if (dKm <= nbRadiusKm) near.push({ oc: oc, dKm: dKm });
       }
       near.sort(function(a, b) { return a.dKm - b.dKm; });
-      near.slice(0, 5).forEach(function(o) {
+      near.slice(0, nbMax).forEach(function(o) {
         const oc = o.oc;
         if (state.orefAlerts.find(function(a) { return a.kind === 'city' && a.cityId === oc.id; })) return;
         const poly = OREF_POLYS[oc.id];
@@ -11345,6 +11358,12 @@ function splitCluster(t, intercepted) {
   }
   const arc = -Math.sin(t.progress * Math.PI) * getArcHeight(t);   // split FX at the bus's altitude
   try { createClusterSplitFX(t.curLat, t.curLon, arc, n); } catch (e) {}
+  // v2.24.3 — the moment the warhead dispenses, the REGIONAL red alert fires over the target area
+  // (bomblets carry alertFired:true, and an early split can happen before the bus's own terminal
+  // alert at progress 0.82 — without this, a far-released swarm arrived with no siren at all).
+  // 'submunition' maps to the wide ~35 km footprint; triggerOrefZoneAlert dedupes repeats.
+  try { if (t.targetCity) triggerOrefZoneAlert(t.targetCity, 'submunition'); } catch (e) {}
+  try { if (t.targetCity && t.targetCity.population > 0) triggerAlert(t.targetCity); } catch (e) {}
   if (!intercepted) { t.impacted = true; t._consumed = true; }   // natural dispersal consumes the bus
   try {
     logEvent(`✸ ${intercepted ? 'Cluster warhead hit — bomblets released, still inbound' : 'Cluster munition dispersed'}: ${n} bomblets → ${t.targetCity ? t.targetCity.name : 'target'}`, 'danger');
