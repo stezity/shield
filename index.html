@@ -2075,6 +2075,11 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.23.9 — Interceptors no longer engage BEYOND their battery's range (user: an Iron Dome in
+//            Haifa was intercepting over Syria — that's not a 70 km weapon). The lead-pursuit aim
+//            is now clamped to within rangeKm*1.05 of the launch site, so the interceptor holds at
+//            the range boundary until the threat enters the bubble instead of flying out to meet
+//            it. Iron Dome 70 km, D-Sling 200 km, Arrow-3 700 km (so Arrow CAN still reach Syria).
 //   2.23.8 — Cluster only scatters bomblets if hit in the TERMINAL phase (user: intercepting the
 //            bus far out over Iraq sent bomblets flying with wild scatter across the region —
 //            remove that). The intercept-split now requires the bus be within ~60 km of the
@@ -2828,7 +2833,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.23.8';
+const GAME_VERSION = '2.23.9';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -12546,6 +12551,21 @@ function updateInterceptors(dt) {
     const futureProg = Math.min(0.98, threat.progress + futureAdv);
     i.targetLat = threat.startLat + dLatT * futureProg;
     i.targetLon = threat.startLon + dLonT * futureProg;
+
+    // v2.23.9 — CLAMP the aim point to within the BATTERY'S RANGE. Lead pursuit was sending the
+    // interceptor far out to meet a fast threat at its future position — so an Iron Dome in Haifa
+    // (70 km) would fly out and intercept over Syria. Now the interceptor never aims past its
+    // battery's max range; it holds at the range boundary until the threat enters the bubble.
+    const _bt = BATTERY_TYPES[i.batteryType];
+    if (_bt && i.startLat != null && _bt.rangeKm) {
+      const aimKm = haversineKm(i.startLat, i.startLon, i.targetLat, i.targetLon);
+      const maxKm = _bt.rangeKm * 1.05;   // tiny slack for terminal curvature
+      if (aimKm > maxKm) {
+        const f = maxKm / aimKm;
+        i.targetLat = i.startLat + (i.targetLat - i.startLat) * f;
+        i.targetLon = i.startLon + (i.targetLon - i.startLon) * f;
+      }
+    }
 
     const dLatI = i.targetLat - i.curLat;
     const dLonI = i.targetLon - i.curLon;
