@@ -1758,11 +1758,14 @@ function pixelsPerKm(lat) {
 }
 
 // Высота апекса траектории в пикселях экрана (масштабируется с зумом и дальностью)
-function getArcHeight(t) {
-  const [sx0, sy0] = geoToScreen(t.startLat, t.startLon);
-  const [sxT, syT] = geoToScreen(t.targetLat, t.targetLon);
+// Arc apex height (screen px) for explicit endpoints at the CURRENT zoom. Recomputed every
+// frame so anything drawn with it (trajectories, interceptor contrails) scales correctly when
+// the map is zoomed — a baked pixel value would distort on zoom (v2.22.7).
+function arcHeightFromEndpoints(startLat, startLon, targetLat, targetLon, arcRatio) {
+  const [sx0, sy0] = geoToScreen(startLat, startLon);
+  const [sxT, syT] = geoToScreen(targetLat, targetLon);
   const screenDist = Math.hypot(sxT - sx0, syT - sy0);
-  const raw = screenDist * (t.arcRatio || 0.25);
+  const raw = screenDist * (arcRatio || 0.25);
   // v2.22.0 — APEX CAP. The arc "lift" is a stylised altitude cue drawn in screen-Y.
   // For long-range threats (e.g. a 778 km ballistic) viewed at high zoom the chord is
   // thousands of px wide, so raw apex was ~1000 px — far above the viewport. You then saw
@@ -1770,6 +1773,9 @@ function getArcHeight(t) {
   // of the viewport so the WHOLE arc stays on-screen as one shallow, realistic bow.
   const cap = Math.max(60, (canvasH || 600) * 0.32);
   return Math.min(raw, cap);
+}
+function getArcHeight(t) {
+  return arcHeightFromEndpoints(t.startLat, t.startLon, t.targetLat, t.targetLon, t.arcRatio);
 }
 
 // Точка, удалённая от (lat, lon) на distKm по азимуту bearing (рад.)
@@ -2061,6 +2067,19 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.22.7 — Fixed contrail distorting on zoom + intercept clouds now linger ~30 s (user: the
+//            interceptor line warps when you zoom the map out; and add lingering small clouds
+//            like real life). (1) ZOOM FIX: the trail's altitude lift was a baked pixel value
+//            (altOffset) computed at one zoom, so on zoom-out it no longer matched the compressed
+//            map and the line kinked. Now each trail point stores a zoom-INDEPENDENT lift
+//            fraction (altFrac) and the interceptor stores the threat's flight endpoints; the
+//            lift is recomputed every frame as altFrac × arcHeightFromEndpoints(endpoints) at the
+//            current zoom (new helper; getArcHeight refactored to use it). (2) LINGERING CLOUDS:
+//            the day intercept puff now lives ~26-34 s (was ~4 s), stays SMALL (slow grow), and
+//            its altitude is likewise recomputed at the current zoom (lift info passed into
+//            createInterceptFlash → stored on the ismoke particles → recomputed in drawParticles)
+//            so the clouds don't drift vertically when you zoom during their long life. Particle
+//            cap 520→680 for headroom.
 //   2.22.6 — Contrail = TRANSLUCENT diffuse smoke, not an opaque white strip (user: I want the
 //            long trail from the 3rd photo but more transparent, an actual smoke effect not a
 //            strip). Removed the bright core line (alpha .78) that painted a solid ribbon; the
@@ -2724,7 +2743,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.22.6';
+const GAME_VERSION = '2.22.7';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -9979,11 +9998,17 @@ function drawInterceptors() {
     //             (in daylight footage you only ever see the smoke trail, not the rocket).
     //  NIGHT:     no smoke at all — just a bright yellow-orange-white motor point streaking up.
     if (!isNight && i.trail && i.trail.length > 1) {
+      // v2.22.7 — recompute the altitude lift at the CURRENT zoom (threat arc from the stored
+      // endpoints) so the contrail scales correctly and no longer distorts when the map is zoomed.
+      const thArc = (i.threatStartLat != null)
+        ? arcHeightFromEndpoints(i.threatStartLat, i.threatStartLon, i.threatTargetLat, i.threatTargetLon, i.threatArcRatio)
+        : arcH;
       const pts = i.trail.map((p) => {
         const [tsx, tsy0] = geoToScreen(p.lat, p.lon);
-        const tsy = tsy0 + (typeof p.altOffset === 'number' ? p.altOffset : -Math.sin((p.prog || 0) * Math.PI) * arcH);
+        const lift = (typeof p.altFrac === 'number') ? p.altFrac * thArc
+                   : (typeof p.altOffset === 'number' ? p.altOffset : -Math.sin((p.prog || 0) * Math.PI) * arcH);
         const drift = Math.min(8, (now - (p.t || now)) / 250);   // smoke rises slowly
-        return { sx: tsx, sy: tsy - drift };
+        return { sx: tsx, sy: tsy0 + lift - drift };
       });
       const N = pts.length;
       ctx.lineCap = 'round';
@@ -10202,7 +10227,12 @@ function drawParticles() {
   state.particles.forEach(p => {
     if (p.kind !== 'smoke' && p.kind !== 'ismoke') return;
     const [sx, sy0] = geoToScreen(p.lat, p.lon);
-    const sy = sy0 + (p.screenYOffset || 0);
+    // v2.22.7 — lingering intercept clouds recompute their altitude lift at the CURRENT zoom
+    // (from the stored threat endpoints), so they don't drift vertically when the map is zoomed.
+    const off = (p.lift)
+      ? p.lift.frac * arcHeightFromEndpoints(p.lift.aLat, p.lift.aLon, p.lift.bLat, p.lift.bLon, p.lift.arcR)
+      : (p.screenYOffset || 0);
+    const sy = sy0 + off;
     const a = (p.life / p.maxLife) * (p.kind === 'ismoke' ? 0.55 : 0.45);
     if (a <= 0) return;
     const r = p.size;
@@ -11873,6 +11903,11 @@ function launchInterceptor(battery, threat) {
     curLat: battery.lat, curLon: battery.lon,
     targetLat: ip.lat, targetLon: ip.lon,
     interceptF: ip.f,                 // зафиксировано на момент пуска
+    // v2.22.7 — threat flight endpoints, so the contrail's altitude lift is recomputed at the
+    // current zoom each frame (fixes the trail distorting/kinking when you zoom the map out).
+    threatStartLat: threat.startLat, threatStartLon: threat.startLon,
+    threatTargetLat: threat.targetLat, threatTargetLon: threat.targetLon,
+    threatArcRatio: threat.arcRatio || (THREAT_TYPES[threat.type] && THREAT_TYPES[threat.type].arcRatio) || 0.25,
     speed: _ispeed,
     alive: true,
     accuracy: BATTERY_TYPES[battery.type].accuracy * (Date.now() < (state.accuracyDebuffUntil || 0) ? 0.80 : 1.0),
@@ -11992,15 +12027,17 @@ function updateInterceptors(dt) {
     // === STORE EXACT VISUAL ALTITUDE OFFSET in the trail point ===
     // (Was: trail rendered using interceptor's own arc but the live dot used the threat's arc — caused the trail to detach vertically from the moving icon. Now both share the same altitude.)
     const _prog = getInterceptorProgress(i);
-    let _altOffset;
+    // v2.22.7 — store a ZOOM-INDEPENDENT lift fraction (multiplied by the threat arc height,
+    // recomputed at the current zoom in drawInterceptors). Was a baked pixel altOffset that
+    // didn't rescale, so the contrail distorted/kinked when the map was zoomed out.
+    let _altFrac;
     if (threat && !threat.intercepted && !threat.impacted) {
-      const _tArc = -Math.sin(threat.progress * Math.PI) * getArcHeight(threat);
-      _altOffset = _prog * _tArc;
-      if (i.exo) _altOffset -= Math.sin(_prog * Math.PI) * 80;
+      _altFrac = _prog * -Math.sin(threat.progress * Math.PI);
+      if (i.exo) _altFrac -= Math.sin(_prog * Math.PI) * 0.12;   // exo boost ≈ fraction of arc
     } else {
-      _altOffset = -Math.sin(_prog * Math.PI) * getInterceptorArc(i);
+      _altFrac = null;   // fall back to the interceptor's own arc at render time
     }
-    i.trail.push({ lat: i.curLat, lon: i.curLon, prog: _prog, altOffset: _altOffset, t: Date.now() });
+    i.trail.push({ lat: i.curLat, lon: i.curLon, prog: _prog, altFrac: _altFrac, t: Date.now() });
     // Longer trail for a fuller, lingering contrail (v2.22.4)
     if (i.trail.length > 46) i.trail.shift();
 
@@ -12040,7 +12077,9 @@ function updateInterceptors(dt) {
         const tArcVisual = -Math.sin(threat.progress * Math.PI) * getArcHeight(threat);
         createExplosion(threat.curLat, threat.curLon, i.exo ? 30 : 22, i.exo ? 1100 : 900, false, !!i.exo, tArcVisual);
         // NEW v2.14.0: dedicated mid-air intercept flash + falling debris (distinct from a ground hit)
-        if (typeof createInterceptFlash === 'function') createInterceptFlash(threat.curLat, threat.curLon, tArcVisual, !!i.exo);
+        // v2.22.7 — pass the threat's endpoints so the lingering cloud's altitude rescales on zoom
+        const _liftInfo = { frac: -Math.sin(threat.progress * Math.PI), aLat: threat.startLat, aLon: threat.startLon, bLat: threat.targetLat, bLon: threat.targetLon, arcR: threat.arcRatio || 0.25 };
+        if (typeof createInterceptFlash === 'function') createInterceptFlash(threat.curLat, threat.curLon, tArcVisual, !!i.exo, _liftInfo);
         audio.intercept();
         const battery = state.batteries.find(b => b.id === i.batteryId);
         if (battery) battery.interceptions++;
@@ -12175,7 +12214,7 @@ function createExplosion(lat, lon, maxRadius, duration, big, exo, screenYOffset)
 //  NIGHT: a bright yellow-orange detonation throwing glowing embers + sparks; NO smoke
 //         (smoke is invisible in the dark — you just see the flash and falling sparks).
 // screenYOffset is the threat's visual arc so the burst appears at the rocket's drawn altitude.
-function createInterceptFlash(lat, lon, screenYOffset, exo) {
+function createInterceptFlash(lat, lon, screenYOffset, exo, lift) {
   const isNight = (state.dayNight === 'night');
   // bright instant flash (reuses the explosion list with a short, flashy profile)
   state.explosions.push({
@@ -12221,21 +12260,23 @@ function createInterceptFlash(lat, lon, screenYOffset, exo) {
       });
     }
   } else {
-    // DAY — the intercept CLOUD: a compact GREY-WHITE smoke puff that starts SMALL and grows
-    // (grow>1) while fading & drifting, over a brief warm fire flash. Matches real daytime Iron
-    // Dome footage (orange warhead flash + grey smoke ball at the kill point).
-    const puffs = 7 + Math.floor(Math.random() * 4);
+    // DAY — the intercept CLOUD: a SMALL white cotton-puff that LINGERS ~30 s like real Iron
+    // Dome kills (the little clouds hang in the sky long after the trail is gone), drifting a
+    // touch then slowly fading. Over a brief warm warhead flash. v2.22.7: long life, small size.
+    const puffs = 5 + Math.floor(Math.random() * 3);
     for (let i = 0; i < puffs; i++) {
       const a = Math.random() * Math.PI * 2;
-      const sp = (0.03 + Math.random() * 0.11) * 0.0008;
+      const sp = (0.02 + Math.random() * 0.06) * 0.0008;
+      const life = 26000 + Math.random() * 8000;   // ~26-34 s
       state.particles.push({
         kind: 'ismoke', lat, lon, screenYOffset: screenYOffset || 0,
-        vLat: Math.sin(a) * sp * 0.4 - 0.00012,   // slow outward + gentle rise
+        lift: lift || null,                        // v2.22.7 — recompute altitude at current zoom
+        vLat: Math.sin(a) * sp * 0.4 - 0.00010,    // slow outward + gentle rise, then it settles
         vLon: Math.cos(a) * sp,
-        life: 2300 + Math.random() * 1600, maxLife: 3900,
-        shade: 186 + Math.random() * 26,           // grey-white smoke (not pure white)
-        size: 1.6 + Math.random() * 2.2,           // START small...
-        grow: 1.010                                // ...expand into a ball
+        life: life, maxLife: life,
+        shade: 200 + Math.random() * 30,           // bright cotton-white
+        size: 2.6 + Math.random() * 3.0,           // SMALL puff
+        grow: 1.0004                               // stays small over its long life
       });
     }
     // brief warm fire sparks at the contact point (the warhead flash)
@@ -12289,8 +12330,10 @@ function updateExplosions(dt) {
   });
   state.particles = state.particles.filter(p => p.life > 0);
   // Hard cap — during mass salvos particles balloon and tank FPS. Drop oldest.
-  if (state.particles.length > 520) {
-    state.particles.splice(0, state.particles.length - 520);
+  // v2.22.7 — raised 520→680 so the long-lived (~30 s) intercept clouds have headroom to
+  // linger without being culled the moment a salvo sprays sparks/debris.
+  if (state.particles.length > 680) {
+    state.particles.splice(0, state.particles.length - 680);
   }
 
   // Затухание тряски
@@ -15051,7 +15094,7 @@ function tickPlayerFighters(dt) {
             if (state.gaza) state.gaza.interceptsTotal = (state.gaza.interceptsTotal||0)+1;
             if (state.sandbox) sandboxRecordIntercept(tgt, true);
             try { createExplosion(tgt.curLat, tgt.curLon, 20, 900); } catch(e){}
-            if (typeof createInterceptFlash === 'function') createInterceptFlash(tgt.curLat, tgt.curLon, -Math.sin(tgt.progress*Math.PI)*getArcHeight(tgt), false);
+            if (typeof createInterceptFlash === 'function') createInterceptFlash(tgt.curLat, tgt.curLon, -Math.sin(tgt.progress*Math.PI)*getArcHeight(tgt), false, { frac: -Math.sin(tgt.progress*Math.PI), aLat: tgt.startLat, aLon: tgt.startLon, bLat: tgt.targetLat, bLon: tgt.targetLon, arcR: tgt.arcRatio || 0.25 });
             if (typeof audio !== 'undefined' && audio.intercept) audio.intercept();
             logEvent(`◯ SPLASH: ${f.baseName} flight downed a UAV`, 'success');
           }
