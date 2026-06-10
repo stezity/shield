@@ -2061,6 +2061,13 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.22.6 — Contrail = TRANSLUCENT diffuse smoke, not an opaque white strip (user: I want the
+//            long trail from the 3rd photo but more transparent, an actual smoke effect not a
+//            strip). Removed the bright core line (alpha .78) that painted a solid ribbon; the
+//            trail is now built purely from soft LOW-alpha overlapping puffs (lumpy sizes for
+//            real smoke texture, billowing wider toward the tail) over a barely-there haze for
+//            continuity, plus a gentle soft head. Peak opacity ~0.35 vs the old ~0.78 — the map
+//            shows through it now.
 //   2.22.5 — Interceptor detonates RIGHT AT the target (user: it visually doesn't reach the
 //            target and explodes ~800 m away). Root cause measured: HIT_RANGE_DEG was 0.045
 //            (~5 km), so the interceptor registered a 'hit' while still ~4.9 km from the threat,
@@ -2717,7 +2724,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.22.5';
+const GAME_VERSION = '2.22.6';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -9981,48 +9988,53 @@ function drawInterceptors() {
       const N = pts.length;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
-      // v2.22.4 — a FULL, billowy white smoke contrail (was reading as a thin strip). It's built
-      // from big OVERLAPPING soft puffs (the smoke body) whose size varies point-to-point so the
-      // edge is irregular/lumpy like real smoke — not a flat ribbon — and which billow wider &
-      // airier toward the tail (older smoke spreads). A wide soft halo sits under them and a
-      // crisp bright core runs through the middle. All unbroken so the smoke never looks detached.
-      // Soft outer halo
-      ctx.strokeStyle = 'rgb(236, 241, 247)';
-      ctx.lineWidth = 8;
+      // v2.22.6 — TRANSLUCENT diffuse SMOKE, not an opaque white strip. The old version had a
+      // bright core line (alpha .78) that painted a solid ribbon; real smoke is see-through and
+      // soft. Now the trail is built PURELY from soft low-alpha overlapping puffs (lumpy sizes →
+      // real smoke texture, billowing wider & airier toward the tail) over a barely-there haze
+      // that keeps it continuous. No opaque core — the map shows through it.
+      // (1) Faint continuous haze — unbroken continuity at any zoom, but barely visible
+      ctx.strokeStyle = 'rgb(230, 237, 245)';
+      ctx.lineWidth = 4;
       ctx.beginPath();
       pts.forEach((p, idx) => {
-        ctx.globalAlpha = (0.04 + (idx / N) * 0.12) * fadeMul;
+        ctx.globalAlpha = (0.025 + (idx / N) * 0.06) * fadeMul;
         if (idx === 0) ctx.moveTo(p.sx, p.sy); else ctx.lineTo(p.sx, p.sy);
       });
       ctx.stroke();
-      // Billowy overlapping puffs — the body of the smoke
+      // (2) Diffuse smoke puffs — translucent & lumpy, billowing toward the tail. Low per-puff
+      //     alpha so even where they overlap the smoke stays see-through (never a solid band).
       for (let idx = 0; idx < N; idx += 2) {
         const p = pts[idx];
         const f = idx / N;
-        const lump = 0.78 + 0.42 * Math.abs(Math.sin(idx * 1.7));   // 0.78..1.2 lumpiness
-        const r = (3.4 + (1 - f) * 6.2) * lump;                     // head ~3px → tail ~10px, lumpy
-        const a = (0.08 + f * 0.15) * fadeMul;
+        const lump = 0.6 + 0.6 * Math.abs(Math.sin(idx * 1.5 + idx * idx * 0.02));
+        const r = (3.6 + (1 - f) * 8.0) * lump;        // head ~3-4px → tail ~10-13px, irregular
+        const a = (0.045 + f * 0.085) * fadeMul;       // LOW → translucent; overlap builds it up
         const g = ctx.createRadialGradient(p.sx, p.sy, 0, p.sx, p.sy, r);
-        g.addColorStop(0, `rgba(247, 250, 254, ${a})`);
-        g.addColorStop(0.6, `rgba(244, 248, 253, ${a * 0.5})`);
-        g.addColorStop(1, 'rgba(244, 248, 253, 0)');
+        g.addColorStop(0, `rgba(245, 248, 252, ${a})`);
+        g.addColorStop(0.55, `rgba(240, 245, 251, ${a * 0.45})`);
+        g.addColorStop(1, 'rgba(240, 245, 251, 0)');
         ctx.globalAlpha = 1;
         ctx.fillStyle = g;
         ctx.beginPath(); ctx.arc(p.sx, p.sy, r, 0, Math.PI * 2); ctx.fill();
       }
-      // Crisp bright continuous core (the dense fresh smoke ridge, brightest at the head)
-      ctx.strokeStyle = 'rgb(252, 253, 255)';
-      ctx.lineWidth = 1.8;
+      // (3) Soft brightening at the very head only (fresh dense smoke at the missile) — gentle,
+      //     translucent, NOT a hard line.
+      const headStart = Math.max(0, N - 6);
+      ctx.strokeStyle = 'rgb(248, 251, 255)';
+      ctx.lineCap = 'round';
+      ctx.lineWidth = 2.4;
       ctx.beginPath();
-      pts.forEach((p, idx) => {
-        ctx.globalAlpha = (0.18 + (idx / N) * 0.6) * fadeMul;
-        if (idx === 0) ctx.moveTo(p.sx, p.sy); else ctx.lineTo(p.sx, p.sy);
-      });
+      for (let idx = headStart; idx < N; idx++) {
+        const p = pts[idx];
+        ctx.globalAlpha = (0.10 + ((idx - headStart) / Math.max(1, N - 1 - headStart)) * 0.22) * fadeMul;
+        if (idx === headStart) ctx.moveTo(p.sx, p.sy); else ctx.lineTo(p.sx, p.sy);
+      }
       ctx.stroke();
       ctx.globalAlpha = 1;
       ctx.lineCap = 'butt';
       ctx.lineJoin = 'miter';
-      // (the dense bright head is the interceptor itself — no separate dot needed in daylight)
+      // (the soft bright head is the interceptor itself — no separate dot needed in daylight)
     }
 
     if (isNight) {
