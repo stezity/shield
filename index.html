@@ -1352,6 +1352,7 @@ body.targeting-cursor #map-canvas {
         <div class="quick" id="zoom-fit" title="Fit Israel">FIT</div>
         <div class="quick" id="zoom-region" title="Show region">RGN</div>
         <div class="quick" id="layer-toggle" title="Toggle dark / satellite">SAT</div>
+        <div class="quick" id="daynight-toggle" title="Time of day: day / dusk / night">☀ DAY</div>
         <div class="quick" id="layers-toggle" title="Show/hide map layers" style="margin-top:6px;">≡ LAYERS</div>
       </div>
       <!-- ===== LAYER VISIBILITY PANEL ===== -->
@@ -2060,6 +2061,29 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.22.2 — True-to-life Iron Dome intercepts, keyed to time of day (user spec):
+//            DAY  — a bright WHITE continuous smoke contrail with the missile itself NOT visible;
+//                   the intercept is a small white flash that blooms into an expanding white smoke
+//                   CLOUD (starts small, grows big via per-particle grow rate, drifts & fades).
+//            NIGHT — NO smoke trail; the interceptor is a bright yellow-orange-white motor point,
+//                   and the intercept is a bright yellow-orange detonation throwing glowing embers
+//                   + sparks (smoke is invisible in the dark).
+//            Implemented by branching drawInterceptors (trail vs glowing dot), the e.intercept
+//            burst in drawExplosions (e.night → warm fireball / day → white flash), and
+//            createInterceptFlash (day=expanding ismoke cloud / night=embers+sparks). ismoke now
+//            honours a per-particle grow rate. Exo/Arrow-3 keeps its bright space-burn point.
+//   2.22.1 — Interceptor realism + day/night (user: drop the blue/green/cyan interceptor trail,
+//            make it realistic white transparent smoke / a yellow ball; add a day-night option).
+//            (1) The contrail is now pure WHITE/grey smoke — Layer 3 was the faction colour
+//            (Iron Dome cyan / D-Sling green / Arrow blue); replaced with a warm-white hot-plume
+//            tip over white smoke. The interceptor dot's outer glow is now a warm YELLOW engine
+//            flame (was faction colour); the white-yellow core stays. Exo/Arrow-3 glow recoloured
+//            from blue to white-gold; its altitude label too. The faint guide line + lock reticle
+//            in drawInterceptorPaths are now neutral white/amber (were faction-coloured). Ground
+//            batteries keep their colours for ID — only the in-flight FX went neutral/realistic.
+//            (2) DAY / DUSK / NIGHT toggle (☀ button by SAT): lays a translucent tint over the
+//            map tiles only, so labels and combat FX (fires, intercept flashes, tracers) pop on
+//            top — a tactical night-ops look. Cycles day → dusk → night.
 //   2.22.0 — Realism + perf pass (user: start in clean view, it lags on launch; interceptors
 //            draw stupid lines; make smoke/intercept FX realistic; shift style toward realism).
 //            (1) CLEAN VIEW IS NOW THE DEFAULT: the heavy static layers (coverage rings, radar
@@ -2660,7 +2684,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.22.0';
+const GAME_VERSION = '2.22.2';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -6189,6 +6213,21 @@ function resizeCanvas() {
 /* =========================================================
    ОТРИСОВКА
    ========================================================= */
+// v2.22.1 — DAY / DUSK / NIGHT. A translucent tint laid over the map tiles only (everything
+// else — labels, threats, fires, intercept flashes — draws on top at full brightness, so at
+// night the combat FX really pop, like a tactical night-ops display). Cycled by the ☀ button.
+function applyTimeOfDayTint() {
+  const mode = state.dayNight || 'day';
+  if (mode === 'day') return;
+  if (mode === 'dusk') {
+    ctx.fillStyle = 'rgba(46, 26, 58, 0.32)';   // warm purple-orange dusk
+  } else {
+    ctx.fillStyle = 'rgba(6, 11, 30, 0.56)';    // deep navy night
+  }
+  // over-fill a little so screen-shake never reveals an untinted edge
+  ctx.fillRect(-30, -30, canvasW + 60, canvasH + 60);
+}
+
 function render() {
   if (canvasW === 0 || canvasH === 0) return;
 
@@ -6202,6 +6241,7 @@ function render() {
   ctx.translate(shakeX, shakeY);
 
   drawTiles();
+  applyTimeOfDayTint();   // v2.22.1 — darken map tiles for dusk/night (FX draw on top)
   const L = state.layers || {};
   if (L.territories !== false) drawTerritories();
   if (L.orefZones !== false) { try { drawOrefAlertZones(); } catch (e) { console.error('[OREF] render error:', e); } }
@@ -9832,7 +9872,7 @@ function drawInterceptorPaths() {
     // soft curved guide: quadratic through a control point lifted toward the flight apex
     const midx = (isx + txc) / 2;
     const midy = (isy + tyc) / 2 - Math.min(40, Math.hypot(txc - isx, tyc - isy) * 0.18);
-    ctx.strokeStyle = t.color + '38';        // ~22% alpha — subtle
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.16)';   // v2.22.1 neutral, no faction colour
     ctx.lineWidth = 1.2;
     ctx.setLineDash([2, 5]);
     ctx.lineCap = 'round';
@@ -9846,7 +9886,7 @@ function drawInterceptorPaths() {
     // pulsing lock reticle on the threat (square brackets — reads as "tracking")
     const pulse = (Math.sin(Date.now() / 150) + 1) / 2;
     const r = 9 + pulse * 3;
-    ctx.strokeStyle = t.color + Math.floor(150 + pulse * 90).toString(16).padStart(2, '0');
+    ctx.strokeStyle = `rgba(255, 226, 150, ${0.5 + pulse * 0.35})`;   // v2.22.1 neutral amber lock
     ctx.lineWidth = 1.4;
     const br = 4;   // bracket arm length
     ctx.beginPath();
@@ -9883,100 +9923,82 @@ function drawInterceptors() {
       sy = sy0 - Math.sin(prog * Math.PI) * getInterceptorArc(i);
     }
 
-    // === MULTI-LAYER CONTRAIL ===
-    // All layers use the EXACT altOffset stored at push-time → trail head touches the live dot,
-    // no vertical desync (was: trail used interceptor.arc, dot used threat.arc → they diverged).
-    if (i.trail && i.trail.length > 1) {
+    // === v2.22.2 — DAY vs NIGHT interceptor visuals (true-to-life Iron Dome) ===
+    //  DAY / DUSK: a continuous bright-WHITE smoke contrail; the missile itself is NOT visible
+    //             (in daylight footage you only ever see the smoke trail, not the rocket).
+    //  NIGHT:     no smoke at all — just a bright yellow-orange-white motor point streaking up.
+    const isNight = (state.dayNight === 'night');
+
+    if (!isNight && i.trail && i.trail.length > 1) {
       const now = Date.now();
-      // Pre-project all points once
-      const pts = i.trail.map((p, idx) => {
+      const pts = i.trail.map((p) => {
         const [tsx, tsy0] = geoToScreen(p.lat, p.lon);
         const tsy = tsy0 + (typeof p.altOffset === 'number' ? p.altOffset : -Math.sin((p.prog || 0) * Math.PI) * arcH);
-        // Age of point in ms — used for smoke puff fade and for "drift" upward (rising smoke)
-        const ageMs = now - (p.t || now);
-        const drift = Math.min(8, ageMs / 250);    // smoke rises slowly
-        return { sx: tsx, sy: tsy - drift, age: ageMs, idx };
+        const drift = Math.min(8, (now - (p.t || now)) / 250);   // smoke rises slowly
+        return { sx: tsx, sy: tsy - drift };
       });
-      // Layer 1: WIDE smoke billow (oldest part — diffuse smoke)
-      ctx.strokeStyle = 'rgba(255, 240, 220, 0.18)';
-      ctx.lineWidth = 6;
       ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      // Wide diffuse white billow (the oldest, dissipating smoke)
+      ctx.strokeStyle = 'rgb(232, 236, 242)';
+      ctx.lineWidth = 7;
       ctx.beginPath();
       pts.forEach((p, idx) => {
-        ctx.globalAlpha = (idx / pts.length) * 0.28;
+        ctx.globalAlpha = (idx / pts.length) * 0.22;
         if (idx === 0) ctx.moveTo(p.sx, p.sy); else ctx.lineTo(p.sx, p.sy);
       });
       ctx.stroke();
-      // Layer 2: medium grey-white smoke (mid-trail substance)
-      ctx.strokeStyle = 'rgba(220, 230, 240, 0.55)';
-      ctx.lineWidth = 3;
+      // Dense CONTINUOUS white smoke body — one unbroken ribbon, brighter toward the head
+      ctx.strokeStyle = 'rgb(250, 251, 253)';
+      ctx.lineWidth = 3.2;
       ctx.beginPath();
       pts.forEach((p, idx) => {
-        ctx.globalAlpha = (idx / pts.length) * 0.55;
+        ctx.globalAlpha = 0.16 + (idx / pts.length) * 0.64;
         if (idx === 0) ctx.moveTo(p.sx, p.sy); else ctx.lineTo(p.sx, p.sy);
       });
       ctx.stroke();
-      // Layer 3: faction-color (Iron Dome cyan / DS green / Arrow blue) — fresh exhaust
-      ctx.strokeStyle = t.color;
-      ctx.lineWidth = 1.6;
-      ctx.beginPath();
-      pts.forEach((p, idx) => {
-        ctx.globalAlpha = (idx / pts.length) * 0.85;
-        if (idx === 0) ctx.moveTo(p.sx, p.sy); else ctx.lineTo(p.sx, p.sy);
-      });
-      ctx.stroke();
-      // Layer 4: ultra-bright white-hot core (just below the live dot)
+      // Bright white-hot freshest tip (the burning motor), short
+      const coreStart = Math.floor(pts.length * 0.55);
+      const tip = pts.slice(coreStart);
       ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 0.7;
+      ctx.lineWidth = 1.4;
       ctx.beginPath();
-      // Only the freshest 60% of the trail gets the white-hot core
-      const coreStart = Math.floor(pts.length * 0.4);
-      pts.slice(coreStart).forEach((p, idx) => {
-        ctx.globalAlpha = (idx / (pts.length - coreStart)) * 0.85;
+      tip.forEach((p, idx) => {
+        ctx.globalAlpha = 0.3 + (idx / Math.max(1, tip.length)) * 0.6;
         if (idx === 0) ctx.moveTo(p.sx, p.sy); else ctx.lineTo(p.sx, p.sy);
       });
       ctx.stroke();
-      // Smoke puff dots — small grey blobs every ~3rd point, drifting + fading
-      ctx.fillStyle = 'rgba(200, 210, 220, 0.25)';
-      pts.forEach((p, idx) => {
-        if (idx % 3 !== 0) return;
-        const pf = idx / pts.length;
-        const r = 2 + pf * 2;     // older puffs grow as they dissipate
-        ctx.globalAlpha = pf * 0.35;
-        ctx.beginPath();
-        ctx.arc(p.sx + (Math.sin(idx * 1.3) * 1.2), p.sy, r, 0, Math.PI * 2);
-        ctx.fill();
-      });
       ctx.globalAlpha = 1;
       ctx.lineCap = 'butt';
+      ctx.lineJoin = 'miter';
+      // (no missile dot in daylight — only the smoke trail is visible)
     }
 
-    // Внешнее свечение перехватчика
-    const grad = ctx.createRadialGradient(sx, sy, 0, sx, sy, 12);
-    grad.addColorStop(0, t.color);
-    grad.addColorStop(0.5, t.color + 'AA');
-    grad.addColorStop(1, t.color + '00');
-    ctx.fillStyle = grad;
-    ctx.beginPath(); ctx.arc(sx, sy, 12, 0, Math.PI * 2); ctx.fill();
+    if (isNight) {
+      // NIGHT — bright yellow-orange-white motor point (no smoke). A small glowing comet head.
+      const halo = ctx.createRadialGradient(sx, sy, 0, sx, sy, 13);
+      halo.addColorStop(0, 'rgba(255, 222, 125, 0.95)');
+      halo.addColorStop(0.45, 'rgba(255, 160, 50, 0.6)');
+      halo.addColorStop(1, 'rgba(255, 120, 30, 0)');
+      ctx.fillStyle = halo;
+      ctx.beginPath(); ctx.arc(sx, sy, 13, 0, Math.PI * 2); ctx.fill();
+      const core = ctx.createRadialGradient(sx, sy, 0, sx, sy, 4.5);
+      core.addColorStop(0, '#ffffff');
+      core.addColorStop(0.5, '#ffe27a');
+      core.addColorStop(1, 'rgba(255, 200, 80, 0)');
+      ctx.fillStyle = core;
+      ctx.beginPath(); ctx.arc(sx, sy, 4.5, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath(); ctx.arc(sx, sy, 1.6, 0, Math.PI * 2); ctx.fill();
+    }
 
-    // Ядро (бело-жёлтое для эффекта движка)
-    const coreGrad = ctx.createRadialGradient(sx, sy, 0, sx, sy, 4);
-    coreGrad.addColorStop(0, '#ffffff');
-    coreGrad.addColorStop(0.5, '#ffffaa');
-    coreGrad.addColorStop(1, 'rgba(255, 255, 200, 0)');
-    ctx.fillStyle = coreGrad;
-    ctx.beginPath(); ctx.arc(sx, sy, 4, 0, Math.PI * 2); ctx.fill();
-
-    ctx.fillStyle = '#ffffff';
-    ctx.beginPath(); ctx.arc(sx, sy, 1.5, 0, Math.PI * 2); ctx.fill();
-
-    // Экзоатмосферный эффект для Arrow-3
-    if (i.exo) {
-      // Большое холодное свечение (космос — бело-голубое)
+    // Экзоатмосферный эффект для Arrow-3 (space burn — bright point, shown at night)
+    if (i.exo && isNight) {
+      // v2.22.1 — bright white-hot exo plume (was blue). High-altitude burn against dark space.
       const exoGrad = ctx.createRadialGradient(sx, sy, 0, sx, sy, 22);
-      exoGrad.addColorStop(0, 'rgba(220, 240, 255, 0.7)');
-      exoGrad.addColorStop(0.5, 'rgba(150, 200, 255, 0.3)');
-      exoGrad.addColorStop(1, 'rgba(100, 150, 220, 0)');
+      exoGrad.addColorStop(0, 'rgba(255, 255, 255, 0.75)');
+      exoGrad.addColorStop(0.5, 'rgba(255, 244, 210, 0.32)');
+      exoGrad.addColorStop(1, 'rgba(255, 228, 160, 0)');
       ctx.fillStyle = exoGrad;
       ctx.beginPath(); ctx.arc(sx, sy, 22, 0, Math.PI * 2); ctx.fill();
 
@@ -9994,7 +10016,7 @@ function drawInterceptors() {
       if (prog > 0.15 && prog < 0.85) {
         const altKm = Math.round(Math.sin(prog * Math.PI) * 800);
         ctx.font = '9px Consolas';
-        ctx.fillStyle = 'rgba(150, 200, 255, 0.9)';
+        ctx.fillStyle = 'rgba(255, 235, 180, 0.9)';
         ctx.fillText(`H ${altKm}km`, sx + 14, sy - 8);
       }
     }
@@ -10057,27 +10079,38 @@ function drawExplosions() {
       return;
     }
 
-    // === MID-AIR INTERCEPT BURST — v2.22.0 realism: warm proximity-fuze detonation ===
-    // A real Tamir/Stunner kill is a hot orange-white fireball (it detonates the rocket's
-    // warhead), not a sci-fi blue flash. Exo/Arrow-3 kills are handled above (blue, vacuum).
+    // === MID-AIR INTERCEPT BURST — v2.22.2 day / night ===
+    //  NIGHT: bright yellow-orange detonation — a fireball that pops against the dark.
+    //  DAY:   a small, quick WHITE flash; the expanding white smoke cloud (ismoke) is the star.
     if (e.intercept) {
-      const iOuter = ctx.createRadialGradient(sx, sy, 0, sx, sy, radius * 2.3);
-      iOuter.addColorStop(0, `rgba(255, 244, 210, ${t * 0.8})`);
-      iOuter.addColorStop(0.4, `rgba(255, 175, 85, ${t * 0.42})`);
-      iOuter.addColorStop(1, 'rgba(255, 120, 40, 0)');
-      ctx.fillStyle = iOuter;
-      ctx.beginPath(); ctx.arc(sx, sy, radius * 2.3, 0, Math.PI * 2); ctx.fill();
-      // hot white-yellow core
-      const iCore = ctx.createRadialGradient(sx, sy, 0, sx, sy, radius);
-      iCore.addColorStop(0, `rgba(255, 255, 248, ${t})`);
-      iCore.addColorStop(0.5, `rgba(255, 228, 150, ${t * 0.72})`);
-      iCore.addColorStop(1, 'rgba(255, 150, 60, 0)');
-      ctx.fillStyle = iCore;
-      ctx.beginPath(); ctx.arc(sx, sy, radius, 0, Math.PI * 2); ctx.fill();
-      // instant overflash
-      if (e.flash > 0) {
-        ctx.fillStyle = `rgba(255, 255, 240, ${e.flash * 0.9})`;
-        ctx.beginPath(); ctx.arc(sx, sy, radius * 2.8, 0, Math.PI * 2); ctx.fill();
+      if (e.night) {
+        const iOuter = ctx.createRadialGradient(sx, sy, 0, sx, sy, radius * 2.5);
+        iOuter.addColorStop(0, `rgba(255, 242, 190, ${t * 0.88})`);
+        iOuter.addColorStop(0.4, `rgba(255, 165, 55, ${t * 0.52})`);
+        iOuter.addColorStop(1, 'rgba(255, 110, 30, 0)');
+        ctx.fillStyle = iOuter;
+        ctx.beginPath(); ctx.arc(sx, sy, radius * 2.5, 0, Math.PI * 2); ctx.fill();
+        const iCore = ctx.createRadialGradient(sx, sy, 0, sx, sy, radius);
+        iCore.addColorStop(0, `rgba(255, 255, 240, ${t})`);
+        iCore.addColorStop(0.5, `rgba(255, 222, 130, ${t * 0.8})`);
+        iCore.addColorStop(1, 'rgba(255, 150, 50, 0)');
+        ctx.fillStyle = iCore;
+        ctx.beginPath(); ctx.arc(sx, sy, radius, 0, Math.PI * 2); ctx.fill();
+        if (e.flash > 0) {
+          ctx.fillStyle = `rgba(255, 245, 200, ${e.flash * 0.95})`;
+          ctx.beginPath(); ctx.arc(sx, sy, radius * 2.9, 0, Math.PI * 2); ctx.fill();
+        }
+      } else {
+        const wf = ctx.createRadialGradient(sx, sy, 0, sx, sy, radius * 1.7);
+        wf.addColorStop(0, `rgba(255, 255, 255, ${t * 0.9})`);
+        wf.addColorStop(0.5, `rgba(246, 249, 252, ${t * 0.45})`);
+        wf.addColorStop(1, 'rgba(236, 241, 248, 0)');
+        ctx.fillStyle = wf;
+        ctx.beginPath(); ctx.arc(sx, sy, radius * 1.7, 0, Math.PI * 2); ctx.fill();
+        if (e.flash > 0) {
+          ctx.fillStyle = `rgba(255, 255, 255, ${e.flash * 0.8})`;
+          ctx.beginPath(); ctx.arc(sx, sy, radius * 2.3, 0, Math.PI * 2); ctx.fill();
+        }
       }
       return;
     }
@@ -12055,72 +12088,88 @@ function createExplosion(lat, lon, maxRadius, duration, big, exo, screenYOffset)
   }
 }
 
-// === MID-AIR INTERCEPT FLASH + FALLING DEBRIS (NEW v2.14.0) ===
-// A bright, short white-blue air-burst at the kill point (clearly an interception, not a ground
-// hit) plus a shower of glowing fragments that arc and fall toward the ground. screenYOffset is
-// the threat's visual arc so the burst appears at the rocket's drawn altitude.
+// === MID-AIR INTERCEPT FLASH — v2.22.2 day / night (true-to-life Iron Dome) ===
+//  DAY:   small white flash → a white smoke CLOUD that starts small and expands into a big
+//         ball, then drifts & dissipates (the signature daytime intercept puff). No fire.
+//  NIGHT: a bright yellow-orange detonation throwing glowing embers + sparks; NO smoke
+//         (smoke is invisible in the dark — you just see the flash and falling sparks).
+// screenYOffset is the threat's visual arc so the burst appears at the rocket's drawn altitude.
 function createInterceptFlash(lat, lon, screenYOffset, exo) {
-  // bright instant flash ring (reuses the explosion list with a short, flashy profile)
+  const isNight = (state.dayNight === 'night');
+  // bright instant flash (reuses the explosion list with a short, flashy profile)
   state.explosions.push({
-    lat, lon, life: 1, maxLife: exo ? 600 : 420, maxRadius: exo ? 26 : 18,
-    flash: 1, big: false, exo: !!exo, intercept: true,
+    lat, lon, life: 1, maxLife: exo ? 600 : 420,
+    maxRadius: exo ? 26 : (isNight ? 20 : 13),
+    flash: 1, big: false, exo: !!exo, intercept: true, night: isNight,
     screenYOffset: screenYOffset || 0
   });
-  // a couple of fast bright rings
+  // a couple of fast rings
   for (let i = 0; i < 2; i++) {
     state.shockwaves.push({
       lat, lon, life: 1, maxLife: 380 + i * 120, maxRadius: (exo ? 28 : 20) * (1.2 + i * 0.6),
       delay: i * 40, screenYOffset: screenYOffset || 0, intercept: true
     });
   }
-  // falling debris fragments (skip for exo — vacuum, no fall)
-  if (!exo) {
-    const n = 14 + Math.floor(Math.random() * 8);
+  if (exo) { state.shake = Math.max(state.shake, 3); return; }   // exo has its own visuals
+
+  if (isNight) {
+    // NIGHT — glowing falling embers + a bright warm spark spray, no smoke.
+    const n = 16 + Math.floor(Math.random() * 8);
     for (let i = 0; i < n; i++) {
       const a = Math.random() * Math.PI * 2;
       const sp = (0.4 + Math.random() * 1.6) * 0.0009;
       state.particles.push({
         kind: 'debris', lat, lon,
-        vLat: Math.sin(a) * sp * 0.5 - 0.0004,    // initial outward + slight upward, gravity takes over
+        vLat: Math.sin(a) * sp * 0.5 - 0.0004,    // outward + slight upward, gravity takes over
         vLon: Math.cos(a) * sp,
         life: 900 + Math.random() * 1000, maxLife: 1900,
-        color: Math.random() < 0.5 ? 'rgb(255, 210, 130)' : 'rgb(255, 120, 60)',
+        color: Math.random() < 0.5 ? 'rgb(255, 210, 120)' : 'rgb(255, 120, 50)',
         size: 1.3 + Math.random() * 1.9
       });
     }
-    // === REALISTIC INTERCEPT SMOKE PUFF (NEW v2.17.0) ===
-    // A real Iron Dome kill leaves a grey-white smoke ball that lingers and drifts. The
-    // screenYOffset is baked into the smoke particle's starting lat via a tiny altitude proxy:
-    // we can't store screen-offset on a geo particle, so we use a dedicated 'ismoke' kind that
-    // carries its own screenYOffset and draws at the intercept altitude.
-    const puffs = 5 + Math.floor(Math.random() * 4);
-    for (let i = 0; i < puffs; i++) {
-      const a = Math.random() * Math.PI * 2;
-      const sp = (0.05 + Math.random() * 0.25) * 0.0008;
-      state.particles.push({
-        kind: 'ismoke', lat, lon,
-        screenYOffset: screenYOffset || 0,
-        vLat: Math.sin(a) * sp * 0.4 - 0.00018,   // slow outward + gentle rise
-        vLon: Math.cos(a) * sp,
-        life: 1600 + Math.random() * 1400, maxLife: 3000,
-        shade: 150 + Math.random() * 70,           // light grey-white
-        size: 4 + Math.random() * 7
-      });
-    }
-    // a quick spark spray for the kinetic hit
-    const sparks = 8 + Math.floor(Math.random() * 6);
+    const sparks = 14 + Math.floor(Math.random() * 8);
     for (let i = 0; i < sparks; i++) {
       const a = Math.random() * Math.PI * 2;
-      const sp = (0.8 + Math.random() * 1.6) * 0.0011;
+      const sp = (0.8 + Math.random() * 1.8) * 0.0011;
       state.particles.push({
         kind: 'spark', lat, lon, screenYOffset: screenYOffset || 0,
         vLat: Math.sin(a) * sp, vLon: Math.cos(a) * sp,
-        life: 300 + Math.random() * 350, maxLife: 650,
-        color: 'rgb(255, 245, 200)', size: 1 + Math.random() * 1.4
+        life: 300 + Math.random() * 380, maxLife: 680,
+        color: Math.random() < 0.6 ? 'rgb(255, 230, 140)' : 'rgb(255, 170, 70)',
+        size: 1 + Math.random() * 1.5
+      });
+    }
+  } else {
+    // DAY — the white intercept CLOUD: low spread velocity so the puffs stay one cloud, start
+    // SMALL and grow big (grow>1) while fading. This is the classic Iron Dome daytime puff.
+    const puffs = 8 + Math.floor(Math.random() * 5);
+    for (let i = 0; i < puffs; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = (0.03 + Math.random() * 0.12) * 0.0008;
+      state.particles.push({
+        kind: 'ismoke', lat, lon, screenYOffset: screenYOffset || 0,
+        vLat: Math.sin(a) * sp * 0.4 - 0.00012,   // slow outward + gentle rise
+        vLon: Math.cos(a) * sp,
+        life: 2400 + Math.random() * 1700, maxLife: 4100,
+        shade: 224 + Math.random() * 28,           // bright white
+        size: 1.5 + Math.random() * 2.4,           // START small...
+        grow: 1.011                                // ...expand into a big ball
+      });
+    }
+    // a few faint white contact sparks, then it's all smoke
+    const sparks = 5 + Math.floor(Math.random() * 4);
+    for (let i = 0; i < sparks; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = (0.6 + Math.random() * 1.2) * 0.0010;
+      state.particles.push({
+        kind: 'spark', lat, lon, screenYOffset: screenYOffset || 0,
+        vLat: Math.sin(a) * sp, vLon: Math.cos(a) * sp,
+        life: 220 + Math.random() * 260, maxLife: 480,
+        color: 'rgb(255, 255, 245)', size: 0.9 + Math.random() * 1.1
       });
     }
   }
-  state.shake = Math.max(state.shake, exo ? 3 : 5);
+  state.shake = Math.max(state.shake, 5);
 }
 
 function updateExplosions(dt) {
@@ -12148,9 +12197,11 @@ function updateExplosions(dt) {
       p.vLat += 0.0000009 * dt;     // gravity (screen-down)
       p.vLon *= 0.99;
     } else if (p.kind === 'ismoke') {
-      // NEW v2.17.0: intercept smoke ball — drifts out, rises slowly, expands as it dissipates
+      // intercept smoke ball — drifts out, rises slowly, expands as it dissipates.
+      // v2.22.2: honour a per-particle grow rate so the daytime intercept cloud visibly
+      // swells from a small puff into a big ball.
       p.vLat *= 0.97; p.vLon *= 0.97;
-      p.size *= 1.004;
+      p.size *= (p.grow || 1.004);
     }
     p.life -= dt;
   });
@@ -21198,6 +21249,20 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('layer-toggle').textContent = currentLayer === 'dark' ? 'SAT' : 'DRK';
     showNotification('Map', `Layer: ${TILE_LAYERS[currentLayer].name}`, 'success');
   };
+  // v2.22.1 — Day / dusk / night cycle (tints the map tiles; combat FX pop at night)
+  if (!state.dayNight) state.dayNight = 'day';
+  const dnBtn = document.getElementById('daynight-toggle');
+  if (dnBtn) {
+    const DN_LABELS = { day: '☀ DAY', dusk: '◑ DUSK', night: '☾ NIGHT' };
+    dnBtn.textContent = DN_LABELS[state.dayNight] || '☀ DAY';
+    dnBtn.onclick = () => {
+      audio.click();
+      const order = ['day', 'dusk', 'night'];
+      state.dayNight = order[(order.indexOf(state.dayNight) + 1) % order.length];
+      dnBtn.textContent = DN_LABELS[state.dayNight];
+      showNotification('Time of day', DN_LABELS[state.dayNight].replace(/^\S+\s/, ''), 'success');
+    };
+  }
   // === Layers panel toggle + checkbox handlers ===
   const layersPanel = document.getElementById('layers-panel');
   // v2.22.0 — START IN CLEAN VIEW (perf: the heavy static layers — coverage rings, radar sweep,
