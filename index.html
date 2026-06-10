@@ -860,6 +860,14 @@ body.is-attacker .stat-row:has(#stat-intel),
 body.is-attacker .stat-row:has(#stat-cyber) { display: none !important; }
 /* Hide the diplomacy panel for attacker */
 body.is-attacker #diplomacy-panel { display: none !important; }
+/* v2.23.0 — OPFOR is a fully separate mode: the IDF is AI-run, the player only launches missiles.
+   Hard-hide every IDF-side control so the deploy/build panel ("deploy launchers"), the battery
+   list and the auto/manual mode switch can NEVER leak in (applyGazaDefenseUI(true) re-shows
+   #build-panel, which isn't .idf-only — this !important rule wins regardless). */
+body.is-attacker #build-panel,
+body.is-attacker #right-panel,
+body.is-attacker .mode-switch,
+body.is-attacker #btn-build-toggle { display: none !important; }
 /* Hide Gaza-specific UI in attacker mode (Gaza is defender-side campaign) */
 body.is-attacker #gaza-hud,
 body.is-attacker #gaza-ops-panel,
@@ -2067,6 +2075,20 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.23.0 — OPFOR (Resistance Axis / attacker) sandbox rework (user, 4 asks):
+//            (1) HIDE IDF AIR DEFENCE from the attacker — drawBatteries()/drawCoverage() return
+//            early when playAs==='attacker'; you see only cities + strategic targets and learn
+//            battery positions only when interceptors streak up. IDF still auto-defends (AI).
+//            (2) FULLY SEPARATE FROM IDF — applyGazaDefenseUI(true) was re-showing the IDF
+//            deploy/build panel ("deploy launchers"); added a hard CSS rule (body.is-attacker
+//            #build-panel/#right-panel/.mode-switch/#btn-build-toggle:none) + canBuildAlways=false.
+//            (3) DRONE ROUTING — attacker drones can be routed: Shift+click lays waypoints (skirt
+//            PVO / fly via the sea), normal click launches along the route, RMB undoes a waypoint.
+//            Routed-drone movement in updateThreats + route visuals in drawDroneRoutes().
+//            (4) CLUSTER MISSILES for Iran — new 'cluster' weapon (+ 'submunition' bomblet). The
+//            bus splits in terminal descent into ~7 bomblets; and if Arrow-3 kills the bus the
+//            bomblets STILL scatter and rain down (splitCluster on both natural split AND intercept)
+//            — a saturation warhead. Wired into weapon/range/battery-canTarget maps.
 //   2.22.7 — Fixed contrail distorting on zoom + intercept clouds now linger ~30 s (user: the
 //            interceptor line warps when you zoom the map out; and add lingering small clouds
 //            like real life). (1) ZOOM FIX: the trail's altitude lift was a baked pixel value
@@ -2743,7 +2765,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.22.7';
+const GAME_VERSION = '2.23.0';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -2753,7 +2775,7 @@ const BATTERY_TYPES = {
     capacity: 60, launchers: 3,
     // heavyRocket added — Tamir interceptor IS rated for Fajr-5/M-302/A-120 in terminal phase
     // (real-world: Iron Dome shot down hundreds of heavy rockets in 2014 + 2021 + 2023 wars)
-    canTarget: ['rocket', 'mortar', 'drone', 'cruise', 'tacBallistic', 'heavyRocket'],
+    canTarget: ['rocket', 'mortar', 'drone', 'cruise', 'tacBallistic', 'heavyRocket', 'submunition'],   // v2.23.0 — Tamir swats cluster bomblets
     cost: 50000, accuracy: 0.94                 // 0.96 → 0.94 — occasional misses near target are realistic
   },
   davidsSling: {
@@ -2761,7 +2783,7 @@ const BATTERY_TYPES = {
     rangeKm: 200, altitudeRange: '15–60 km',
     speed: 0.16, reloadTime: 4000,             // v2.19.1: 0.18→0.16 — slightly slower terminal intercept
     capacity: 24, launchers: 3,
-    canTarget: ['heavyRocket', 'cruise', 'drone', 'tacBallistic', 'ballistic'],
+    canTarget: ['heavyRocket', 'cruise', 'drone', 'tacBallistic', 'ballistic', 'cluster', 'submunition'],   // v2.23.0
     cost: 1000000, accuracy: 0.94
   },
   arrow3: {
@@ -2769,7 +2791,7 @@ const BATTERY_TYPES = {
     rangeKm: 700, altitudeRange: 'exo-atmospheric',
     speed: 0.45, reloadTime: 6000,             // 0.65 → 0.45 — but still 2.25x faster than ballistic (0.20)
     capacity: 12, launchers: 2,
-    canTarget: ['ballistic', 'tacBallistic'],
+    canTarget: ['ballistic', 'tacBallistic', 'cluster'],   // v2.23.0 — kills the cluster bus (but bomblets may still scatter)
     cost: 2500000, accuracy: 0.97
   },
   thaad: {
@@ -2777,7 +2799,7 @@ const BATTERY_TYPES = {
     rangeKm: 200, altitudeRange: '40–150 km',
     speed: 0.35, reloadTime: 5000,             // 0.55 → 0.35 — terminal-phase ballistic
     capacity: 48, launchers: 6,
-    canTarget: ['ballistic', 'tacBallistic'],
+    canTarget: ['ballistic', 'tacBallistic', 'cluster'],   // v2.23.0
     cost: 1100000, accuracy: 0.95
   }
 };
@@ -2908,7 +2930,8 @@ const WEAPON_NAMES = {
     cruise:       ['Soumar', 'Hoveyzeh', 'Paveh', 'Ya-Ali'],
     drone:        ['Shahed-136', 'Shahed-238', 'Mohajer-6', 'Arash-2'],
     tacBallistic: ['Fateh-110', 'Zolfaghar', 'Dezful', 'Fattah-1'],
-    ballistic:    ['Shahab-3', 'Shahab-3 (cluster)', 'Sejjil-2', 'Kheibar Shekan', 'Emad', 'Ghadr-110', 'Fattah-2', 'Khorramshahr']
+    ballistic:    ['Shahab-3', 'Shahab-3 (cluster)', 'Sejjil-2', 'Kheibar Shekan', 'Emad', 'Ghadr-110', 'Fattah-2', 'Khorramshahr'],
+    cluster:      ['Kheibar Shekan (cluster)', 'Zolfaghar (cluster)', 'Fateh-110 (cluster)']   // v2.23.0
   },
   houthi: {
     // Cruise: Quds-1/2/3, Mandab-2, Noor (anti-ship Iranian C-802 copy)
@@ -2995,7 +3018,13 @@ const THREAT_TYPES = {
   cruise:       { name: 'Cruise missile',       shortName: 'CRUISE',color: '#ff4422', speed: 0.035, altitude: '~1 km',      arcRatio: 0.04, damage: 40, detectionDifficulty: 0.55, radius: 5, icon: '►' },
   heavyRocket:  { name: 'Heavy rocket',         shortName: 'HVY',   color: '#e63030', speed: 0.018, altitude: '20–50 km',   arcRatio: 0.22, damage: 35, detectionDifficulty: 0.85, radius: 5, icon: '▲' },
   tacBallistic: { name: 'Tactical ballistic',   shortName: 'SRBM',  color: '#cc1818', speed: 0.055, altitude: '50–150 km',  arcRatio: 0.28, damage: 55, detectionDifficulty: 0.85, radius: 5, icon: '▼' },
-  ballistic:    { name: 'Ballistic missile',    shortName: 'MRBM',  color: '#a00000', speed: 0.11,  altitude: '300–700 km', arcRatio: 0.34, damage: 80, detectionDifficulty: 0.95, radius: 6, icon: '▼' }
+  ballistic:    { name: 'Ballistic missile',    shortName: 'MRBM',  color: '#a00000', speed: 0.11,  altitude: '300–700 km', arcRatio: 0.34, damage: 80, detectionDifficulty: 0.95, radius: 6, icon: '▼' },
+  // v2.23.0 — CLUSTER ballistic (Iran). In the terminal descent the bus dispenses bomblets; even
+  // if Arrow-3 kills the bus, some submunitions are released and rain down — a saturation warhead
+  // that's much harder to fully stop. splitProgress/subCount drive the dispersal (see updateThreats).
+  cluster:      { name: 'Cluster ballistic',    shortName: 'MIRV',  color: '#d11a6a', speed: 0.075, altitude: '50–200 km',  arcRatio: 0.30, damage: 35, detectionDifficulty: 0.9,  radius: 6, icon: '✸', cluster: true, splitKm: 45, subCount: 7 },
+  // bomblet released by a cluster bus — small, falls fast, low individual damage but there are many
+  submunition:  { name: 'Cluster bomblet',      shortName: 'BOMB',  color: '#ff6a3d', speed: 0.05,  altitude: '<20 km',     arcRatio: 0.06, damage: 12, detectionDifficulty: 0.4,  radius: 3, icon: '•' }
 };
 
 // === Faction × weapon → max geographic reach (lat band) ===
@@ -3032,7 +3061,8 @@ const FACTION_RANGES = {
     cruise:      { latMin: 29.0, latMax: 34.0 },
     drone:       { latMin: 29.0, latMax: 34.0 },
     tacBallistic:{ latMin: 29.0, latMax: 34.0 },
-    ballistic:   { latMin: 29.0, latMax: 34.0 }
+    ballistic:   { latMin: 29.0, latMax: 34.0 },
+    cluster:     { latMin: 29.0, latMax: 34.0 }    // v2.23.0 — cluster ballistic, whole country
   }
 };
 
@@ -3441,7 +3471,7 @@ const ENEMIES = {
       { name: 'Natanz',        lat: 33.7228, lon: 51.7271 }
     ],
     spread: 0.15,
-    threats: ['ballistic', 'tacBallistic', 'cruise', 'drone', 'heavyRocket']
+    threats: ['ballistic', 'cluster', 'tacBallistic', 'cruise', 'drone', 'heavyRocket']
   },
   houthi: {
     name: 'Houthis', region: 'Yemen', color: '#f5b041',
@@ -4274,9 +4304,9 @@ const ATTACKER_FACTIONS = {
   iran: {
     name: 'IRGC · Aerospace Force', flag: '🟢', region: 'Iran', color: '#ec7063',
     doctrine: 'Strategic: Shahed swarms + Sejjil/Kheibar-Shekan ballistic for symbolic strikes',
-    arsenalStart:    { ballistic: 50, cruise: 100, drone: 200 },
-    arsenalCap:      { ballistic: 150, cruise: 250, drone: 500 },
-    arsenalRegenPerSec:{ ballistic: 0.005, cruise: 0.01, drone: 0.025 },
+    arsenalStart:    { ballistic: 50, cluster: 20, cruise: 100, drone: 200 },
+    arsenalCap:      { ballistic: 150, cluster: 60, cruise: 250, drone: 500 },
+    arsenalRegenPerSec:{ ballistic: 0.005, cluster: 0.003, cruise: 0.01, drone: 0.025 },
     missions: [
       { id: 'i1', title: 'Shahed Swarm',     desc: 'Launch 30 Shahed-136 drones at Israel.',                                   type: 'launches', weapon: 'drone', count: 30, reward: 50 },
       { id: 'i2', title: 'Ballistic Demo',   desc: 'Launch 5 ballistic missiles (Sejjil / Kheibar-Shekan).',                  type: 'launches', weapon: 'ballistic', count: 5, reward: 60 },
@@ -6319,6 +6349,7 @@ function render() {
   if (L.cities !== false) drawContextLabels();    // Gaza + S. Lebanon visual labels
   if (L.cities !== false) drawCities();
   if (L.smoke !== false) drawSmokeColumns();
+  try { drawDroneRoutes(); } catch (e) {}   // v2.23.0 — attacker drone route preview + in-flight path
   drawThreats();
   if (L.interceptors !== false) drawInterceptorPaths();
   if (L.interceptors !== false) drawInterceptors();
@@ -9334,6 +9365,9 @@ function drawHostileRegions() {
 }
 
 function drawCoverage() {
+  // v2.23.0 — OPFOR mode: the attacker must NOT see IDF air-defence coverage. Battery positions
+  // are hidden; you only learn roughly where they are when interceptors streak up at you.
+  if (state.playAs === 'attacker') return;
   state.batteries.forEach(b => {
     if (b.ammo <= 0) return;
     const t = BATTERY_TYPES[b.type];
@@ -9517,6 +9551,8 @@ function drawCities() {
 }
 
 function drawBatteries() {
+  // v2.23.0 — OPFOR mode: hide IDF battery positions from the attacker (see drawCoverage).
+  if (state.playAs === 'attacker') return;
   state.batteries.forEach(b => {
     const t = BATTERY_TYPES[b.type];
     const [sx, sy] = geoToScreen(b.lat, b.lon);
@@ -9610,6 +9646,62 @@ function drawBatteries() {
       ctx.textAlign = 'left';
     }
   });
+}
+
+// v2.23.0 — OPFOR drone routing visuals: the planned route the player is laying down before
+// launch (launch site → waypoints), and the remaining flight path of drones already routed.
+function drawDroneRoutes() {
+  // (a) planned route for the NEXT drone launch (attacker, drone armed, Shift-clicked waypoints)
+  if (state.playAs === 'attacker' && state.attackMode && state.attackMode.type === 'drone'
+      && state.attackMode.droneRoute && state.attackMode.droneRoute.length) {
+    const route = state.attackMode.droneRoute;
+    let startPt = null;
+    const en = ENEMIES[state.attackMode.faction];
+    if (en && state.attackMode.siteIndex != null && en.launchSites[state.attackMode.siteIndex]) {
+      startPt = en.launchSites[state.attackMode.siteIndex];
+    }
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255, 170, 60, 0.85)';
+    ctx.lineWidth = 1.6;
+    ctx.setLineDash([7, 5]);
+    ctx.beginPath();
+    if (startPt) { const [ssx, ssy] = geoToScreen(startPt.lat, startPt.lon); ctx.moveTo(ssx, ssy); }
+    route.forEach((w, idx) => {
+      const [wx, wy] = geoToScreen(w.lat, w.lon);
+      if (idx === 0 && !startPt) ctx.moveTo(wx, wy); else ctx.lineTo(wx, wy);
+    });
+    ctx.stroke();
+    ctx.setLineDash([]);
+    route.forEach((w, idx) => {
+      const [wx, wy] = geoToScreen(w.lat, w.lon);
+      ctx.fillStyle = 'rgba(255, 170, 60, 0.95)';
+      ctx.beginPath(); ctx.arc(wx, wy, 5, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#1a0f08'; ctx.font = 'bold 9px Consolas';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(String(idx + 1), wx, wy);
+    });
+    ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    ctx.restore();
+  }
+  // (b) in-flight routed drones — remaining path (current pos → waypoints → target)
+  if (state.threats) {
+    state.threats.forEach(t => {
+      if (t.type !== 'drone' || !t.routed || t.intercepted || t.impacted) return;
+      if (!t.waypoints || !t.waypoints.length) return;
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255, 190, 90, 0.45)';
+      ctx.lineWidth = 1.2;
+      ctx.setLineDash([4, 5]);
+      const [csx, csy] = geoToScreen(t.curLat, t.curLon);
+      ctx.beginPath(); ctx.moveTo(csx, csy);
+      t.waypoints.forEach(w => { const [wx, wy] = geoToScreen(w.lat, w.lon); ctx.lineTo(wx, wy); });
+      const [txx, tyy] = geoToScreen(t.targetLat, t.targetLon);
+      ctx.lineTo(txx, tyy);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+    });
+  }
 }
 
 function drawTrajectories() {
@@ -9765,6 +9857,21 @@ function drawThreatIcon(sx, sy, type, r) {
     ctx.beginPath();
     ctx.moveTo(sx - r * 0.5, sy); ctx.lineTo(sx + r * 0.5, sy);
     ctx.stroke();
+  } else if (type === 'cluster') {
+    // v2.23.0 — cluster bus: conical warhead (nose down) carrying bomblet dots
+    ctx.beginPath();
+    ctx.moveTo(sx, sy + r);
+    ctx.lineTo(sx + r * 0.55, sy - r * 0.2);
+    ctx.lineTo(sx + r * 0.8, sy - r);
+    ctx.lineTo(sx - r * 0.8, sy - r);
+    ctx.lineTo(sx - r * 0.55, sy - r * 0.2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#ff3a8a';
+    for (let k = -1; k <= 1; k++) { ctx.beginPath(); ctx.arc(sx + k * r * 0.32, sy - r * 0.35, 1.1, 0, Math.PI * 2); ctx.fill(); }
+  } else if (type === 'submunition') {
+    // v2.23.0 — bomblet: small bright dot
+    ctx.beginPath(); ctx.arc(sx, sy, Math.max(1.4, r * 0.5), 0, Math.PI * 2); ctx.fill();
   }
 }
 
@@ -10663,6 +10770,7 @@ function spawnThreat(typeId, enemyId, targetCityId, explicitLat, explicitLon, ex
   }
   const wName = weapon ? `${weapon} [${tType.shortName}]` : tType.shortName;
   logEvent(`Launch ${wName} from ${site.name} (${e.name}) → ${targetCity.name} · ${distKm.toFixed(0)} km`, 'warn');
+  return threat;   // v2.23.0 — so callers can attach a drone route / cluster flags
 }
 
 /* =========================================================
@@ -10971,12 +11079,122 @@ const ALERT_PROGRESS = {
   drone:         0.85,    // late — UAV detected near border only
   cruise:        0.10,
   tacBallistic:  0.78,    // terminal phase — siren fires ~30s before impact
-  ballistic:     0.82     // terminal phase — siren fires ~60-90s before impact (after early warning)
+  ballistic:     0.82,    // terminal phase — siren fires ~60-90s before impact (after early warning)
+  cluster:       0.55,    // early-ish — the bus is big & high; alert before it dispenses
+  submunition:   2.0      // never (>1) — bomblets are already in terminal, no fresh siren
 };
+
+// === v2.23.0 — CLUSTER MUNITION DISPERSAL ===
+// The cluster bus splits into many small bomblets. Called either when it reaches split altitude
+// (intercepted=false — natural dispersal) OR when an interceptor kills the bus before that
+// (intercepted=true — fewer, wider-scattered bomblets that STILL rain down). Each bomblet is a
+// new 'submunition' threat from the split point to a spread ground impact near the target.
+function splitCluster(t, intercepted) {
+  if (t._split) return;
+  t._split = true;
+  const cfg = THREAT_TYPES.cluster || {};
+  const baseN = cfg.subCount || 7;
+  const n = intercepted ? Math.max(2, Math.round(baseN * 0.5)) : baseN;
+  const sub = THREAT_TYPES.submunition;
+  const spread = intercepted ? 0.07 : 0.03;   // an intercepted bus scatters its bomblets wider
+  for (let k = 0; k < n; k++) {
+    const tLat = t.targetLat + (Math.random() - 0.5) * spread * 2;
+    const tLon = t.targetLon + (Math.random() - 0.5) * spread * 2;
+    let tc = t.targetCity, bestD = Infinity;
+    if (state.cities) {
+      for (const c of state.cities) {
+        if (!c.alive) continue;
+        const d = Math.hypot(c.lat - tLat, c.lon - tLon);
+        if (d < bestD) { bestD = d; tc = c; }
+      }
+    }
+    const sLat = t.curLat, sLon = t.curLon;
+    const dist = Math.max(1e-6, Math.hypot(tLat - sLat, tLon - sLon));
+    state.threats.push({
+      id: nextId++, type: 'submunition', enemy: t.enemy,
+      siteName: t.siteName, weaponName: 'bomblet', isCluster: false, isSubmunition: true,
+      startLat: sLat, startLon: sLon, curLat: sLat, curLon: sLon,
+      targetLat: tLat, targetLon: tLon, targetCity: tc,
+      speed: sub.speed, arcRatio: sub.arcRatio || 0.06,
+      arcKm: 0, progress: 0, distance: dist, distanceKm: dist * 111,
+      eta: dist / sub.speed * 1000,
+      intercepted: false, impacted: false, assigned: false, assignedBattery: null,
+      isFalseAlarm: false, spawnTime: state.gameTime,
+      populated: !!(tc && tc.population > 0), trail: [],
+      alertFired: true   // the cluster siren already fired for the bus
+    });
+    state.stats.threatsTotal++;
+  }
+  // dispersal burst at the split altitude
+  const arc = -Math.sin(t.progress * Math.PI) * getArcHeight(t);
+  try { createClusterSplitFX(t.curLat, t.curLon, arc, n); } catch (e) {}
+  if (!intercepted) { t.impacted = true; t._consumed = true; }   // natural dispersal consumes the bus
+  try {
+    logEvent(`✸ ${intercepted ? 'Cluster warhead hit — bomblets scattered anyway' : 'Cluster munition dispersed'}: ${n} bomblets over ${t.targetCity ? t.targetCity.name : 'target'}`, 'danger');
+  } catch (e) {}
+}
+
+// Visual for the bus breaking apart: a sharp flash + an outward fan of sparks at altitude.
+function createClusterSplitFX(lat, lon, screenYOffset, n) {
+  state.explosions.push({
+    lat, lon, life: 1, maxLife: 380, maxRadius: 16, flash: 1, big: false,
+    intercept: true, night: (state.dayNight === 'night'), screenYOffset: screenYOffset || 0
+  });
+  const cnt = 16 + (n || 6) * 2;
+  for (let i = 0; i < cnt; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const sp = (0.5 + Math.random() * 1.5) * 0.0011;
+    state.particles.push({
+      kind: 'spark', lat, lon, screenYOffset: screenYOffset || 0,
+      vLat: Math.sin(a) * sp, vLon: Math.cos(a) * sp,
+      life: 350 + Math.random() * 400, maxLife: 750,
+      color: Math.random() < 0.5 ? 'rgb(255, 120, 180)' : 'rgb(255, 200, 120)',
+      size: 1 + Math.random() * 1.6
+    });
+  }
+  state.shake = Math.max(state.shake, 4);
+}
 
 function updateThreats(dt) {
   state.threats.forEach(t => {
     if (t.intercepted || t.impacted) return;
+
+    // === v2.23.0 — PLAYER-ROUTED DRONE (waypoint flight) ===
+    // A drone the attacker gave a route flies DIRECTLY toward its next waypoint, then to the
+    // final target — letting it skirt IDF air defence (e.g. out over the sea). Uses direct-aim
+    // motion (not the straight start→target progress model) so it never snaps back to the line.
+    if (t.type === 'drone' && t.routed) {
+      const totalD = Math.max(1e-6, Math.hypot(t.targetLat - t.startLat, t.targetLon - t.startLon));
+      const aim = (t.waypoints && t.waypoints.length) ? t.waypoints[0] : { lat: t.targetLat, lon: t.targetLon };
+      const stepDeg = (t.speed * dt / 1000);
+      const dLatA = aim.lat - t.curLat, dLonA = aim.lon - t.curLon;
+      const dToAim = Math.hypot(dLatA, dLonA);
+      if (dToAim <= stepDeg || dToAim < 0.003) {
+        t.curLat = aim.lat; t.curLon = aim.lon;
+        if (t.waypoints && t.waypoints.length) {
+          t.waypoints.shift();                       // reached a waypoint → head to the next leg
+        } else {
+          t.progress = 1; t.curLat = t.targetLat; t.curLon = t.targetLon; t.impacted = true; handleImpact(t); return;
+        }
+      } else {
+        t.curLat += (dLatA / dToAim) * stepDeg;
+        t.curLon += (dLonA / dToAim) * stepDeg;
+      }
+      const remD = Math.hypot(t.targetLat - t.curLat, t.targetLon - t.curLon);
+      t.progress = Math.max(0, Math.min(0.999, 1 - remD / totalD));
+      // late OREF/shelter alert as it closes on the target (same doctrine as a normal drone)
+      const dThr = ALERT_PROGRESS['drone'] || 0.85;
+      if (!t.alertFired && t.progress >= dThr) {
+        t.alertFired = true;
+        try { triggerOrefZoneAlert(t.targetCity, 'drone'); } catch (e) {}
+        if (t.targetCity && t.targetCity.population > 0) triggerAlert(t.targetCity);
+      }
+      t.trail.push({ lat: t.curLat, lon: t.curLon, progress: t.progress });
+      if (t.trail.length > 28) t.trail.shift();
+      t.eta = remD / t.speed * 1000;
+      return;
+    }
+
     const dLat = t.targetLat - t.startLat;
     const dLon = t.targetLon - t.startLon;
     const dist = Math.max(1e-6, Math.hypot(dLat, dLon));   // FIX v2.11.3: clamp div-by-0 -> NaN stuck-threat
@@ -11002,6 +11220,13 @@ function updateThreats(dt) {
     }
     t.curLat = t.startLat + dLat * t.progress;
     t.curLon = t.startLon + dLon * t.progress;
+    // v2.23.0 — cluster bus dispenses its bomblets in the TERMINAL phase, ~45 km from the target
+    // (distance-based so it works at any range — for an Iran shot 0.62 progress is still ~500 km out).
+    const _ttype = THREAT_TYPES[t.type];
+    if (_ttype && _ttype.cluster && !t._split) {
+      const kmToTgt = haversineKm(t.curLat, t.curLon, t.targetLat, t.targetLon);
+      if (kmToTgt < (_ttype.splitKm || 45)) { splitCluster(t, false); return; }
+    }
     t.trail.push({ lat: t.curLat, lon: t.curLon, progress: t.progress });
     if (t.trail.length > 28) t.trail.shift();
     const remaining = (1 - t.progress) * dist;
@@ -11346,7 +11571,8 @@ const WEAPON_DISPLAY = {
   drone:        { icon: '✈', label: 'DRONE',      range: '500-2000 km' },
   cruise:       { icon: '►', label: 'CRUISE',     range: '300-1500 km' },
   tacBallistic: { icon: '▼', label: 'SRBM',       range: '100-500 km' },
-  ballistic:    { icon: '▼', label: 'MRBM',       range: '1000+ km' }
+  ballistic:    { icon: '▼', label: 'MRBM',       range: '1000+ km' },
+  cluster:      { icon: '✸', label: 'CLUSTER',    range: '500-1500 km' }   // v2.23.0
 };
 
 function showAttackerPanel() {
@@ -11525,6 +11751,7 @@ function renderAttackerWeapons() {
         state.attackMode.type = typeId;
         document.body.classList.add('targeting-cursor');
       }
+      state.attackMode.droneRoute = [];   // v2.23.0 — drop any half-laid drone route on weapon change
       renderAttackerWeapons();
       updateAttackerStatus();
     };
@@ -11556,6 +11783,15 @@ function updateAttackerStatus() {
   if (remainingReload > 0) {
     el.textContent = `🔄 RELOADING ${(remainingReload / 1000).toFixed(1)}s — ${f.name} · ${meta.label}${salvoStr}`;
     el.style.color = '#ffa040';
+    return;
+  }
+  // v2.23.0 — drones can be routed: Shift+click lays waypoints (skirt PVO / fly via the sea),
+  // a normal click launches along the route.
+  if (state.attackMode.type === 'drone') {
+    const n = (state.attackMode.droneRoute && state.attackMode.droneRoute.length) || 0;
+    const routeStr = n ? ` · route: ${n} waypoint${n > 1 ? 's' : ''}` : '';
+    el.textContent = `▶ ARMED: ${f.name} · ${baseName} · ${meta.label}${salvoStr}${routeStr} — Shift+click = route waypoint, click = launch`;
+    el.style.color = '#ff8a76';
     return;
   }
   el.textContent = `▶ ARMED: ${f.name} · ${baseName} · ${meta.label}${salvoStr} — click on Israel (RMB cancel)`;
@@ -11651,6 +11887,14 @@ function attackerLaunchAt(lat, lon) {
     }
     if (best && bestD < 12) targetCityId = best.id;
   }
+  // v2.23.0 — DRONE ROUTE: queued waypoints fly each drone around IDF air defence (e.g. out over
+  // the sea) before it turns in on the target. A fresh copy is attached to every drone in the salvo.
+  const droneRoute = (state.attackMode.type === 'drone' && state.attackMode.droneRoute && state.attackMode.droneRoute.length)
+    ? state.attackMode.droneRoute.map(w => ({ lat: w.lat, lon: w.lon }))
+    : null;
+  const applyRoute = (th) => {
+    if (th && droneRoute) { th.waypoints = droneRoute.map(w => ({ lat: w.lat, lon: w.lon })); th.routed = true; }
+  };
   for (let i = 0; i < salvoCount; i++) {
     const offLat = (Math.random() - 0.5) * spreadDeg * 2;
     const offLon = (Math.random() - 0.5) * spreadDeg * 2;
@@ -11661,15 +11905,17 @@ function attackerLaunchAt(lat, lon) {
       attackerConsumeLaunch(state.attackMode.type, siteIdx, targetCityId);
     }
     if (i === 0) {
-      spawnThreat(state.attackMode.type, state.attackMode.faction, null, tLat, tLon, siteIdx);
+      applyRoute(spawnThreat(state.attackMode.type, state.attackMode.faction, null, tLat, tLon, siteIdx));
     } else {
       const delay = i * (120 + Math.random() * 180);
       setTimeout(() => {
         if (state.scenarioGen !== gen || !state.active) return;
-        spawnThreat(state.attackMode.type, state.attackMode.faction, null, tLat, tLon, siteIdx);
+        applyRoute(spawnThreat(state.attackMode.type, state.attackMode.faction, null, tLat, tLon, siteIdx));
       }, delay);
     }
   }
+  // consume the queued route — next drone starts fresh
+  if (droneRoute && state.attackMode) state.attackMode.droneRoute = [];
   audio.alarm();
   // === Reload cooldown — bigger salvo = longer reload ===
   // Per-weapon base reload + per-rocket extra time
@@ -11714,7 +11960,9 @@ const WEAPON_MAX_RANGE = {
   drone:         2200,
   cruise:        1800,
   tacBallistic:  700,
-  ballistic:    2500
+  ballistic:    2500,
+  cluster:      2000,   // v2.23.0
+  submunition:  9999    // internal (spawned mid-air); never range-checked
 };
 
 // Global proximity-fuze radius for interceptor hits (degrees ≈ Mercator)
@@ -12052,6 +12300,11 @@ function updateInterceptors(dt) {
       if (Math.random() < i.accuracy) {
         threat.intercepted = true;
         state.stats.intercepted++;
+        // v2.23.0 — CLUSTER: killing the bus doesn't fully stop it — it scatters bomblets that
+        // still rain down. This is what makes a cluster warhead so hard to defend against.
+        if (THREAT_TYPES[threat.type] && THREAT_TYPES[threat.type].cluster && !threat._split) {
+          try { splitCluster(threat, true); } catch (e) {}
+        }
         // === GAZA campaign tracker (FIX v2.9: was init but never written) ===
         if (state.gaza) state.gaza.interceptsTotal = (state.gaza.interceptsTotal || 0) + 1;
         // === ATTACKER CAMPAIGN — record loss to Iron Dome ===
@@ -18933,7 +19186,16 @@ function setupCanvasInteraction() {
         // === RESISTANCE AXIS — player-as-attacker click-to-launch ===
         if (attackerArmed) {
           const [lat, lon] = screenToGeo(sx, sy);
-          attackerLaunchAt(lat, lon);
+          // v2.23.0 — DRONE ROUTING: Shift+click drops a route waypoint (fly around PVO / via the
+          // sea); a normal click launches the drone routed through the queued waypoints to the target.
+          if (state.attackMode.type === 'drone' && e.shiftKey) {
+            state.attackMode.droneRoute = state.attackMode.droneRoute || [];
+            state.attackMode.droneRoute.push({ lat, lon });
+            audio.click();
+            if (typeof updateAttackerStatus === 'function') updateAttackerStatus();
+          } else {
+            attackerLaunchAt(lat, lon);
+          }
         }
         // === РАЗМЕЩЕНИЕ БАТАРЕИ (фаза развёртывания ИЛИ панель «Строить») ===
         else if ((state.buildPhase || buildPanelOpen) && state.placeMode) {
@@ -19048,10 +19310,19 @@ function setupCanvasInteraction() {
       updateBuildPanel();
     }
     if (state.playAs === 'attacker' && state.attackMode && state.attackMode.type) {
-      state.attackMode.type = null;
-      document.body.classList.remove('targeting-cursor');
-      renderAttackerWeapons();
-      updateAttackerStatus();
+      // v2.23.0 — for a drone with a half-laid route, RMB UNDOES the last waypoint instead of
+      // disarming; only disarm once the route is empty.
+      if (state.attackMode.type === 'drone' && state.attackMode.droneRoute && state.attackMode.droneRoute.length) {
+        state.attackMode.droneRoute.pop();
+        audio.click();
+        updateAttackerStatus();
+      } else {
+        state.attackMode.type = null;
+        state.attackMode.droneRoute = [];
+        document.body.classList.remove('targeting-cursor');
+        renderAttackerWeapons();
+        updateAttackerStatus();
+      }
     }
   });
 
@@ -20764,7 +21035,8 @@ function startScenario(name) {
       : { ironDome: 0, davidsSling: 0, arrow3: 0 };
     state.waveDelayTimer = isSandbox ? 8000 : 999999;
     state.mode = 'auto';
-    state.canBuildAlways = true;
+    // v2.23.0 — in OPFOR mode the IDF is AI-run; the player can't build/deploy anything.
+    state.canBuildAlways = !isAttacker;
     document.getElementById('build-panel').style.display = 'none';
     if (isAttacker) showAttackerPanel(); else hideAttackerPanel();
     // === Sandbox-only goodies: huge budget, more strikes, more US support ===
