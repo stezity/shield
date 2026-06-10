@@ -2075,6 +2075,16 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.24.2 — Bomblet engagement over ISRAEL only + realistic Tamir weave + faster bomblets (user:
+//            the Dome was intercepting over Syria — engage over Israeli territory; the 360° loops
+//            looked ugly — make the maneuver realistic; make submunitions land fast-fast).
+//            (1) autoTarget now gates submunition engagement on a point-in-polygon test against
+//            the Israel ring (fallback: <55 km from target) — terminal defence above the country,
+//            never out over Syria/Jordan. (2) Tamir maneuver retuned from cartoon rings to an
+//            aggressive banking S-weave (R 0.022→0.010, ω 9→7, peak lateral ~0.45× forward — no
+//            full loops, still bleeds energy → organic misses). (3) submunition speed 0.095→0.14
+//            (faster than the MRBM bus — terminal dive, on the ground in ~2-3 s); the Iron Dome
+//            1.12× speed cap scales with it, so the Dome still can't run them down.
 //   2.24.1 — Iron Dome vs cluster bomblets (user: the Dome shouldn't manage to catch the fast
 //            bomblets, and the Tamir should fly 360° maneuvers trying). (1) Tamir speed vs a
 //            submunition capped at 1.12× the bomblet (was 3.5×) — it barely outruns one and
@@ -2856,7 +2866,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.24.1';
+const GAME_VERSION = '2.24.2';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -3115,7 +3125,7 @@ const THREAT_TYPES = {
   // that's much harder to fully stop. splitProgress/subCount drive the dispersal (see updateThreats).
   cluster:      { name: 'Cluster ballistic',    shortName: 'MIRV',  color: '#d11a6a', speed: 0.075, altitude: '50–200 km',  arcRatio: 0.30, damage: 35, detectionDifficulty: 0.9,  radius: 6, icon: '✸', cluster: true, splitKm: 45, subCount: 7 },
   // bomblet released by a cluster bus — small, falls fast, low individual damage but there are many
-  submunition:  { name: 'Cluster bomblet',      shortName: 'BOMB',  color: '#ff6a3d', speed: 0.095, altitude: '<20 km',     arcRatio: 0.06, damage: 12, detectionDifficulty: 0.4,  radius: 3, icon: '•' }
+  submunition:  { name: 'Cluster bomblet',      shortName: 'BOMB',  color: '#ff6a3d', speed: 0.14,  altitude: '<20 km',     arcRatio: 0.06, damage: 12, detectionDifficulty: 0.4,  radius: 3, icon: '•' }   // v2.24.2 — faster than the MRBM itself: terminal dive, lands in seconds
 };
 
 // === Faction × weapon → max geographic reach (lat band) ===
@@ -12563,6 +12573,15 @@ function autoTarget() {
     else if (threat.type === 'drone') minProgress = 0.30;   // BORDER intercept — was 0.85, missed too many UAVs
     else minProgress = 0.55;   // Iron Dome — terminal but with enough time to catch
     if (threat.progress < minProgress) return;
+    // v2.24.2 — cluster bomblets are engaged ONLY over Israeli territory (terminal defence above
+    // the protected area, not out over Syria/Jordan). Authoritative point-in-polygon test against
+    // the Israel ring; distance-to-target fallback if the polygon isn't available.
+    if (threat.type === 'submunition') {
+      const overIsrael = (typeof pointInPolygon === 'function' && typeof TERRITORIES !== 'undefined' && TERRITORIES.israel)
+        ? pointInPolygon(threat.curLat, threat.curLon, TERRITORIES.israel)
+        : haversineKm(threat.curLat, threat.curLon, threat.targetLat, threat.targetLon) < 55;
+      if (!overIsrael) return;
+    }
     launchInterceptor(battery, threat);
   });
 }
@@ -12622,16 +12641,19 @@ function updateInterceptors(dt) {
     // converges on average — but the wasted path + the bomblet's speed mean it usually CAN'T
     // catch one before impact. The trail records the loops, so you SEE the maneuvering.
     if (i.batteryType === 'ironDome' && threat.type === 'submunition' && dToLead > 0.0001) {
-      const w = 9;                                   // roll rate, rad/s
+      // v2.24.2 — realistic terminal maneuver: an aggressive banking S-weave (peak lateral speed
+      // ~0.45× forward), like real Tamir footage — not cartoon 360° rings. The offset is still a
+      // closed cycle (zero net drift), so guidance converges; the weave just bleeds energy.
+      const w = 7;                                   // weave rate, rad/s
       const prevPh = (i._mPhase == null ? (i._mPhase = Math.random() * Math.PI * 2) : i._mPhase);
       i._mPhase = prevPh + (dt / 1000) * w;
       const fwLat = dLatI / dToLead, fwLon = dLonI / dToLead;
       const ppLat = -fwLon, ppLon = fwLat;           // perpendicular to the pursuit axis
-      const R = 0.022;                               // peak lateral speed ≈1.9× forward → real 360° loops
+      const R = 0.010;                               // ~1.1 km weave amplitude
       i.curLat += ppLat * (Math.sin(i._mPhase) - Math.sin(prevPh)) * R
-                + fwLat * (Math.cos(i._mPhase) - Math.cos(prevPh)) * R * 0.7;
+                + fwLat * (Math.cos(i._mPhase) - Math.cos(prevPh)) * R * 0.4;
       i.curLon += ppLon * (Math.sin(i._mPhase) - Math.sin(prevPh)) * R
-                + fwLon * (Math.cos(i._mPhase) - Math.cos(prevPh)) * R * 0.7;
+                + fwLon * (Math.cos(i._mPhase) - Math.cos(prevPh)) * R * 0.4;
     }
     // === STORE EXACT VISUAL ALTITUDE OFFSET in the trail point ===
     // (Was: trail rendered using interceptor's own arc but the live dot used the threat's arc — caused the trail to detach vertically from the moving icon. Now both share the same altitude.)
