@@ -2061,6 +2061,19 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.22.3 — Interceptor speed synced to the threat + thinner, photo-accurate contrail (user: the
+//            interceptor flies way too fast vs the slow rocket; the white smoke is ugly — make it
+//            like a real Iron Dome contrail [reference photo: thin white trail + orange flash]).
+//            (1) SPEED. The interceptor speed is now derived from the THREAT's own speed by a
+//            realistic per-battery ratio (Tamir ~Mach 2.2, Stunner ~Mach 7.5, Arrow-3/THAAD
+//            ~Mach 9 — real intercepts are collision-course, only ~1.5-2x faster, NOT 10x). Was a
+//            fixed battery speed that made Iron Dome 9.5x a rocket. Now ironDome 1.9x, davidsSling
+//            1.8x, arrow3 2.0x, thaad 1.9x of the threat, with a floor so it always converges.
+//            (2) CONTRAIL. Replaced the fat white blob with a THIN clean contrail — a faint
+//            diffuse halo (2.6px) + a crisp white core (1.3px) brightening toward the head.
+//            (3) INTERCEPT. Day kill is now an orange warhead flash + a compact GREY-WHITE smoke
+//            puff that grows small->big (was pure white); the burst fireball is warm orange for
+//            both day & night (sized small/big), matching real footage.
 //   2.22.2 — True-to-life Iron Dome intercepts, keyed to time of day (user spec):
 //            DAY  — a bright WHITE continuous smoke contrail with the missile itself NOT visible;
 //                   the intercept is a small white flash that blooms into an expanding white smoke
@@ -2684,7 +2697,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.22.2';
+const GAME_VERSION = '2.22.3';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -9939,39 +9952,29 @@ function drawInterceptors() {
       });
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
-      // Wide diffuse white billow (the oldest, dissipating smoke)
-      ctx.strokeStyle = 'rgb(232, 236, 242)';
-      ctx.lineWidth = 7;
+      // v2.22.3 — a real Tamir leaves a THIN, clean white contrail with a soft feathered halo,
+      // NOT a fat white blob. Two passes: (1) a faint diffuse halo for the wispy edge, then
+      // (2) a crisp thin white core line, brightening toward the head.
+      ctx.strokeStyle = 'rgb(244, 247, 251)';
+      ctx.lineWidth = 2.6;
       ctx.beginPath();
       pts.forEach((p, idx) => {
-        ctx.globalAlpha = (idx / pts.length) * 0.22;
+        ctx.globalAlpha = 0.05 + (idx / pts.length) * 0.16;
         if (idx === 0) ctx.moveTo(p.sx, p.sy); else ctx.lineTo(p.sx, p.sy);
       });
       ctx.stroke();
-      // Dense CONTINUOUS white smoke body — one unbroken ribbon, brighter toward the head
-      ctx.strokeStyle = 'rgb(250, 251, 253)';
-      ctx.lineWidth = 3.2;
+      ctx.strokeStyle = 'rgb(252, 253, 255)';
+      ctx.lineWidth = 1.3;
       ctx.beginPath();
       pts.forEach((p, idx) => {
-        ctx.globalAlpha = 0.16 + (idx / pts.length) * 0.64;
-        if (idx === 0) ctx.moveTo(p.sx, p.sy); else ctx.lineTo(p.sx, p.sy);
-      });
-      ctx.stroke();
-      // Bright white-hot freshest tip (the burning motor), short
-      const coreStart = Math.floor(pts.length * 0.55);
-      const tip = pts.slice(coreStart);
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 1.4;
-      ctx.beginPath();
-      tip.forEach((p, idx) => {
-        ctx.globalAlpha = 0.3 + (idx / Math.max(1, tip.length)) * 0.6;
+        ctx.globalAlpha = 0.18 + (idx / pts.length) * 0.7;
         if (idx === 0) ctx.moveTo(p.sx, p.sy); else ctx.lineTo(p.sx, p.sy);
       });
       ctx.stroke();
       ctx.globalAlpha = 1;
       ctx.lineCap = 'butt';
       ctx.lineJoin = 'miter';
-      // (no missile dot in daylight — only the smoke trail is visible)
+      // (no missile dot in daylight — only the thin smoke trail is visible)
     }
 
     if (isNight) {
@@ -10079,38 +10082,26 @@ function drawExplosions() {
       return;
     }
 
-    // === MID-AIR INTERCEPT BURST — v2.22.2 day / night ===
-    //  NIGHT: bright yellow-orange detonation — a fireball that pops against the dark.
-    //  DAY:   a small, quick WHITE flash; the expanding white smoke cloud (ismoke) is the star.
+    // === MID-AIR INTERCEPT BURST — v2.22.3 ===
+    // A warm orange-yellow detonation (the warhead going off), like the real thing — small in
+    // daylight (the grey smoke puff carries it) and big & bright at night. radius comes from
+    // e.maxRadius (day 13 / night 20), so one code path handles both.
     if (e.intercept) {
-      if (e.night) {
-        const iOuter = ctx.createRadialGradient(sx, sy, 0, sx, sy, radius * 2.5);
-        iOuter.addColorStop(0, `rgba(255, 242, 190, ${t * 0.88})`);
-        iOuter.addColorStop(0.4, `rgba(255, 165, 55, ${t * 0.52})`);
-        iOuter.addColorStop(1, 'rgba(255, 110, 30, 0)');
-        ctx.fillStyle = iOuter;
-        ctx.beginPath(); ctx.arc(sx, sy, radius * 2.5, 0, Math.PI * 2); ctx.fill();
-        const iCore = ctx.createRadialGradient(sx, sy, 0, sx, sy, radius);
-        iCore.addColorStop(0, `rgba(255, 255, 240, ${t})`);
-        iCore.addColorStop(0.5, `rgba(255, 222, 130, ${t * 0.8})`);
-        iCore.addColorStop(1, 'rgba(255, 150, 50, 0)');
-        ctx.fillStyle = iCore;
-        ctx.beginPath(); ctx.arc(sx, sy, radius, 0, Math.PI * 2); ctx.fill();
-        if (e.flash > 0) {
-          ctx.fillStyle = `rgba(255, 245, 200, ${e.flash * 0.95})`;
-          ctx.beginPath(); ctx.arc(sx, sy, radius * 2.9, 0, Math.PI * 2); ctx.fill();
-        }
-      } else {
-        const wf = ctx.createRadialGradient(sx, sy, 0, sx, sy, radius * 1.7);
-        wf.addColorStop(0, `rgba(255, 255, 255, ${t * 0.9})`);
-        wf.addColorStop(0.5, `rgba(246, 249, 252, ${t * 0.45})`);
-        wf.addColorStop(1, 'rgba(236, 241, 248, 0)');
-        ctx.fillStyle = wf;
-        ctx.beginPath(); ctx.arc(sx, sy, radius * 1.7, 0, Math.PI * 2); ctx.fill();
-        if (e.flash > 0) {
-          ctx.fillStyle = `rgba(255, 255, 255, ${e.flash * 0.8})`;
-          ctx.beginPath(); ctx.arc(sx, sy, radius * 2.3, 0, Math.PI * 2); ctx.fill();
-        }
+      const iOuter = ctx.createRadialGradient(sx, sy, 0, sx, sy, radius * 2.3);
+      iOuter.addColorStop(0, `rgba(255, 244, 200, ${t * 0.85})`);
+      iOuter.addColorStop(0.4, `rgba(255, 168, 68, ${t * 0.48})`);
+      iOuter.addColorStop(1, 'rgba(255, 112, 32, 0)');
+      ctx.fillStyle = iOuter;
+      ctx.beginPath(); ctx.arc(sx, sy, radius * 2.3, 0, Math.PI * 2); ctx.fill();
+      const iCore = ctx.createRadialGradient(sx, sy, 0, sx, sy, radius);
+      iCore.addColorStop(0, `rgba(255, 255, 242, ${t})`);
+      iCore.addColorStop(0.5, `rgba(255, 220, 128, ${t * 0.8})`);
+      iCore.addColorStop(1, 'rgba(255, 150, 50, 0)');
+      ctx.fillStyle = iCore;
+      ctx.beginPath(); ctx.arc(sx, sy, radius, 0, Math.PI * 2); ctx.fill();
+      if (e.flash > 0) {
+        ctx.fillStyle = `rgba(255, 248, 214, ${e.flash * 0.9})`;
+        ctx.beginPath(); ctx.arc(sx, sy, radius * 2.7, 0, Math.PI * 2); ctx.fill();
       }
       return;
     }
@@ -11788,6 +11779,16 @@ function launchInterceptor(battery, threat) {
 
   // Arrow-3 — экзоатмосферный перехватчик: высокая дуга в «космос»
   const isExo = battery.type === 'arrow3';
+  // v2.22.3 — INTERCEPTOR SPEED SYNCED TO THE THREAT (realistic). In real life an interceptor is
+  // only modestly faster than the target it's on a collision course with — Tamir ~Mach 2.2,
+  // Stunner ~Mach 7.5, Arrow-3 / THAAD ~Mach 9 — NOT 10x. The old fixed battery speed made
+  // Iron Dome (0.095) blur past a rocket (0.010) at 9.5x. Now we scale the interceptor off the
+  // threat's own speed by a realistic per-battery ratio, with a floor so it always converges.
+  const _SPEED_MULT  = { ironDome: 2.2, davidsSling: 2.0, arrow3: 2.2, thaad: 2.0 };
+  const _SPEED_FLOOR = { ironDome: 0.020, davidsSling: 0.06, arrow3: 0.10, thaad: 0.085 };
+  const _threatSpeed = (THREAT_TYPES[threat.type] && THREAT_TYPES[threat.type].speed) || 0.01;
+  const _ispeed = Math.max(_SPEED_FLOOR[battery.type] || 0.016,
+                           _threatSpeed * (_SPEED_MULT[battery.type] || 1.9));
   state.interceptors.push({
     id: nextId++, batteryType: battery.type, batteryId: battery.id,
     threatId: threat.id,
@@ -11795,7 +11796,7 @@ function launchInterceptor(battery, threat) {
     curLat: battery.lat, curLon: battery.lon,
     targetLat: ip.lat, targetLon: ip.lon,
     interceptF: ip.f,                 // зафиксировано на момент пуска
-    speed: BATTERY_TYPES[battery.type].speed,
+    speed: _ispeed,
     alive: true,
     accuracy: BATTERY_TYPES[battery.type].accuracy * (Date.now() < (state.accuracyDebuffUntil || 0) ? 0.80 : 1.0),
     trail: [],
@@ -12140,32 +12141,33 @@ function createInterceptFlash(lat, lon, screenYOffset, exo) {
       });
     }
   } else {
-    // DAY — the white intercept CLOUD: low spread velocity so the puffs stay one cloud, start
-    // SMALL and grow big (grow>1) while fading. This is the classic Iron Dome daytime puff.
-    const puffs = 8 + Math.floor(Math.random() * 5);
+    // DAY — the intercept CLOUD: a compact GREY-WHITE smoke puff that starts SMALL and grows
+    // (grow>1) while fading & drifting, over a brief warm fire flash. Matches real daytime Iron
+    // Dome footage (orange warhead flash + grey smoke ball at the kill point).
+    const puffs = 7 + Math.floor(Math.random() * 4);
     for (let i = 0; i < puffs; i++) {
       const a = Math.random() * Math.PI * 2;
-      const sp = (0.03 + Math.random() * 0.12) * 0.0008;
+      const sp = (0.03 + Math.random() * 0.11) * 0.0008;
       state.particles.push({
         kind: 'ismoke', lat, lon, screenYOffset: screenYOffset || 0,
         vLat: Math.sin(a) * sp * 0.4 - 0.00012,   // slow outward + gentle rise
         vLon: Math.cos(a) * sp,
-        life: 2400 + Math.random() * 1700, maxLife: 4100,
-        shade: 224 + Math.random() * 28,           // bright white
-        size: 1.5 + Math.random() * 2.4,           // START small...
-        grow: 1.011                                // ...expand into a big ball
+        life: 2300 + Math.random() * 1600, maxLife: 3900,
+        shade: 186 + Math.random() * 26,           // grey-white smoke (not pure white)
+        size: 1.6 + Math.random() * 2.2,           // START small...
+        grow: 1.010                                // ...expand into a ball
       });
     }
-    // a few faint white contact sparks, then it's all smoke
-    const sparks = 5 + Math.floor(Math.random() * 4);
+    // brief warm fire sparks at the contact point (the warhead flash)
+    const sparks = 7 + Math.floor(Math.random() * 5);
     for (let i = 0; i < sparks; i++) {
       const a = Math.random() * Math.PI * 2;
-      const sp = (0.6 + Math.random() * 1.2) * 0.0010;
+      const sp = (0.6 + Math.random() * 1.3) * 0.0010;
       state.particles.push({
         kind: 'spark', lat, lon, screenYOffset: screenYOffset || 0,
         vLat: Math.sin(a) * sp, vLon: Math.cos(a) * sp,
-        life: 220 + Math.random() * 260, maxLife: 480,
-        color: 'rgb(255, 255, 245)', size: 0.9 + Math.random() * 1.1
+        life: 260 + Math.random() * 300, maxLife: 560,
+        color: Math.random() < 0.6 ? 'rgb(255, 210, 110)' : 'rgb(255, 150, 60)', size: 1 + Math.random() * 1.3
       });
     }
   }
