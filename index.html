@@ -2075,6 +2075,12 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.24.9 — Early warning is TRUE-BALLISTIC ONLY (user: "early warning works on regular rockets —
+//            remove this"). The v2.24.5 rule "attacking a strategic object raises the regional early
+//            warning for ANY weapon" fired the orange macroregion even for plain Katyushas on Bazan
+//            Oil Refinery (population 0 → strategic), lighting up the whole north. Removed that block
+//            entirely; the orange standby now fires only for true ballistic (Iran). Strategic objects
+//            still get the correct RED alert per weapon (cruise → regional corridor, rocket → local).
 //   2.24.8 — No early warning for Lebanese ballistic (user: "Lebanese rockets still trigger early
 //            warning — remove it"). Reverted the v2.24.7 mistake: tacBallistic no longer fires the
 //            orange macroregion early warning (the Lebanon→Israel flight is too short for a regional
@@ -2921,7 +2927,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.24.8';
+const GAME_VERSION = '2.24.9';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -10982,12 +10988,6 @@ function spawnThreat(typeId, enemyId, targetCityId, explicitLat, explicitLon, ex
   // at the terminal phase via updateThreats (ALERT_PROGRESS.tacBallistic 0.78), not the orange.
   const isTacBallistic = (typeId === 'tacBallistic');
   const isDrone = (typeId === 'drone');
-  // v2.24.5 — a STRATEGIC OBJECT (power station, AD complex, IDF HQ, airbase — population 0, not a
-  // virtual desert point) is high-value: attacking it raises the REGIONAL early warning, same as a
-  // ballistic, whatever the weapon. resolveOrefCity() falls back to coordinates when the target's
-  // name isn't an OREF zone (Elbit / Hadera Power / Ein Shemer never matched before → no alert).
-  const isStrategicTarget = !!(targetCity && targetCity.population === 0
-                               && targetCity.type && targetCity.type !== 'virtual');
   if (isTrueBallistic) {
     try {
       const oc = resolveOrefCity(targetCity);
@@ -11007,14 +11007,11 @@ function spawnThreat(typeId, enemyId, targetCityId, explicitLat, explicitLon, ex
       threat.alertFired = true;  // mark so updateThreats doesn't double-fire
     } catch (e) { console.warn('[OREF] zone alert failed:', e); }
   }
-  // Strategic objects also raise the regional EARLY WARNING (orange standby) for non-ballistic
-  // weapons — the ballistic branch above already did.
-  if (isStrategicTarget && !isTrueBallistic && !isTacBallistic) {
-    try {
-      const oc = resolveOrefCity(targetCity);
-      if (oc) triggerEarlyWarning(oc);
-    } catch (e) {}
-  }
+  // v2.24.9 — the orange regional EARLY WARNING is now TRUE-BALLISTIC ONLY (Iran MRBM, ~10 min
+  // flight, detected early). The v2.24.5 "strategic objects raise early warning for any weapon" rule
+  // is removed: it fired the macroregion orange even for plain Katyushas on a refinery (Bazan), which
+  // lit up the whole north (user: "early warning on regular rockets — remove it"). Strategic objects
+  // still get the right RED alert for the weapon (cruise → regional corridor; rocket → local zones).
   const wName = weapon ? `${weapon} [${tType.shortName}]` : tType.shortName;
   logEvent(`Launch ${wName} from ${site.name} (${e.name}) → ${targetCity.name} · ${distKm.toFixed(0)} km`, 'warn');
   return threat;   // v2.23.0 — so callers can attach a drone route / cluster flags
