@@ -2075,6 +2075,13 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.24.11 — Near-border rockets stay a SMALL patch (user: "if it's 5-10-15-20 km from the border,
+//            small radius like before"). v2.24.10 scaled by raw flight distance, so a near-border
+//            target fired from a laterally-offset base (Tyre→Nahariya is 31 km though Nahariya is
+//            ~8 km from the border) still grew. Now rockets get a near-border DEAD ZONE: _rng =
+//            max(0,(flightKm-35)/110), and within it (_rng==0) they skip the corridor entirely and
+//            fall back to the original small radial patch (7 km / 5 zones). The corridor only opens
+//            for deeper shots; ballistic/cruise unchanged (long-range by nature).
 //   2.24.10 — Alert territory scales with flight distance, incl. regular rockets (user: "these are
 //            regular rockets, not ballistic — but if they fly far the red zone should be like
 //            ballistic, just a bit smaller"). triggerOrefZoneAlert now computes flightKm (launch→
@@ -2935,7 +2942,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.24.10';
+const GAME_VERSION = '2.24.11';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -11233,14 +11240,21 @@ function triggerOrefZoneAlert(targetCity, threatType, approach) {
       const _big = (threatType === 'ballistic' || threatType === 'tacBallistic' || threatType === 'cluster' || threatType === 'submunition');
       const _cruise = (threatType === 'cruise');
       const _rkt = (threatType === 'rocket' || threatType === 'heavyRocket' || threatType === 'mortar');
-      // distance factor, normalised to each class's reach (0 = point-blank, 1 = max range)
-      const _rng = _big ? Math.min(1, flightKm / 1200) : _cruise ? Math.min(1, flightKm / 800) : Math.min(1, flightKm / 150);
+      // distance factor, normalised to each class's reach (0 = point-blank, 1 = max range).
+      // v2.24.11 — ROCKETS have a near-border DEAD ZONE: a rocket landing within ~35 km of its
+      // launch (i.e. ~5-20 km past the border) keeps the small original patch; the corridor only
+      // opens for deeper shots (user). ballistic/cruise scale from zero (they're long-range by nature).
+      const _rng = _big ? Math.min(1, flightKm / 1200)
+                 : _cruise ? Math.min(1, flightKm / 800)
+                 : Math.max(0, Math.min(1, (flightKm - 35) / 110));
       const nbRadiusKm = _big ? (35 + _rng * 20) : _cruise ? (30 + _rng * 16) : (_rkt ? (7 + _rng * 13) : 7);
       const nbMax      = _big ? Math.round(130 + _rng * 50) : _cruise ? Math.round(100 + _rng * 50) : (_rkt ? Math.round(5 + _rng * 90) : 5);
       // v2.24.4 — APPROACH CORRIDOR: alert the zones along the flight path, so the sirens run from
       // where the missile comes in down to the target — not a circle around the target.
+      // v2.24.11 — near-border rockets (_rng==0) skip the corridor → small radial patch (7 km / 5
+      // zones), exactly as before; the corridor only builds once a rocket reaches deeper.
       let segB = null, corW = 0;
-      if ((_big || _cruise || _rkt) && approach && typeof approach.fromLat === 'number') {
+      if ((_big || _cruise || (_rkt && _rng > 0)) && approach && typeof approach.fromLat === 'number') {
         const adLat = approach.fromLat - orefCity.lat, adLon = approach.fromLon - orefCity.lng;
         const alen = Math.hypot(adLat, adLon);
         if (alen > 1e-6) {
