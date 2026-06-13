@@ -2075,6 +2075,16 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.24.7 — Lebanese ballistic alert + captured launch sites (user: ballistic from Lebanon only
+//            alerts a small area; and once the IDF enters Lebanon, rockets shouldn't fire from the
+//            ground it holds). (1) tacBallistic (Fateh-110) now fires the WIDE orange early warning
+//            at launch and a BIG regional corridor at terminal (joined the _big tier: 35 km / 130
+//            zones / 18 km corridor) — it was wrongly in the launch-fire else branch with only a
+//            ~20 km patch, despite ALERT_PROGRESS/comments already promising the ballistic pattern.
+//            (2) tickHezbollahWar now disables Hezbollah launch sites OVERRUN by the advancing front
+//            (site.lat < 33.10 + front×0.25): captured Tyre/Bint Jbeil go offline, so tacBallistic
+//            and nearest-site fire come from sites still north of the front (Nabatieh/Sidon/Beirut/
+//            Bekaa). Reuses state.disabledLaunchSites (Date.now()-based), refreshed each ground tick.
 //   2.24.6 — HEZBOLLAH SCENARIO REBALANCE (user: the Lebanon scenario is overkill, needs balance).
 //            The late phases fired ~190-335 rockets/min — unplayable saturation. Target chosen:
 //            realistic & survivable. (1) Phase fire-rate (HEZ_WAR_PHASES.rocket) retuned to a smooth
@@ -2904,7 +2914,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.24.6';
+const GAME_VERSION = '2.24.7';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -10959,6 +10969,11 @@ function spawnThreat(typeId, enemyId, targetCityId, explicitLat, explicitLon, ex
   // Drones: NO alert at launch — slow UAV detected only when it crosses into Israeli airspace.
   // Everything else (rocket, mortar, cruise, heavyRocket): RED city polygon fires NOW.
   const isTrueBallistic = (typeId === 'ballistic');
+  // v2.24.7 — tacBallistic (Fateh-110 from Lebanon) is a ballistic-class threat too: it must get
+  // the WIDE orange early warning at launch (was falling into the else branch → only a small ~20 km
+  // zone). With this it matches ALERT_PROGRESS.tacBallistic 0.78 — orange regional standby now, red
+  // corridor at terminal — exactly what the detection-threshold comment already promised.
+  const isTacBallistic = (typeId === 'tacBallistic');
   const isDrone = (typeId === 'drone');
   // v2.24.5 — a STRATEGIC OBJECT (power station, AD complex, IDF HQ, airbase — population 0, not a
   // virtual desert point) is high-value: attacking it raises the REGIONAL early warning, same as a
@@ -10966,12 +10981,12 @@ function spawnThreat(typeId, enemyId, targetCityId, explicitLat, explicitLon, ex
   // name isn't an OREF zone (Elbit / Hadera Power / Ein Shemer never matched before → no alert).
   const isStrategicTarget = !!(targetCity && targetCity.population === 0
                                && targetCity.type && targetCity.type !== 'virtual');
-  if (isTrueBallistic) {
+  if (isTrueBallistic || isTacBallistic) {
     try {
       const oc = resolveOrefCity(targetCity);
       if (oc) triggerEarlyWarning(oc);
     } catch (e) { console.warn('[OREF] early-warn failed:', e); }
-    // alertFired stays FALSE so updateThreats fires the city/corridor alert at terminal phase
+    // alertFired stays FALSE so updateThreats fires the regional corridor alert at terminal phase
   } else if (isDrone) {
     // No launch-time alert. updateThreats fires it at ALERT_PROGRESS.drone (0.85 = close to target).
   } else {
@@ -10984,7 +10999,7 @@ function spawnThreat(typeId, enemyId, targetCityId, explicitLat, explicitLon, ex
   }
   // Strategic objects also raise the regional EARLY WARNING (orange standby) for non-ballistic
   // weapons — the ballistic branch above already did.
-  if (isStrategicTarget && !isTrueBallistic) {
+  if (isStrategicTarget && !isTrueBallistic && !isTacBallistic) {
     try {
       const oc = resolveOrefCity(targetCity);
       if (oc) triggerEarlyWarning(oc);
@@ -11194,15 +11209,17 @@ function triggerOrefZoneAlert(targetCity, threatType, approach) {
   try {
     const idxN = buildOrefIndex();
     if (idxN && idxN.all) {
-      const _big = (threatType === 'ballistic' || threatType === 'cluster' || threatType === 'submunition');
+      // v2.24.7 — tacBallistic joins the BIG regional tier (35 km / 130 zones): a Fateh-110 from
+      // Lebanon now lights a wide corridor like a true ballistic, not a small 20 km patch.
+      const _big = (threatType === 'ballistic' || threatType === 'tacBallistic' || threatType === 'cluster' || threatType === 'submunition');
       const _cruise = (threatType === 'cruise');   // v2.24.5 — cruise also gets a regional corridor
-      const nbRadiusKm = _big ? 35 : _cruise ? 30 : (threatType === 'tacBallistic' ? 20 : 7);
-      const nbMax      = _big ? 130 : _cruise ? 100 : (threatType === 'tacBallistic' ? 60 : 5);
-      // v2.24.4 — APPROACH CORRIDOR: for ballistic/cluster/cruise (and tacBallistic) with known
-      // heading, alert the zones along the LAST ~100 km of the flight path, so the sirens run from
-      // where the missile comes in down to the target — not a circle around the target.
+      const nbRadiusKm = _big ? 35 : _cruise ? 30 : 7;
+      const nbMax      = _big ? 130 : _cruise ? 100 : 5;
+      // v2.24.4 — APPROACH CORRIDOR: for ballistic/cluster/tacBallistic/cruise with known heading,
+      // alert the zones along the LAST ~100 km of the flight path, so the sirens run from where the
+      // missile comes in down to the target — not a circle around the target.
       let segB = null, corW = 0;
-      if ((_big || _cruise || threatType === 'tacBallistic') && approach && typeof approach.fromLat === 'number') {
+      if ((_big || _cruise) && approach && typeof approach.fromLat === 'number') {
         const adLat = approach.fromLat - orefCity.lat, adLon = approach.fromLon - orefCity.lng;
         const alen = Math.hypot(adLat, adLon);
         if (alen > 1e-6) {
@@ -21342,6 +21359,17 @@ function tickHezbollahWar(dt) {
     if (w.front < target) w.front = Math.min(target, w.front + (gdtSec / (ph.durationMs/1000)) * (target - (w.frontBase||0)) + 0.0002 * gdtSec);
   }
   w.front = Math.max(w.front, ph.ground ? ph.front * pFrac : w.front);
+  // v2.24.7 — LAUNCH SITES OVERRUN BY THE IDF FRONT can no longer fire. The front line latitude is
+  // 33.10 (Blue Line) → 33.35 (Litani) as w.front 0→1 — same line the border-launch retreat uses.
+  // Any Hezbollah site south of it has been captured, so disable it (the AI then fires from sites
+  // still north of the front: Nabatieh, Sidon, Beirut, Bekaa). Refreshed each tick while ground-war.
+  if (ph.ground && w.front > 0.02) {
+    const frontLat = 33.10 + Math.min(1, w.front) * 0.25;
+    state.disabledLaunchSites = state.disabledLaunchSites || {};
+    ENEMIES.hezbollah.launchSites.forEach(function (s, i) {
+      if (s.lat < frontLat) state.disabledLaunchSites['hezbollah_' + i] = Date.now() + 30000;
+    });
+  }
   // climbing casualty counters
   w.lebDeaths = Math.round(ph.lebStart + (ph.lebEnd - ph.lebStart) * pFrac);
   w.ilKilled = Math.max(w.ilKilled, Math.round(ph.ilStart + (ph.ilEnd - ph.ilStart) * pFrac));
