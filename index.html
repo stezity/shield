@@ -2075,6 +2075,16 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.24.5 — Cruise corridor + strategic-object early warning (user: the alert should follow the
+//            trajectory across the highlighted region, and attacking a strategic object must also
+//            raise the regional early warning). (1) cruise is now corridor-eligible + regional in
+//            triggerOrefZoneAlert (~30 km radial / ~16 km corridor, up to 100 zones), and the
+//            launch dispatch passes the launch point so cruise lights the flight band instead of a
+//            single zone. (2) new resolveOrefCity() resolves a target by NAME then by nearest
+//            coordinates — strategic objects (Elbit / Hadera Power / Ein Shemer, population 0) have
+//            no OREF zone name, so the early-warning lookup used to return nothing. (3) attacking
+//            any strategic object now fires triggerEarlyWarning (orange macroregion standby)
+//            regardless of weapon, matching the ballistic branch.
 //   2.24.4 — Alert CORRIDOR along the approach path (user: the alert should start from where the
 //            missile is coming FROM — e.g. Tabriz→Caesarea lights the Golan→Coast diagonal, per
 //            the Tzofar reference). triggerOrefZoneAlert takes an optional approach {fromLat,
@@ -2882,7 +2892,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.24.4';
+const GAME_VERSION = '2.24.5';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -10938,19 +10948,35 @@ function spawnThreat(typeId, enemyId, targetCityId, explicitLat, explicitLon, ex
   // Everything else (rocket, mortar, cruise, heavyRocket): RED city polygon fires NOW.
   const isTrueBallistic = (typeId === 'ballistic');
   const isDrone = (typeId === 'drone');
+  // v2.24.5 — a STRATEGIC OBJECT (power station, AD complex, IDF HQ, airbase — population 0, not a
+  // virtual desert point) is high-value: attacking it raises the REGIONAL early warning, same as a
+  // ballistic, whatever the weapon. resolveOrefCity() falls back to coordinates when the target's
+  // name isn't an OREF zone (Elbit / Hadera Power / Ein Shemer never matched before → no alert).
+  const isStrategicTarget = !!(targetCity && targetCity.population === 0
+                               && targetCity.type && targetCity.type !== 'virtual');
   if (isTrueBallistic) {
     try {
-      const oc = lookupOrefCity(targetCity.name);
+      const oc = resolveOrefCity(targetCity);
       if (oc) triggerEarlyWarning(oc);
     } catch (e) { console.warn('[OREF] early-warn failed:', e); }
-    // alertFired stays FALSE so updateThreats fires the city alert at terminal phase
+    // alertFired stays FALSE so updateThreats fires the city/corridor alert at terminal phase
   } else if (isDrone) {
     // No launch-time alert. updateThreats fires it at ALERT_PROGRESS.drone (0.85 = close to target).
   } else {
     try {
-      triggerOrefZoneAlert(targetCity, typeId);
+      // Cruise / heavy rocket / etc.: corridor alert along the flight line, fired now (pass the
+      // launch point so cruise lights the trajectory band, not just a zone around the target).
+      triggerOrefZoneAlert(targetCity, typeId, { fromLat: sLat, fromLon: sLon });
       threat.alertFired = true;  // mark so updateThreats doesn't double-fire
     } catch (e) { console.warn('[OREF] zone alert failed:', e); }
+  }
+  // Strategic objects also raise the regional EARLY WARNING (orange standby) for non-ballistic
+  // weapons — the ballistic branch above already did.
+  if (isStrategicTarget && !isTrueBallistic) {
+    try {
+      const oc = resolveOrefCity(targetCity);
+      if (oc) triggerEarlyWarning(oc);
+    } catch (e) {}
   }
   const wName = weapon ? `${weapon} [${tType.shortName}]` : tType.shortName;
   logEvent(`Launch ${wName} from ${site.name} (${e.name}) → ${targetCity.name} · ${distKm.toFixed(0)} km`, 'warn');
@@ -11026,6 +11052,29 @@ function lookupOrefCity(gameCityName) {
   }
   _lookupOrefCache.set(key, null);
   return null;
+}
+// v2.24.5 — resolve ANY target-like object {name, lat, lon|lng} to an OREF zone: try the name
+// first, then fall back to the geographically nearest zone. Strategic objects (Elbit, Hadera
+// Power Station, Ein Shemer AD Complex) and virtual points have no matching OREF name, so the
+// early-warning lookup returned nothing → attacking them produced no regional alert at all.
+function resolveOrefCity(targetLike) {
+  if (!targetLike) return null;
+  let oc = null;
+  try { oc = lookupOrefCity(targetLike.name); } catch (e) {}
+  if (oc) return oc;
+  const idx = buildOrefIndex();
+  if (!idx || !idx.all || !idx.all.length) return null;
+  const tLat = (typeof targetLike.lat === 'number') ? targetLike.lat : null;
+  const tLon = (typeof targetLike.lon === 'number') ? targetLike.lon
+             : (typeof targetLike.lng === 'number') ? targetLike.lng : null;
+  if (tLat == null || tLon == null) return null;
+  let best = null, bestD = Infinity;
+  for (const c of idx.all) {
+    const dx = c.lat - tLat, dy = c.lng - tLon;
+    const d = dx * dx + dy * dy;
+    if (d < bestD) { bestD = d; best = c; }
+  }
+  return best;
 }
 function triggerOrefZoneAlert(targetCity, threatType, approach) {
   // approach (v2.24.4, optional): {fromLat, fromLon} — where the threat is coming FROM. For
@@ -11134,19 +11183,20 @@ function triggerOrefZoneAlert(targetCity, threatType, approach) {
     const idxN = buildOrefIndex();
     if (idxN && idxN.all) {
       const _big = (threatType === 'ballistic' || threatType === 'cluster' || threatType === 'submunition');
-      const nbRadiusKm = _big ? 35 : (threatType === 'tacBallistic' ? 20 : 7);
-      const nbMax      = _big ? 130 : (threatType === 'tacBallistic' ? 60 : 5);
-      // v2.24.4 — APPROACH CORRIDOR: for ballistic/cluster (and tacBallistic) with known heading,
-      // alert the zones along the LAST ~110 km of the flight path (width ~18 km), so the sirens
-      // run from where the missile comes in down to the target — not a circle around the target.
+      const _cruise = (threatType === 'cruise');   // v2.24.5 — cruise also gets a regional corridor
+      const nbRadiusKm = _big ? 35 : _cruise ? 30 : (threatType === 'tacBallistic' ? 20 : 7);
+      const nbMax      = _big ? 130 : _cruise ? 100 : (threatType === 'tacBallistic' ? 60 : 5);
+      // v2.24.4 — APPROACH CORRIDOR: for ballistic/cluster/cruise (and tacBallistic) with known
+      // heading, alert the zones along the LAST ~100 km of the flight path, so the sirens run from
+      // where the missile comes in down to the target — not a circle around the target.
       let segB = null, corW = 0;
-      if ((_big || threatType === 'tacBallistic') && approach && typeof approach.fromLat === 'number') {
+      if ((_big || _cruise || threatType === 'tacBallistic') && approach && typeof approach.fromLat === 'number') {
         const adLat = approach.fromLat - orefCity.lat, adLon = approach.fromLon - orefCity.lng;
         const alen = Math.hypot(adLat, adLon);
         if (alen > 1e-6) {
-          const Ldeg = Math.min(_big ? 1.0 : 0.7, alen);   // corridor length back along the approach
+          const Ldeg = Math.min(_big ? 1.0 : _cruise ? 0.9 : 0.7, alen);   // corridor length back along the approach
           segB = { lat: orefCity.lat + adLat / alen * Ldeg, lon: orefCity.lng + adLon / alen * Ldeg };
-          corW = _big ? 18 : 14;                            // corridor half-width, km
+          corW = _big ? 18 : _cruise ? 16 : 14;            // corridor half-width, km
         }
       }
       const near = [];
