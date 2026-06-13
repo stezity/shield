@@ -2075,6 +2075,14 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.24.10 — Alert territory scales with flight distance, incl. regular rockets (user: "these are
+//            regular rockets, not ballistic — but if they fly far the red zone should be like
+//            ballistic, just a bit smaller"). triggerOrefZoneAlert now computes flightKm (launch→
+//            target) and grows the corridor with it: width corWmin→corWmax and length Lmin→Lmax,
+//            plus nbRadiusKm/nbMax. Rockets/heavyRockets/mortars JOINED the corridor system (were
+//            a flat 7 km / 5-zone patch) with their own smaller caps (width 4→15 km vs ballistic
+//            18→38, length 0.35→0.9 vs 1.0→1.8). _rng normalises distance per class (rocket /150 km,
+//            cruise /800, ballistic /1200). Short shots stay tight; long shots open into a band.
 //   2.24.9 — Early warning is TRUE-BALLISTIC ONLY (user: "early warning works on regular rockets —
 //            remove this"). The v2.24.5 rule "attacking a strategic object raises the regional early
 //            warning for ANY weapon" fired the orange macroregion even for plain Katyushas on Bazan
@@ -2927,7 +2935,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.24.9';
+const GAME_VERSION = '2.24.10';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -11216,23 +11224,33 @@ function triggerOrefZoneAlert(targetCity, threatType, approach) {
   try {
     const idxN = buildOrefIndex();
     if (idxN && idxN.all) {
-      // v2.24.7 — tacBallistic joins the BIG regional tier (35 km / 130 zones): a Fateh-110 from
-      // Lebanon now lights a wide corridor like a true ballistic, not a small 20 km patch.
+      // v2.24.10 — the alert TERRITORY scales with how far the projectile flew: a short shot is a
+      // tight local patch, a long shot opens into a wide corridor (impact-point uncertainty grows
+      // with range). REGULAR ROCKETS get this too (user) — a far rocket lights a ballistic-like band,
+      // just a bit smaller (its width/length are capped below the true-ballistic tier).
+      const flightKm = (approach && typeof approach.fromLat === 'number')
+        ? haversineKm(approach.fromLat, approach.fromLon, orefCity.lat, orefCity.lng) : 0;
       const _big = (threatType === 'ballistic' || threatType === 'tacBallistic' || threatType === 'cluster' || threatType === 'submunition');
-      const _cruise = (threatType === 'cruise');   // v2.24.5 — cruise also gets a regional corridor
-      const nbRadiusKm = _big ? 35 : _cruise ? 30 : 7;
-      const nbMax      = _big ? 130 : _cruise ? 100 : 5;
-      // v2.24.4 — APPROACH CORRIDOR: for ballistic/cluster/tacBallistic/cruise with known heading,
-      // alert the zones along the LAST ~100 km of the flight path, so the sirens run from where the
-      // missile comes in down to the target — not a circle around the target.
+      const _cruise = (threatType === 'cruise');
+      const _rkt = (threatType === 'rocket' || threatType === 'heavyRocket' || threatType === 'mortar');
+      // distance factor, normalised to each class's reach (0 = point-blank, 1 = max range)
+      const _rng = _big ? Math.min(1, flightKm / 1200) : _cruise ? Math.min(1, flightKm / 800) : Math.min(1, flightKm / 150);
+      const nbRadiusKm = _big ? (35 + _rng * 20) : _cruise ? (30 + _rng * 16) : (_rkt ? (7 + _rng * 13) : 7);
+      const nbMax      = _big ? Math.round(130 + _rng * 50) : _cruise ? Math.round(100 + _rng * 50) : (_rkt ? Math.round(5 + _rng * 90) : 5);
+      // v2.24.4 — APPROACH CORRIDOR: alert the zones along the flight path, so the sirens run from
+      // where the missile comes in down to the target — not a circle around the target.
       let segB = null, corW = 0;
-      if ((_big || _cruise) && approach && typeof approach.fromLat === 'number') {
+      if ((_big || _cruise || _rkt) && approach && typeof approach.fromLat === 'number') {
         const adLat = approach.fromLat - orefCity.lat, adLon = approach.fromLon - orefCity.lng;
         const alen = Math.hypot(adLat, adLon);
         if (alen > 1e-6) {
-          const Ldeg = Math.min(_big ? 1.0 : _cruise ? 0.9 : 0.7, alen);   // corridor length back along the approach
+          const Lmin = _big ? 1.0 : _cruise ? 0.9 : 0.35;
+          const Lmax = _big ? 1.8 : _cruise ? 1.5 : 1.1;
+          const Ldeg = Math.min(Lmin + _rng * (Lmax - Lmin), alen);   // longer corridor for longer flights
           segB = { lat: orefCity.lat + adLat / alen * Ldeg, lon: orefCity.lng + adLon / alen * Ldeg };
-          corW = _big ? 18 : _cruise ? 16 : 14;            // corridor half-width, km
+          const corWmin = _big ? 18 : _cruise ? 16 : 4;
+          const corWmax = _big ? 38 : _cruise ? 32 : 20;            // rocket band stays a bit under ballistic
+          corW = corWmin + _rng * (corWmax - corWmin);              // wider band for longer flights
         }
       }
       const near = [];
