@@ -2075,6 +2075,13 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.24.8 — No early warning for Lebanese ballistic (user: "Lebanese rockets still trigger early
+//            warning — remove it"). Reverted the v2.24.7 mistake: tacBallistic no longer fires the
+//            orange macroregion early warning (the Lebanon→Israel flight is too short for a regional
+//            standby — and the original doctrine comment already said so). It KEEPS the big RED
+//            regional corridor (still in the _big tier, 35 km / 130 zones), now fired at the
+//            terminal phase via updateThreats (ALERT_PROGRESS.tacBallistic 0.78) instead of the
+//            orange. True ballistic (Iran, long flight) still uses orange→red.
 //   2.24.7 — Lebanese ballistic alert + captured launch sites (user: ballistic from Lebanon only
 //            alerts a small area; and once the IDF enters Lebanon, rockets shouldn't fire from the
 //            ground it holds). (1) tacBallistic (Fateh-110) now fires the WIDE orange early warning
@@ -2914,7 +2921,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.24.7';
+const GAME_VERSION = '2.24.8';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -10964,15 +10971,15 @@ function spawnThreat(typeId, enemyId, targetCityId, explicitLat, explicitLon, ex
   // True ballistic ONLY (MRBM/IRBM, e.g. Iran Khorramshahr, Houthi Burkan-3):
   //   EARLY WARNING (orange macroregion) at launch — flight ~10+ minutes.
   //   The city-specific RED polygon fires later via updateThreats threshold.
-  // Tactical ballistic (Fateh-110, Scud-D from Hezbollah): treated like a heavy rocket.
-  //   RED city polygon at launch, NO early warning (flight <2 min, no time for regional alert).
+  // Tactical ballistic (Fateh-110, Scud-D from Hezbollah): NO early warning (short flight, no time
+  //   for a regional standby). The RED REGIONAL corridor fires at the terminal phase, not launch.
   // Drones: NO alert at launch — slow UAV detected only when it crosses into Israeli airspace.
   // Everything else (rocket, mortar, cruise, heavyRocket): RED city polygon fires NOW.
   const isTrueBallistic = (typeId === 'ballistic');
-  // v2.24.7 — tacBallistic (Fateh-110 from Lebanon) is a ballistic-class threat too: it must get
-  // the WIDE orange early warning at launch (was falling into the else branch → only a small ~20 km
-  // zone). With this it matches ALERT_PROGRESS.tacBallistic 0.78 — orange regional standby now, red
-  // corridor at terminal — exactly what the detection-threshold comment already promised.
+  // v2.24.8 — tacBallistic (Fateh-110 from Lebanon) gets NO orange early warning (user: "Lebanese
+  // rockets still trigger early warning — remove it"; the Lebanon→Israel flight is too short for a
+  // regional standby). It still gets the big RED regional corridor (it's in the _big tier) — fired
+  // at the terminal phase via updateThreats (ALERT_PROGRESS.tacBallistic 0.78), not the orange.
   const isTacBallistic = (typeId === 'tacBallistic');
   const isDrone = (typeId === 'drone');
   // v2.24.5 — a STRATEGIC OBJECT (power station, AD complex, IDF HQ, airbase — population 0, not a
@@ -10981,12 +10988,15 @@ function spawnThreat(typeId, enemyId, targetCityId, explicitLat, explicitLon, ex
   // name isn't an OREF zone (Elbit / Hadera Power / Ein Shemer never matched before → no alert).
   const isStrategicTarget = !!(targetCity && targetCity.population === 0
                                && targetCity.type && targetCity.type !== 'virtual');
-  if (isTrueBallistic || isTacBallistic) {
+  if (isTrueBallistic) {
     try {
       const oc = resolveOrefCity(targetCity);
       if (oc) triggerEarlyWarning(oc);
     } catch (e) { console.warn('[OREF] early-warn failed:', e); }
     // alertFired stays FALSE so updateThreats fires the regional corridor alert at terminal phase
+  } else if (isTacBallistic) {
+    // NO early warning. alertFired stays FALSE → updateThreats fires the RED regional corridor at
+    // the terminal phase (ALERT_PROGRESS.tacBallistic 0.78). No orange macroregion standby.
   } else if (isDrone) {
     // No launch-time alert. updateThreats fires it at ALERT_PROGRESS.drone (0.85 = close to target).
   } else {
@@ -11389,8 +11399,9 @@ function shelterTimeByRegion(lat, lon) {
 
 // Detection thresholds — when (as fraction of trajectory) does the *city-specific RED polygon* fire?
 // (For non-ballistic threats this is bypassed — they fire at launch via spawnThreat.)
-// For ballistic / tac-ballistic, only the wide ORANGE early-warning fires at launch;
-// the red city polygon fires near the terminal phase, mirroring real Pikud HaOref doctrine.
+// TRUE ballistic: the wide ORANGE early-warning fires at launch, then the red polygon at terminal.
+// tac-ballistic (short Lebanon flight): NO orange — only the red regional corridor at terminal.
+// Mirroring real Pikud HaOref doctrine.
 const ALERT_PROGRESS = {
   mortar:        0.10,
   rocket:        0.05,
