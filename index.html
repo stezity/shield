@@ -2075,6 +2075,18 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.24.6 — HEZBOLLAH SCENARIO REBALANCE (user: the Lebanon scenario is overkill, needs balance).
+//            The late phases fired ~190-335 rockets/min — unplayable saturation. Target chosen:
+//            realistic & survivable. (1) Phase fire-rate (HEZ_WAR_PHASES.rocket) retuned to a smooth
+//            ramp PEAKING at the Oct ground-invasion phase then TAPERING to the ceasefire (was the
+//            ceasefire that peaked, narratively backwards): support1 .18→.10, support2 .24→.14,
+//            creep .32→.20, pager .30→.16, arrows .72→.44, ground .88→.80 (peak), drones .85→.58,
+//            ceasefire .95→.40. (2) Barrage SIZE decoupled from the rocket knob — fixed 2-6 rockets;
+//            intensity now comes from barrage FREQUENCY, so rate ≈ 100×rocket/min (peak ~80/min, was
+//            335). (3) tacBallistic per-barrage chance .25→.10 (~1-2/phase, not ~5-6). (4) Iran Oct-1
+//            salvo: ~13 missiles spread over ~16 s (was 14 in ~3 s) WITH an orange early warning
+//            first, so Arrow/David's Sling engage in waves instead of a wall. (5) IDF→Lebanon strike
+//            cadence 1500→2000 (~30/min, less explosion spam). Ranges untouched (historically right).
 //   2.24.5 — Cruise corridor + strategic-object early warning (user: the alert should follow the
 //            trajectory across the highlighted region, and attacking a strategic object must also
 //            raise the regional early warning). (1) cruise is now corridor-eligible + regional in
@@ -2892,7 +2904,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.24.5';
+const GAME_VERSION = '2.24.6';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -20123,42 +20135,42 @@ const OCT7_WAR_PHASES = [
 //    ballistic = this phase can fire long-range ballistic at the centre (Tel Aviv) — late only
 const HEZ_WAR_PHASES = [
   { id:'support1', name:'The Support Front', dateLabel:'Oct 8 2023 – Feb 2024',
-    durationMs:55000, rocket:0.18, tier:'border', droneRate:0.4, strike:0.35, front:0, ground:false,
+    durationMs:55000, rocket:0.10, tier:'border', droneRate:0.4, strike:0.35, front:0, ground:false,
     lebStart:60, lebEnd:300, ilStart:0, ilEnd:18,
     desc:'A day after Oct 7, Hezbollah opens a "support front" for Gaza. Fire is confined to the border belt — Katyushas, Kornet ATGMs and attack drones on Kiryat Shmona, Metula, Shtula and the border kibbutzim. ~60,000 Israelis evacuate the north.',
     news:['Hezbollah opens a "support front" — fire confined to the border belt','Kiryat Shmona, Metula, Shtula, Margaliot under daily Katyusha + drone fire','60,000 evacuated from the northern border communities'] },
   { id:'support2', name:'War of Attrition', dateLabel:'Feb – Jun 2024',
-    durationMs:55000, rocket:0.24, tier:'border', droneRate:0.5, strike:0.45, front:0, ground:false,
+    durationMs:55000, rocket:0.14, tier:'border', droneRate:0.5, strike:0.45, front:0, ground:false,
     lebStart:300, lebEnd:480, ilStart:18, ilEnd:30,
     desc:'Grinding tit-for-tat along the Blue Line. Heavier drone use and ATGM ambushes; IDF steps up airstrikes on south-Lebanon launch cells. Still border-only — nothing reaching past the immediate frontier.',
     news:['Daily exchanges along the Blue Line — still border-confined','Hezbollah drone & ATGM attacks on IDF border posts intensify','IDF airstrikes push deeper into south Lebanon launch areas'] },
   { id:'creep', name:'Escalating Attrition · Deeper Drones', dateLabel:'Jun – Sep 16, 2024',
-    durationMs:50000, rocket:0.32, tier:'border', droneTier:'coast', droneRate:0.7, strike:0.6, front:0, ground:false,
+    durationMs:50000, rocket:0.20, tier:'border', droneTier:'coast', droneRate:0.7, strike:0.6, front:0, ground:false,
     lebStart:480, lebEnd:900, ilStart:30, ilEnd:52,
     desc:'The summer of heavy drone use. Rockets still land on the border belt (a Falaq rocket hits a football pitch in Majdal Shams on Jul 27, killing 12 children; Israel kills commander Fuad Shukr). But explosive DRONES reach deeper — a strike on Camp Shraga near Nahariya (Aug 6) and the Tiberias / Golani-Junction area. Rocket range still does NOT reach Haifa or the Krayot.',
     news:['Heavy drone summer — UAV strikes near Nahariya (Camp Shraga) & Tiberias','Falaq rocket kills 12 children on a football pitch in Majdal Shams','Israel kills senior Hezbollah commander Fuad Shukr in Beirut'] },
   { id:'pager', name:'Operation Grim Beeper · Device Attacks', dateLabel:'Sep 17–18, 2024',
-    durationMs:30000, rocket:0.3, tier:'galilee', droneRate:0.4, strike:0.7, front:0, ground:false,
+    durationMs:30000, rocket:0.16, tier:'galilee', droneRate:0.4, strike:0.7, front:0, ground:false,
     lebStart:900, lebEnd:1000, ilStart:52, ilEnd:53,
     desc:'Israel detonates thousands of booby-trapped Hezbollah pagers (Sep 17) then walkie-talkies (Sep 18) across Lebanon — ~42 killed, ~3,500 wounded, ~1,500 fighters out of action. Hezbollah is reeling.',
     news:['Thousands of Hezbollah pagers explode simultaneously across Lebanon','A day later, hundreds of walkie-talkies detonate — ~3,500 wounded','Hezbollah command and communications shattered'] },
   { id:'arrows', name:'Northern Arrows · Nasrallah Killed', dateLabel:'Sep 23–30, 2024',
-    durationMs:55000, rocket:0.72, tier:'haifa', droneRate:0.6, strike:1.0, front:0, ground:false, ballistic:true,
+    durationMs:55000, rocket:0.44, tier:'haifa', droneRate:0.6, strike:1.0, front:0, ground:false, ballistic:true,
     lebStart:1000, lebEnd:1700, ilStart:53, ilEnd:55,
     desc:'Israel launches Operation Northern Arrows — massive strikes on Hezbollah\'s missile stores. Now the range opens up: the first heavy rockets reach HAIFA and a ballistic missile is fired at Tel Aviv (Sep 25). On Sep 27 bunker-busters on the Dahieh HQ kill Hassan Nasrallah.',
     news:['Range opens up — first heavy rockets reach Haifa; a missile at Tel Aviv','★ HASSAN NASRALLAH killed in a bunker-buster strike on Dahieh, Beirut','Operation Northern Arrows: 800+ killed in Lebanon in the first week'] },
   { id:'ground', name:'Ground Invasion + Iran\'s Missiles', dateLabel:'Oct 1 – mid-Oct 2024',
-    durationMs:60000, rocket:0.88, tier:'haifa', droneRate:0.6, strike:1.0, front:0.4, ground:true, iranSalvo:true, ballistic:true,
+    durationMs:60000, rocket:0.80, tier:'haifa', droneRate:0.6, strike:1.0, front:0.4, ground:true, iranSalvo:true, ballistic:true,
     lebStart:1700, lebEnd:2300, ilStart:55, ilEnd:70,
     desc:'IDF ground forces cross into south Lebanon. The same day, Iran fires ~180 ballistic missiles at Israel (True Promise II). An ambush at Odaisseh kills 8 soldiers — the deadliest day of the ground war.',
     news:['GROUND INVASION: IDF crosses into south Lebanon','★ IRAN fires ~180 ballistic missiles at Israel — intercepted by Arrow + Iron Dome','Egoz commandos ambushed at Odaisseh — 8 soldiers killed'] },
   { id:'drones', name:'Deep Strikes & the Binyamina Drone', dateLabel:'mid-Oct – mid-Nov 2024',
-    durationMs:55000, rocket:0.85, tier:'deep', droneRate:0.85, strike:1.0, front:0.7, ground:true,
+    durationMs:55000, rocket:0.58, tier:'deep', droneRate:0.85, strike:1.0, front:0.7, ground:true,
     lebStart:2300, lebEnd:3000, ilStart:70, ilEnd:100,
     desc:'Grinding combat in the border villages. Hezbollah\'s deepest strikes: 100+ rockets on Haifa, and an attack drone that evades the defences to hit a Golani base near Binyamina, killing 4 soldiers.',
     news:['Heaviest barrage on Haifa yet — 100+ rockets in 30 minutes','★ Hezbollah drone evades defences, hits a Golani base near Binyamina — 4 killed','IDF razes border strongholds: Maroun al-Ras, Aita al-Shaab'] },
   { id:'ceasefire', name:'Final Barrages → Ceasefire', dateLabel:'mid-Nov – Nov 27, 2024',
-    durationMs:50000, rocket:0.95, tier:'deep', droneRate:0.7, strike:0.8, front:1.0, ground:true, truceAtEnd:true,
+    durationMs:50000, rocket:0.40, tier:'deep', droneRate:0.7, strike:0.8, front:1.0, ground:true, truceAtEnd:true,
     lebStart:3000, lebEnd:3800, ilStart:100, ilEnd:127,
     desc:'A last surge of heavy fire — up to 250 rockets in a day on Haifa, Tiberias, Acre and the Krayot — even as diplomacy closes in. On Nov 27 a 60-day ceasefire takes effect: Hezbollah north of the Litani, IDF south of the Blue Line.',
     news:['Up to 250 rockets in a single day — Haifa, Tiberias, Acre, the Krayot','Ceasefire agreed under US-French mediation','CEASEFIRE in effect — Hezbollah withdraws north of the Litani'] }
@@ -21169,7 +21181,11 @@ function initHezbollahWar() {
 // Fire one incoming Hezbollah barrage of the appropriate weapon tier (player auto-defends).
 function hezFireBarrage(ph) {
   const gen = state.scenarioGen;
-  const n = Math.max(2, Math.round((3 + Math.random() * 7) * ph.rocket));
+  // v2.24.6 — REBALANCE: barrage SIZE is now fixed (2-6 rockets); war intensity is carried by how
+  // OFTEN barrages fire (ph.rocket → interval), not by exploding the count. Old formula hit 10+ per
+  // barrage at peak, which combined with the tight interval to ~335 rockets/min — unplayable. Now
+  // rate ≈ 100 × ph.rocket per min (peak ph.rocket 0.80 → ~80/min instead of 335).
+  const n = 2 + Math.floor(Math.random() * 5);
   // === ROCKET POOL — cumulative by depth (v2.21.0) ===
   // border/galilee fire short rockets; haifa/deep add HEAVY rockets onto the Haifa belt.
   let pool = HEZ_TARGETS.border.map(c => [c, 'rocket']);
@@ -21206,7 +21222,9 @@ function hezFireBarrage(ph) {
     }
   }
   // === BALLISTIC at the centre (Tel Aviv) — ONLY late phases flagged ballistic (Sept 25 2024+) ===
-  if (ph.ballistic && Math.random() < 0.25) {
+  // v2.24.6 — was 0.25/barrage (~5-6 Fateh-110s per phase, way over the handful Hezbollah really
+  // fired). 0.10 → ~1-2 per ballistic phase, so a tacBallistic is a notable event, not background.
+  if (ph.ballistic && Math.random() < 0.10) {
     setTimeout(() => {
       if (state.scenarioGen !== gen || !state.active || state.paused) return;
       try { spawnThreat('tacBallistic', 'hezbollah', Math.random() < 0.5 ? 'telaviv' : 'haifa'); } catch (e) {}
@@ -21219,12 +21237,22 @@ function hezIranSalvo() {
   const gen = state.scenarioGen;
   logEvent('★★★ IRAN: ~180 BALLISTIC MISSILES INBOUND (Operation True Promise II) ★★★', 'danger');
   showNotification('IRAN MISSILE ATTACK', 'Iran fires ~180 ballistic missiles at Israel — Tel Aviv, Nevatim and Tel Nof airbases. Arrow and David\'s Sling engage.', 'danger');
-  for (let i = 0; i < 14; i++) {
+  // v2.24.6 — EARLY WARNING first (orange macroregion standby over the target areas), then ~13
+  // missiles spread over ~16 s (was 14 in ~3 s — an unsurvivable wall). Staggered arrival lets
+  // Arrow / David's Sling reload and engage the salvo wave by wave.
+  try {
+    HEZ_IRAN_TARGETS.forEach(function (cid) {
+      const c = state.cities.find(function (x) { return x.id === cid; });
+      const oc = c ? resolveOrefCity(c) : null;
+      if (oc) triggerEarlyWarning(oc);   // dedupes by macroregion → ~central + south
+    });
+  } catch (e) {}
+  for (let i = 0; i < 13; i++) {
     setTimeout(() => {
       if (state.scenarioGen !== gen || !state.active || state.paused) return;
       const t = HEZ_IRAN_TARGETS[Math.floor(Math.random() * HEZ_IRAN_TARGETS.length)];
       try { spawnThreat(Math.random() < 0.5 ? 'ballistic' : 'tacBallistic', 'iran', t); } catch (e) {}
-    }, i * 220);
+    }, i * 1250);
   }
 }
 
@@ -21292,7 +21320,7 @@ function tickHezbollahWar(dt) {
   // IDF airstrikes on Lebanon
   if (ph.strike > 0) {
     w.strikeAccum += gdt;
-    if (w.strikeAccum >= 1500 / ph.strike) { w.strikeAccum = 0; hezLebanonStrike(); }
+    if (w.strikeAccum >= 2000 / ph.strike) { w.strikeAccum = 0; hezLebanonStrike(); }   // v2.24.6 — was 1500 (40/min); 2000 → ~30/min at peak, less visual spam
   }
   // one-off scripted beats
   if (ph.id === 'arrows' && !w.nasrallahKilled && pFrac >= 0.6) {
