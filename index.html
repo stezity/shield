@@ -2075,6 +2075,12 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.24.14 — No IDF retaliation for OPEN-TERRAIN impacts (user: in the Resistance Axis sandbox the
+//            IDF was striking back even when rockets fell on empty ground). Side-effect of v2.24.12
+//            (rockets can now land on open terrain): handleImpact added IDF pressure for EVERY
+//            impact. Now it only builds pressure when the hit is on a real populated (pop>0) or
+//            strategic (importance>=7) target — the same gate autoTarget uses to defend. A virtual
+//            "Open area" impact (pop 0, importance 1) does no damage and provokes no retaliation.
 //   2.24.13 — SALVO SATURATION: a big incoming salvo makes batteries ripple-fire (user: "if there
 //            are many rockets, the dome should fire its whole ammo load at once, in all scenarios").
 //            autoTarget counts engageable incoming threats; at >=5 it flips on rippleMode, which lets
@@ -2959,7 +2965,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.24.13';
+const GAME_VERSION = '2.24.14';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -11818,7 +11824,11 @@ function handleImpact(threat, smallBlast) {
   // v2.23.3 — OPFOR: an impact that LANDS builds IDF retaliation pressure (the IDF responds to
   // damage done, not to launches). Intercepted threats never reach here, so a fully-defended
   // salvo provokes nothing.
-  if (state.playAs === 'attacker') {
+  // v2.24.14 — but ONLY a hit on a real populated/strategic target counts. A rocket that falls on
+  // OPEN TERRAIN (virtual "Open area" — population 0, importance 1) does no damage, so the IDF does
+  // NOT retaliate for it (user: the IDF shouldn't strike back when rockets land in empty fields).
+  // Same gate autoTarget uses to decide what's worth defending — defence and retaliation stay consistent.
+  if (state.playAs === 'attacker' && (city.population > 0 || (city.importance || 0) >= 7)) {
     state.idfPressure = (state.idfPressure || 0) + (IDF_IMPACT_PRESSURE[threat.type] || 3);
   }
   // Track ISRAELI civilian casualties from Hamas rocket impact on Israeli city.
