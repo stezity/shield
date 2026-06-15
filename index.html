@@ -2075,6 +2075,14 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.24.18 — More realistic interceptor SMOKE for Iron Dome / David's Sling / THAAD (user). The
+//            daytime contrail now BILLOWS and SHEARS with age: each trail point rises + drifts
+//            sideways on a gentle per-missile wind the older it is, and the puffs balloon out and go
+//            wispy with age (ageF over ~7 s) instead of a uniform ribbon. The intercept kill-cloud
+//            (ismoke) was a near-static dot (grow 1.0004) — now it billows fast then plateaus toward
+//            a maxSize (~3-5× base) and keeps drifting on a steady wind, so it shears like a real
+//            Iron Dome / Stunner cloud. Per-battery size still scales via trailMul (Tamir < Stunner
+//            < THAAD). Night (glowing dots, no smoke) and Arrow-3's purple exo plume unchanged.
 //   2.24.17 — Audit fixes (B1,B5,B6,B7,B11) + battery role swap + launch-site suppression (user).
 //            B1: AI cluster missiles now DISPERSE in flight — threat.clusterWarhead = isCluster &&
 //            !isPlayerLaunch (was player-only; enemy "(cluster)" MRBMs only did an impact puff).
@@ -2990,7 +2998,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.24.17';
+const GAME_VERSION = '2.24.18';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -10407,12 +10415,18 @@ function drawInterceptors() {
       const thArc = (i.threatStartLat != null)
         ? arcHeightFromEndpoints(i.threatStartLat, i.threatStartLon, i.threatTargetLat, i.threatTargetLon, i.threatArcRatio)
         : arcH;
+      // v2.24.18 — realistic smoke: every trail point RISES and SHEARS sideways more the older it
+      // is, and the puffs below BILLOW (expand + go wispy) with age, so the contrail dissipates like
+      // real interceptor smoke instead of reading as a uniform ribbon. _wind = gentle per-missile drift.
+      const _wind = (i._wind != null) ? i._wind : (i._wind = 0.55 + Math.random() * 0.55);
       const pts = i.trail.map((p) => {
         const [tsx, tsy0] = geoToScreen(p.lat, p.lon);
         const lift = (typeof p.altFrac === 'number') ? p.altFrac * thArc
                    : (typeof p.altOffset === 'number' ? p.altOffset : -Math.sin((p.prog || 0) * Math.PI) * arcH);
-        const drift = Math.min(8, (now - (p.t || now)) / 250);   // smoke rises slowly
-        return { sx: tsx, sy: tsy0 + lift - drift };
+        const ageMs = now - (p.t || now);
+        const rise  = Math.min(18, ageMs / 160);            // smoke keeps rising as it ages
+        const shear = Math.min(13, ageMs / 520) * _wind;    // wind blows it sideways, more with age
+        return { sx: tsx + shear, sy: tsy0 + lift - rise, age: ageMs };
       });
       const N = pts.length;
       // v2.23.2 — bigger trail for the bigger interceptors: Iron Dome (Tamir) small, David's
@@ -10440,14 +10454,18 @@ function drawInterceptors() {
       //     alpha so even where they overlap the smoke stays see-through (never a solid band).
       for (let idx = 0; idx < N; idx += 2) {
         const p = pts[idx];
-        const f = idx / N;
-        const lump = 0.6 + 0.6 * Math.abs(Math.sin(idx * 1.5 + idx * idx * 0.02));
-        const r = (3.6 + (1 - f) * 8.0) * lump * trailMul;   // head→tail, scaled per battery
-        const a = (0.045 + f * 0.085) * fadeMul;       // LOW → translucent; overlap builds it up
+        const f = idx / N;                                   // 0 = oldest tail … 1 = fresh head
+        const ageF = Math.min(1, p.age / 7000);              // dissipation 0…1 over ~7 s
+        const lump = 0.62 + 0.5 * Math.abs(Math.sin(idx * 1.7 + idx * idx * 0.013));
+        // BILLOW: tight at the fresh head, ballooning out + going wispy as the smoke ages/dissipates
+        const r = (3.0 + ageF * 11.0 + (1 - f) * 2.5) * lump * trailMul;
+        // DENSITY: dense at the head, thinning as it disperses
+        const a = (0.05 + f * 0.055) * (1 - ageF * 0.6) * fadeMul;
+        if (a <= 0.003) continue;
         const g = ctx.createRadialGradient(p.sx, p.sy, 0, p.sx, p.sy, r);
-        g.addColorStop(0, `rgba(245, 248, 252, ${a})`);
-        g.addColorStop(0.55, `rgba(240, 245, 251, ${a * 0.45})`);
-        g.addColorStop(1, 'rgba(240, 245, 251, 0)');
+        g.addColorStop(0, `rgba(246, 249, 253, ${a})`);
+        g.addColorStop(0.5, `rgba(238, 244, 250, ${a * 0.5})`);
+        g.addColorStop(1, 'rgba(236, 242, 249, 0)');
         ctx.globalAlpha = 1;
         ctx.fillStyle = g;
         ctx.beginPath(); ctx.arc(p.sx, p.sy, r, 0, Math.PI * 2); ctx.fill();
@@ -13213,20 +13231,25 @@ function createInterceptFlash(lat, lon, screenYOffset, exo, lift) {
     // DAY — the intercept CLOUD: a SMALL white cotton-puff that LINGERS ~30 s like real Iron
     // Dome kills (the little clouds hang in the sky long after the trail is gone), drifting a
     // touch then slowly fading. Over a brief warm warhead flash. v2.22.7: long life, small size.
-    const puffs = 5 + Math.floor(Math.random() * 3);
+    // v2.24.18 — the intercept cloud now BILLOWS out (fast then plateau) and drifts on a steady
+    // wind so it shears like a real Iron Dome / David's Sling kill cloud instead of freezing as a dot.
+    const puffs = 6 + Math.floor(Math.random() * 4);
+    const windLon = (Math.random() < 0.5 ? -1 : 1) * (0.000006 + Math.random() * 0.000007);
     for (let i = 0; i < puffs; i++) {
       const a = Math.random() * Math.PI * 2;
-      const sp = (0.02 + Math.random() * 0.06) * 0.0008;
-      const life = 26000 + Math.random() * 8000;   // ~26-34 s
+      const sp = (0.04 + Math.random() * 0.10) * 0.0008;   // a touch more initial spread (puff opens up)
+      const life = 24000 + Math.random() * 9000;           // ~24-33 s
+      const baseSize = 2.2 + Math.random() * 2.4;
       state.particles.push({
         kind: 'ismoke', lat, lon, screenYOffset: screenYOffset || 0,
         lift: lift || null,                        // v2.22.7 — recompute altitude at current zoom
-        vLat: Math.sin(a) * sp * 0.4 - 0.00010,    // slow outward + gentle rise, then it settles
+        vLat: Math.sin(a) * sp * 0.5 - 0.00012,    // outward + gentle rise, then it settles
         vLon: Math.cos(a) * sp,
+        windLon: windLon,                          // steady horizontal wind shear (cloud never freezes)
         life: life, maxLife: life,
-        shade: 200 + Math.random() * 30,           // bright cotton-white
-        size: 2.6 + Math.random() * 3.0,           // SMALL puff
-        grow: 1.0004                               // stays small over its long life
+        shade: 206 + Math.random() * 26,           // bright cordite-white
+        size: baseSize,
+        maxSize: baseSize * (3.0 + Math.random() * 2.0)   // billows to ~3-5× then plateaus & drifts
       });
     }
     // brief warm fire sparks at the contact point (the warhead flash)
@@ -13270,11 +13293,15 @@ function updateExplosions(dt) {
       p.vLat += 0.0000009 * dt;     // gravity (screen-down)
       p.vLon *= 0.99;
     } else if (p.kind === 'ismoke') {
-      // intercept smoke ball — drifts out, rises slowly, expands as it dissipates.
-      // v2.22.2: honour a per-particle grow rate so the daytime intercept cloud visibly
-      // swells from a small puff into a big ball.
-      p.vLat *= 0.97; p.vLon *= 0.97;
-      p.size *= (p.grow || 1.004);
+      // v2.24.18 — intercept cloud BILLOWS then plateaus and keeps drifting on a steady wind, so it
+      // shears like a real kill cloud instead of swelling forever or freezing in place.
+      p.vLat *= 0.985; p.vLon *= 0.985;
+      if (p.windLon) p.lon += p.windLon * dt / 16;          // steady wind drift (applied to position)
+      if (p.maxSize && p.size < p.maxSize) {
+        p.size += (p.maxSize - p.size) * 0.012 * (dt / 16); // fast at first, asymptotic to maxSize
+      } else {
+        p.size *= (p.grow || 1.0006);                       // then a very slow continued spread
+      }
     }
     p.life -= dt;
   });
