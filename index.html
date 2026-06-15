@@ -2075,6 +2075,14 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.24.19 — Continuous contrail + dimmer rocket tip (user: the line was getting cut — make it
+//            unbroken so the wind just shears it; and the rocket tip shouldn't be a super-bright dot).
+//            The day trail used a near-invisible haze line + spaced puffs, so it read as a dashed/cut
+//            line. Now it draws a CONTINUOUS smoke spine (two uniform-alpha passes: soft wide body +
+//            denser narrow core) through every wind-sheared point; the billow puffs are dropped to a
+//            subtle texture on top (no dashes). The bright white head line is replaced with a soft
+//            smoke puff (no glowing tip — daytime footage shows only smoke). Night motor point toned
+//            down: smaller, softer, warm core (was a pure-white super-bright dot).
 //   2.24.18 — More realistic interceptor SMOKE for Iron Dome / David's Sling / THAAD (user). The
 //            daytime contrail now BILLOWS and SHEARS with age: each trail point rises + drifts
 //            sideways on a gentle per-missile wind the older it is, and the puffs balloon out and go
@@ -2998,7 +3006,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.24.18';
+const GAME_VERSION = '2.24.19';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -10404,6 +10412,7 @@ function drawInterceptors() {
     } else {
       sy = sy0 - Math.sin(prog * Math.PI) * getInterceptorArc(i);
     }
+    if (!isFinite(sx) || !isFinite(sy)) return;   // v2.24.19 — never feed NaN to a gradient (a bad-timing interceptor must not crash the whole render)
 
     // === v2.22.2 — DAY vs NIGHT interceptor visuals (true-to-life Iron Dome) ===
     //  DAY / DUSK: a continuous bright-WHITE smoke contrail; the missile itself is NOT visible
@@ -10436,75 +10445,70 @@ function drawInterceptors() {
                      : i.batteryType === 'davidsSling' ? 1.55 : 1.0;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
-      // v2.22.6 — TRANSLUCENT diffuse SMOKE, not an opaque white strip. The old version had a
-      // bright core line (alpha .78) that painted a solid ribbon; real smoke is see-through and
-      // soft. Now the trail is built PURELY from soft low-alpha overlapping puffs (lumpy sizes →
-      // real smoke texture, billowing wider & airier toward the tail) over a barely-there haze
-      // that keeps it continuous. No opaque core — the map shows through it.
-      // (1) Faint continuous haze — unbroken continuity at any zoom, but barely visible
-      ctx.strokeStyle = 'rgb(230, 237, 245)';
-      ctx.lineWidth = 4 * trailMul;
+      // v2.24.19 — CONTINUOUS smoke SPINE so the contrail is one unbroken line (the wind shear in
+      // pts then bends it), instead of a row of separate puffs that read as a dashed/cut line.
+      // (A single stroke can't taper its alpha per-point — globalAlpha only takes effect at stroke()
+      // — so we draw two uniform-alpha passes: a soft WIDE body + a denser NARROW core.)
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = `rgba(234, 240, 248, ${0.11 * fadeMul})`;
+      ctx.lineWidth = 6.5 * trailMul;
       ctx.beginPath();
-      pts.forEach((p, idx) => {
-        ctx.globalAlpha = (0.025 + (idx / N) * 0.06) * fadeMul;
-        if (idx === 0) ctx.moveTo(p.sx, p.sy); else ctx.lineTo(p.sx, p.sy);
-      });
+      pts.forEach((p, idx) => { if (idx === 0) ctx.moveTo(p.sx, p.sy); else ctx.lineTo(p.sx, p.sy); });
       ctx.stroke();
-      // (2) Diffuse smoke puffs — translucent & lumpy, billowing toward the tail. Low per-puff
-      //     alpha so even where they overlap the smoke stays see-through (never a solid band).
+      ctx.strokeStyle = `rgba(244, 248, 253, ${0.22 * fadeMul})`;
+      ctx.lineWidth = 3.0 * trailMul;
+      ctx.beginPath();
+      pts.forEach((p, idx) => { if (idx === 0) ctx.moveTo(p.sx, p.sy); else ctx.lineTo(p.sx, p.sy); });
+      ctx.stroke();
+      // BILLOW puffs — SUBTLE volume/texture on top of the spine; balloon out + go wispy with age.
+      // Kept low-alpha so they add smoke body without breaking the continuous line into dashes.
       for (let idx = 0; idx < N; idx += 2) {
         const p = pts[idx];
         const f = idx / N;                                   // 0 = oldest tail … 1 = fresh head
         const ageF = Math.min(1, p.age / 7000);              // dissipation 0…1 over ~7 s
         const lump = 0.62 + 0.5 * Math.abs(Math.sin(idx * 1.7 + idx * idx * 0.013));
-        // BILLOW: tight at the fresh head, ballooning out + going wispy as the smoke ages/dissipates
-        const r = (3.0 + ageF * 11.0 + (1 - f) * 2.5) * lump * trailMul;
-        // DENSITY: dense at the head, thinning as it disperses
-        const a = (0.05 + f * 0.055) * (1 - ageF * 0.6) * fadeMul;
+        const r = (3.0 + ageF * 11.0 + (1 - f) * 2.0) * lump * trailMul;
+        const a = (0.035 + f * 0.028) * (1 - ageF * 0.55) * fadeMul;
         if (a <= 0.003) continue;
         const g = ctx.createRadialGradient(p.sx, p.sy, 0, p.sx, p.sy, r);
-        g.addColorStop(0, `rgba(246, 249, 253, ${a})`);
-        g.addColorStop(0.5, `rgba(238, 244, 250, ${a * 0.5})`);
-        g.addColorStop(1, 'rgba(236, 242, 249, 0)');
-        ctx.globalAlpha = 1;
+        g.addColorStop(0, `rgba(244, 248, 253, ${a})`);
+        g.addColorStop(0.5, `rgba(236, 242, 250, ${a * 0.5})`);
+        g.addColorStop(1, 'rgba(234, 240, 248, 0)');
         ctx.fillStyle = g;
         ctx.beginPath(); ctx.arc(p.sx, p.sy, r, 0, Math.PI * 2); ctx.fill();
       }
-      // (3) Soft brightening at the very head only (fresh dense smoke at the missile) — gentle,
-      //     translucent, NOT a hard line.
-      const headStart = Math.max(0, N - 6);
-      ctx.strokeStyle = 'rgb(248, 251, 255)';
-      ctx.lineCap = 'round';
-      ctx.lineWidth = 2.4 * trailMul;
-      ctx.beginPath();
-      for (let idx = headStart; idx < N; idx++) {
-        const p = pts[idx];
-        ctx.globalAlpha = (0.10 + ((idx - headStart) / Math.max(1, N - 1 - headStart)) * 0.22) * fadeMul;
-        if (idx === headStart) ctx.moveTo(p.sx, p.sy); else ctx.lineTo(p.sx, p.sy);
+      // HEAD — a soft puff of fresh smoke at the missile, NOT a bright glowing tip (real daytime
+      // footage shows only the smoke column; the rocket itself isn't visible). v2.24.19.
+      const head = pts[N - 1];
+      if (head) {
+        const hr = 5.0 * trailMul;
+        const hg = ctx.createRadialGradient(head.sx, head.sy, 0, head.sx, head.sy, hr);
+        hg.addColorStop(0, `rgba(247, 250, 254, ${0.24 * fadeMul})`);
+        hg.addColorStop(0.6, `rgba(240, 246, 252, ${0.11 * fadeMul})`);
+        hg.addColorStop(1, 'rgba(238, 244, 251, 0)');
+        ctx.fillStyle = hg;
+        ctx.beginPath(); ctx.arc(head.sx, head.sy, hr, 0, Math.PI * 2); ctx.fill();
       }
-      ctx.stroke();
       ctx.globalAlpha = 1;
       ctx.lineCap = 'butt';
       ctx.lineJoin = 'miter';
-      // (the soft bright head is the interceptor itself — no separate dot needed in daylight)
     }
 
     if (isNight) {
-      // NIGHT — bright yellow-orange-white motor point (no smoke). A small glowing comet head.
-      const halo = ctx.createRadialGradient(sx, sy, 0, sx, sy, 13);
-      halo.addColorStop(0, 'rgba(255, 222, 125, 0.95)');
-      halo.addColorStop(0.45, 'rgba(255, 160, 50, 0.6)');
+      // NIGHT — a small warm motor point (no smoke). v2.24.19 — toned DOWN: smaller, softer halo and
+      // a warm (not pure-white) core, so it reads as a glowing motor rather than a super-bright dot.
+      const halo = ctx.createRadialGradient(sx, sy, 0, sx, sy, 9);
+      halo.addColorStop(0, 'rgba(255, 216, 130, 0.6)');
+      halo.addColorStop(0.5, 'rgba(255, 158, 60, 0.32)');
       halo.addColorStop(1, 'rgba(255, 120, 30, 0)');
       ctx.fillStyle = halo;
-      ctx.beginPath(); ctx.arc(sx, sy, 13, 0, Math.PI * 2); ctx.fill();
-      const core = ctx.createRadialGradient(sx, sy, 0, sx, sy, 4.5);
-      core.addColorStop(0, '#ffffff');
-      core.addColorStop(0.5, '#ffe27a');
-      core.addColorStop(1, 'rgba(255, 200, 80, 0)');
+      ctx.beginPath(); ctx.arc(sx, sy, 9, 0, Math.PI * 2); ctx.fill();
+      const core = ctx.createRadialGradient(sx, sy, 0, sx, sy, 3.2);
+      core.addColorStop(0, 'rgba(255, 244, 200, 0.92)');
+      core.addColorStop(0.5, 'rgba(255, 200, 110, 0.7)');
+      core.addColorStop(1, 'rgba(255, 180, 80, 0)');
       ctx.fillStyle = core;
-      ctx.beginPath(); ctx.arc(sx, sy, 4.5, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = '#ffffff';
-      ctx.beginPath(); ctx.arc(sx, sy, 1.6, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(sx, sy, 3.2, 0, Math.PI * 2); ctx.fill();
     }
 
     // Экзоатмосферный эффект для Arrow-3 — v2.23.2 PURPLE plume, shown day & night (the high-
