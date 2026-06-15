@@ -2075,6 +2075,12 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.24.15 — Golan Heights targetable in the Resistance Axis sandbox (user: "can't fire at the
+//            Golan — says it's not Israeli territory"). attackerLaunchAt's territory box capped lon
+//            at 35.60, but the Israeli-controlled Golan towns (Katzrin, Merom Golan, Ein Zivan, Mevo
+//            Hama) sit at lon ~35.65-35.80. Added a tight second region inGolan (lat 32.65-33.34,
+//            lon 35.55-35.83); with the existing 25 km-from-city anchor it opens the Golan without
+//            opening Syria (east of the ceasefire line) or Jordan.
 //   2.24.14 — No IDF retaliation for OPEN-TERRAIN impacts (user: in the Resistance Axis sandbox the
 //            IDF was striking back even when rockets fell on empty ground). Side-effect of v2.24.12
 //            (rockets can now land on open terrain): handleImpact added IDF pressure for EVERY
@@ -2965,7 +2971,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.24.14';
+const GAME_VERSION = '2.24.15';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -12320,7 +12326,12 @@ function attackerLaunchAt(lat, lon) {
   // Lebanon (north of ~33.3) and Syria. Targets must fall inside this box AND
   // within 25 km of a real city (no firing into open Sinai / Egyptian sea).
   const inBox = (lat >= 29.45 && lat <= 33.30 && lon >= 34.20 && lon <= 35.60);
-  if (!inBox) {
+  // v2.24.15 — the GOLAN HEIGHTS (Israeli-controlled) lies EAST of the main box (towns like Katzrin,
+  // Merom Golan, Ein Zivan, Mevo Hama are at lon ~35.65-35.80) and was wrongly rejected as "not
+  // Israeli territory". Allow the Golan plateau as a second region — bounded tightly (and the 25 km-
+  // from-city check still applies) so it doesn't open up Syria east of the ceasefire line or Jordan.
+  const inGolan = (lat >= 32.65 && lat <= 33.34 && lon >= 35.55 && lon <= 35.83);
+  if (!inBox && !inGolan) {
     showNotification('OUT OF RANGE', 'Target must be inside Israeli territory', 'warn');
     return false;
   }
