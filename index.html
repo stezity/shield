@@ -2075,6 +2075,15 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.24.24 — Burkan range fix + lingering/wavy/diffuse smoke (user). (1) BURKAN-1 was a Hezbollah
+//            rocket name with a 60 km range, so the picker used it for any 25-60 km strike — wrong:
+//            it's a short-range (~5 km) heavy-warhead BORDER rocket. Set range 60→5 and added proper
+//            mid-range names (Grad-122mm 40, Fajr-3 43, 107mm 8) so mid-range fire stops defaulting to
+//            Burkan. (2) SMOKE: now LINGERS ~7 s after the kill (was 1.4 s) and keeps BILLOWING (older
+//            puffs grow, ageF over ~10 s) and DRIFTING on the wind (rise/shear caps raised) — dead
+//            interceptors kept ~7 s for the render. (3) WAVY line: a smooth progress-locked wiggle so
+//            the contrail snakes (not ruler-straight). (4) BLURRIER/diffuse: wider soft low-alpha halo
+//            + softer core. Wisp made sparse-but-big (idx+=8) to hold perf during big salvos.
 //   2.24.23 — Dial-back pass (user: clouds too bright/big & screen-filling; loop too rigid + should
 //            be right next to the rocket & soft; smoke still cuts short + still too dense). (1) CLOUDS:
 //            fewer puffs (6-9→4-6), small base, expand to only ~2.6-4.2× (was 6-9×), and dimmer
@@ -3042,7 +3051,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.24.23';
+const GAME_VERSION = '2.24.24';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -3239,8 +3248,10 @@ const WEAPON_RANGES = {
   'Shehab': 200, 'Ababil-T': 250, 'Zouari': 35,
 
   // === HEZBOLLAH ===
-  'Type-81': 12, 'Falaq-1': 11, 'Falaq-2': 11, 'Shahin-1': 13, 'Katyusha': 22,
-  'Burkan-1': 60, 'Khaibar-1': 100, 'Zelzal-1': 125, 'Zelzal-2': 210,
+  '107mm rocket': 8, 'Type-81': 12, 'Falaq-1': 11, 'Falaq-2': 11, 'Shahin-1': 13, 'Katyusha': 22,
+  'Grad-122mm': 40, 'Fajr-3': 43,   // mid-range Grad/Fajr fire (so the picker stops defaulting to Burkan)
+  // Burkan-1: short-range heavy-warhead BORDER rocket (~5 km, huge warhead) — NOT a 60 km weapon (v2.24.24)
+  'Burkan-1': 5, 'Khaibar-1': 100, 'Zelzal-1': 125, 'Zelzal-2': 210,
   'Fadi-1': 70, 'Fadi-2': 100, 'Fadi-3': 100,
   'Quds-1': 700, 'Yakhont P-800': 300, 'C-802 Noor': 120,
   'Mirsad-1': 120, 'Mohajer-4': 200, 'Shahed-101': 700, 'Ayoub': 250,
@@ -10425,8 +10436,11 @@ function drawInterceptors() {
       // Night has no smoke trail, so dead night interceptors draw nothing.
       if (isNight) return;
       const age = now - (i.deadAt || now);
-      if (age > 1400 || !i.trail || i.trail.length < 2) return;
-      fadeMul = 1 - age / 1400;
+      // v2.24.24 — the smoke LINGERS ~10 s after the kill (was 1.4 s), and since its points keep
+      // aging it keeps BILLOWING and DRIFTING on the wind (see the rise/shear/wisp below). Hold full
+      // for ~5 s then fade over the last 5 s, so it hangs in the sky and disperses like real smoke.
+      if (age > 7000 || !i.trail || i.trail.length < 2) return;
+      fadeMul = age < 3500 ? 1 : Math.max(0, 1 - (age - 3500) / 3500);
     }
     const t = BATTERY_TYPES[i.batteryType];
     const prog = getInterceptorProgress(i);
@@ -10469,9 +10483,13 @@ function drawInterceptors() {
         const lift = (typeof p.altFrac === 'number') ? p.altFrac * thArc
                    : (typeof p.altOffset === 'number' ? p.altOffset : -Math.sin((p.prog || 0) * Math.PI) * arcH);
         const ageMs = now - (p.t || now);
-        const rise  = Math.min(18, ageMs / 160);            // smoke keeps rising as it ages
-        const shear = Math.min(13, ageMs / 520) * _wind;    // wind blows it sideways, more with age
-        return { sx: tsx + shear, sy: tsy0 + lift - rise, age: ageMs };
+        const rise  = Math.min(70, ageMs / 150);            // v2.24.24 — keeps rising over the long linger
+        const shear = Math.min(55, ageMs / 450) * _wind;    // v2.24.24 — keeps drifting on the wind over the linger
+        // v2.24.24 — WAVY/maneuvering line (not ruler-straight): a smooth wiggle locked to the point's
+        // flight progress (stable per point), so the contrail snakes like a real maneuvering interceptor.
+        const wig  = Math.sin((p.prog || 0) * 38 + _wind * 3) * 3.6;
+        const wigY = Math.cos((p.prog || 0) * 31 + _wind * 2) * 2.2;
+        return { sx: tsx + shear + wig, sy: tsy0 + lift - rise + wigY, age: ageMs };
       });
       const N = pts.length;
       // v2.23.2 — bigger trail for the bigger interceptors: Iron Dome (Tamir) small, David's
@@ -10489,28 +10507,31 @@ function drawInterceptors() {
       // v2.24.23 — THIN, LIGHT, TRANSPARENT continuous contrail (was too dense/flat): a faint soft
       // halo for a touch of softness + a crisp THIN core for the line. Low opacity → see-through, not
       // a dense band; the long trail (raised cap) keeps it reaching back to the launch (was cut short).
-      ctx.strokeStyle = `rgba(228, 236, 246, ${0.032 * fadeMul})`;
-      ctx.lineWidth = 4.6 * trailMul;
+      // v2.24.24 — more BLURRY/DIFFUSE (not a flat hard line): a WIDE soft halo (very low alpha →
+      // blurry edge, still see-through) + a soft body + a soft (not crisp) core. All continuous.
+      ctx.strokeStyle = `rgba(228, 236, 246, ${0.024 * fadeMul})`;
+      ctx.lineWidth = 6.8 * trailMul;
       ctx.beginPath();
       pts.forEach((p, idx) => { if (idx === 0) ctx.moveTo(p.sx, p.sy); else ctx.lineTo(p.sx, p.sy); });
       ctx.stroke();
-      ctx.strokeStyle = `rgba(236, 243, 250, ${0.06 * fadeMul})`;
-      ctx.lineWidth = 2.4 * trailMul;
+      ctx.strokeStyle = `rgba(236, 243, 250, ${0.05 * fadeMul})`;
+      ctx.lineWidth = 3.0 * trailMul;
       ctx.beginPath();
       pts.forEach((p, idx) => { if (idx === 0) ctx.moveTo(p.sx, p.sy); else ctx.lineTo(p.sx, p.sy); });
       ctx.stroke();
-      ctx.strokeStyle = `rgba(247, 250, 254, ${0.24 * fadeMul})`;
-      ctx.lineWidth = 1.25 * trailMul;
+      ctx.strokeStyle = `rgba(246, 250, 254, ${0.20 * fadeMul})`;
+      ctx.lineWidth = 1.3 * trailMul;
       ctx.beginPath();
       pts.forEach((p, idx) => { if (idx === 0) ctx.moveTo(p.sx, p.sy); else ctx.lineTo(p.sx, p.sy); });
       ctx.stroke();
-      // VERY light wisping on the FAR tail only (sparse) — slight dispersal, keeps the line transparent
-      for (let idx = 0; idx < N; idx += 6) {
+      // BILLOW puffs on the OLDER smoke — grow BIG as the smoke ages over the long linger (раздувался);
+      // the fresh head stays a clean line. Drift comes from the shear above.
+      for (let idx = 0; idx < N; idx += 8) {   // sparse (perf during salvos) but big puffs → still billows
         const p = pts[idx];
-        const ageF = Math.min(1, p.age / 7000);
-        if (ageF < 0.35) continue;
-        const r = (2.0 + ageF * 5.5) * trailMul;
-        const a = 0.028 * (1 - ageF * 0.5) * fadeMul;
+        const ageF = Math.min(1, p.age / 10000);
+        if (ageF < 0.3) continue;
+        const r = (2.4 + ageF * 11.0) * trailMul;
+        const a = 0.045 * (1 - ageF * 0.4) * fadeMul;
         if (a <= 0.004) continue;
         const g = ctx.createRadialGradient(p.sx, p.sy, 0, p.sx, p.sy, r);
         g.addColorStop(0, `rgba(240, 245, 251, ${a})`);
@@ -13196,7 +13217,7 @@ function updateInterceptors(dt) {
     }
   });
   // v2.22.5 — keep dead interceptors ~1.5 s so their smoke trail can linger & fade (drawInterceptors)
-  state.interceptors = state.interceptors.filter(i => i.alive || (Date.now() - (i.deadAt || 0)) < 1500);
+  state.interceptors = state.interceptors.filter(i => i.alive || (Date.now() - (i.deadAt || 0)) < 7300);   // v2.24.24 — keep dead interceptors for the ~7 s lingering-smoke render
 }
 
 function updateBatteries(dt) {
