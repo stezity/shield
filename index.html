@@ -2075,6 +2075,15 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.24.12 — Spread scatters onto open terrain; open-terrain aim isn't re-aimed to a city (user).
+//            Two fixes in spawnThreat: (1) the player click-snap radius 12 km → 4 km — 12 km absorbed
+//            all spread so every rocket snapped to a city centre; 4 km ≈ a city's built-up extent, so
+//            a rocket only "lands on" a city if it falls within ~4 km, else it impacts the open
+//            terrain where it actually fell (and aiming >4 km from any city stays open terrain).
+//            (2) player launches now set targetLat/Lon to the ACTUAL aimed/spread point (was the
+//            snapped city centre), so a spread salvo scatters across the city + open ground instead
+//            of piling on the centre; near-city impacts still credit/damage the city by reference.
+//            AI launches (city-id targeted) unchanged.
 //   2.24.11 — Near-border rockets stay a SMALL patch (user: "if it's 5-10-15-20 km from the border,
 //            small radius like before"). v2.24.10 scaled by raw flight distance, so a near-border
 //            target fired from a laterally-offset base (Tyre→Nahariya is 31 km though Nahariya is
@@ -2942,7 +2951,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.24.11';
+const GAME_VERSION = '2.24.12';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -10772,11 +10781,15 @@ function spawnThreat(typeId, enemyId, targetCityId, explicitLat, explicitLon, ex
     }
     // === SANDBOX CHEAT: smaller snap radius if "no snap" enabled (precise click) ===
     const cheats = (typeof readAttackerCheats === 'function') ? readAttackerCheats() : null;
-    const snapRadiusKm = (cheats && cheats.noSnap) ? 2 : 12;
+    // v2.24.12 — TIGHT snap (~city built-up extent). Was 12 km, which absorbed all spread → every
+    // rocket snapped to a city centre. Now a rocket only counts as hitting a city if it falls within
+    // ~4 km of it; otherwise it impacts the OPEN TERRAIN where it actually fell. So a salvo with
+    // spread scatters (some on the city, some on open ground), and aiming at open terrain stays open.
+    const snapRadiusKm = (cheats && cheats.noSnap) ? 1 : 4;
     if (nearest && nearestKm < snapRadiusKm) {
-      targetCity = nearest;          // snap to real city if within radius
+      targetCity = nearest;          // direct hit on a real city (damage + alert it)
     } else {
-      // virtual target — open desert / sea, no OREF alert
+      // virtual target — open terrain at the ACTUAL aimed/fell point
       targetCity = { id: 'virtual_' + (nextId++), name: 'Open area', lat: explicitLat, lon: explicitLon, importance: 1, population: 0, alive: true, type: 'virtual' };
     }
   }
@@ -10932,7 +10945,10 @@ function spawnThreat(typeId, enemyId, targetCityId, explicitLat, explicitLon, ex
     isCluster,
     startLat: sLat, startLon: sLon,
     curLat: sLat, curLon: sLon,
-    targetLat: targetCity.lat, targetLon: targetCity.lon,
+    // v2.24.12 — player launches impact the ACTUAL aimed/spread point, not the snapped city centre,
+    // so a spread salvo scatters across the city and onto open terrain instead of piling on the centre.
+    targetLat: (typeof explicitLat === 'number') ? explicitLat : targetCity.lat,
+    targetLon: (typeof explicitLon === 'number') ? explicitLon : targetCity.lon,
     targetCity,
     speed: tType.speed * speedScale,
     arcRatio: tType.arcRatio || 0.25,
