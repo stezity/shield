@@ -2075,6 +2075,11 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.24.16 — Iron Dome coverage on the GOLAN HEIGHTS (user-supplied coords) + Mt Hermon. Added 5
+//            ironDome entries to BATTERY_LAYOUT's NORTH section (Golan South 32.885/35.713, Katzrin
+//            32.985/35.727, Golan North 1 33.170/35.718, Golan North 2 33.167/35.720, Mt Hermon
+//            33.305/35.786). Because deployFullIDFGrid(BATTERY_LAYOUT) is shared, the Golan domes
+//            appear in the sandbox/attacker init, the Hezbollah war scenario, AND October 7.
 //   2.24.15 — Golan Heights targetable in the Resistance Axis sandbox (user: "can't fire at the
 //            Golan — says it's not Israeli territory"). attackerLaunchAt's territory box capped lon
 //            at 35.60, but the Israeli-controlled Golan towns (Katzrin, Merom Golan, Ein Zivan, Mevo
@@ -2971,7 +2976,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.24.15';
+const GAME_VERSION = '2.24.16';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -3040,6 +3045,12 @@ const BATTERY_LAYOUT = [
   { type: 'ironDome', name: 'NORTH · Ramat David Airbase', lat: 32.665,  lon: 35.179,  region: 'north' },
   { type: 'ironDome', name: 'NORTH · Elbit Yokneam',       lat: 32.6600, lon: 35.1050, region: 'north' }, // protects Elbit Yokneam Illit
   { type: 'ironDome', name: 'NORTH · Elbit Matam',         lat: 32.7870, lon: 34.9930, region: 'north' }, // protects Elbit Matam (Haifa)
+  // --- NORTH: GOLAN HEIGHTS (player-requested Iron Dome coverage for the Golan plateau + Mt Hermon) ---
+  { type: 'ironDome', name: 'NORTH · Golan South',         lat: 32.8852, lon: 35.7126, region: 'north' }, // 32°53'06.6"N 35°42'45.3"E
+  { type: 'ironDome', name: 'NORTH · Golan · Katzrin',     lat: 32.9851, lon: 35.7270, region: 'north' }, // 32°59'06.2"N 35°43'37.1"E
+  { type: 'ironDome', name: 'NORTH · Golan North 1',       lat: 33.1701, lon: 35.7181, region: 'north' }, // 33°10'12.2"N 35°43'05.2"E
+  { type: 'ironDome', name: 'NORTH · Golan North 2',       lat: 33.1671, lon: 35.7199, region: 'north' }, // 33°10'01.5"N 35°43'11.8"E
+  { type: 'ironDome', name: 'NORTH · Mt Hermon',           lat: 33.3050, lon: 35.7860, region: 'north' }, // Israeli Hermon outpost (highest IDF position)
   // --- CENTRAL: Sharon, Dan, Shfela, Jerusalem, Tel Nof, Hadera ---
   { type: 'ironDome', name: 'CENTRAL · Sharon',            lat: 32.350, lon: 34.870, region: 'central' },
   { type: 'ironDome', name: 'CENTRAL · Hadera Power',      lat: 32.473, lon: 34.892, region: 'central' },
