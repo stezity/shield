@@ -2075,6 +2075,13 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.24.26 — Night embers refinement (user): (1) embers RAIN DOWN to the ground instead of
+//            scattering in the sky — tighter spread (vLat ×0.25, vLon ×0.4). (2) they fall SLOWER —
+//            per-particle gMul 0.35 on gravity + longer life (close kill ~4.2-7.4 s) so the gentle
+//            descent reaches the ground. (3) the flash comes FIRST then the embers — embers spawn
+//            with a ~240-410 ms delay (new particle `delay` field; skipped in update+draw until it
+//            elapses). The night flash core is now a blurry bright YELLOW dot (warm core, shorter
+//            subtler sparkle rays) per the user's "размытую яркую жёлтую точку".
 //   2.24.25 — Prettier NIGHT intercept (user, reference photos). (1) FLARE: the night intercept burst
 //            is now a vivid orange-white detonation — a wide orange bloom + a white-hot core + a
 //            radiating star flare (alternating long/short rays) during the flash, instead of a plain
@@ -3057,7 +3064,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.24.25';
+const GAME_VERSION = '2.24.26';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -10730,19 +10737,19 @@ function drawExplosions() {
         bloom.addColorStop(1, 'rgba(255, 90, 20, 0)');
         ctx.fillStyle = bloom;
         ctx.beginPath(); ctx.arc(sx, sy, radius * 3.0, 0, Math.PI * 2); ctx.fill();
-        // (2) white-hot core
-        const core = ctx.createRadialGradient(sx, sy, 0, sx, sy, radius * 0.95);
-        core.addColorStop(0, `rgba(255, 255, 250, ${t})`);
-        core.addColorStop(0.45, `rgba(255, 234, 168, ${t * 0.9})`);
-        core.addColorStop(1, 'rgba(255, 175, 85, 0)');
+        // (2) bright warm-YELLOW blurry core (user: "a blurry bright yellow dot")
+        const core = ctx.createRadialGradient(sx, sy, 0, sx, sy, radius * 1.05);
+        core.addColorStop(0, `rgba(255, 248, 200, ${t})`);
+        core.addColorStop(0.4, `rgba(255, 226, 130, ${t * 0.92})`);
+        core.addColorStop(1, 'rgba(255, 180, 80, 0)');
         ctx.fillStyle = core;
-        ctx.beginPath(); ctx.arc(sx, sy, radius * 0.95, 0, Math.PI * 2); ctx.fill();
-        // (3) radiating star flare during the bright flash (alternating long/short rays = sparkle)
+        ctx.beginPath(); ctx.arc(sx, sy, radius * 1.05, 0, Math.PI * 2); ctx.fill();
+        // (3) subtle radiating sparkle during the bright flash (shorter rays — it stays a yellow dot)
         if (e.flash > 0) {
           ctx.save(); ctx.translate(sx, sy);
-          ctx.strokeStyle = `rgba(255, 244, 210, ${e.flash * 0.85})`;
-          ctx.lineWidth = 1.4; ctx.lineCap = 'round';
-          const len = radius * (3.2 + e.flash * 2.4);
+          ctx.strokeStyle = `rgba(255, 238, 180, ${e.flash * 0.7})`;
+          ctx.lineWidth = 1.2; ctx.lineCap = 'round';
+          const len = radius * (2.0 + e.flash * 1.4);
           for (let s = 0; s < 6; s++) {
             const ang = (Math.PI * 2 * s / 6) + 0.4;
             const L = (s % 2 === 0) ? len : len * 0.55;
@@ -10809,6 +10816,7 @@ function drawParticles() {
   // smoke pass — ground 'smoke' + airburst 'ismoke' (carries its own screenYOffset)
   state.particles.forEach(p => {
     if (p.kind !== 'smoke' && p.kind !== 'ismoke') return;
+    if (p.delay > 0) return;
     const [sx, sy0] = geoToScreen(p.lat, p.lon);
     // v2.22.7 — lingering intercept clouds recompute their altitude lift at the CURRENT zoom
     // (shared with all other intercept FX via fxLiftOffset) so everything stays locked together.
@@ -10830,6 +10838,7 @@ function drawParticles() {
 
   state.particles.forEach(p => {
     if (p.kind === 'smoke' || p.kind === 'ismoke') return;
+    if (p.delay > 0) return;            // v2.24.26 — delayed embers not drawn until the flash has shown
     const [sx, sy0] = geoToScreen(p.lat, p.lon);
     const sy = sy0 + fxLiftOffset(p);   // v2.23.2 — sparks/debris share the cloud's recomputed altitude
     const a = p.life / p.maxLife;
@@ -13406,11 +13415,14 @@ function createInterceptFlash(lat, lon, screenYOffset, exo, lift, groundProg) {
       const sp = (0.4 + Math.random() * 1.7) * 0.0003;
       state.particles.push({
         kind: 'debris', glow: true, lat, lon, screenYOffset: screenYOffset || 0, lift: lift || null,
-        vLat: Math.sin(a) * sp * 0.5 - 0.0004,    // outward + slight upward, gravity takes over
-        vLon: Math.cos(a) * sp,
-        // close kill → live long enough for gravity to carry them down toward the ground
-        life: closeKill ? (2400 + Math.random() * 2400) : (1000 + Math.random() * 1100),
-        maxLife: closeKill ? 4800 : 2100,
+        // v2.24.26 — TIGHTER spread (less scatter in the sky) so they rain straight DOWN to the ground.
+        vLat: Math.sin(a) * sp * 0.25 - 0.00006,
+        vLon: Math.cos(a) * sp * 0.4,
+        gMul: 0.35,                               // v2.24.26 — SLOWER fall (gentle descent — user wanted slower)
+        delay: 240 + Math.random() * 170,         // v2.24.26 — appear AFTER the flash (flash first, then embers)
+        // long life so the slow descent actually reaches the ground
+        life: closeKill ? (4200 + Math.random() * 3200) : (1800 + Math.random() * 1500),
+        maxLife: closeKill ? 7400 : 3300,
         color: Math.random() < 0.55 ? 'rgb(255, 196, 96)' : 'rgb(255, 120, 44)',
         size: (closeKill ? 1.9 : 1.4) + Math.random() * (closeKill ? 2.4 : 1.9)
       });
@@ -13482,6 +13494,7 @@ function updateExplosions(dt) {
   state.shockwaves = state.shockwaves.filter(s => s.life > 0);
 
   state.particles.forEach(p => {
+    if (p.delay > 0) { p.delay -= dt; return; }   // v2.24.26 — delayed embers wait (the flash shows first)
     p.lat += p.vLat * dt / 16;
     p.lon += p.vLon * dt / 16;
     if (p.kind === 'smoke') {
@@ -13489,8 +13502,9 @@ function updateExplosions(dt) {
       p.vLon *= 0.98;
       p.size *= 1.005;
     } else if (p.kind === 'debris') {
-      // NEW v2.14.0: falling fragments — gravity pulls south-on-screen (lat decreases), with drag
-      p.vLat += 0.0000009 * dt;     // gravity (screen-down)
+      // NEW v2.14.0: falling fragments — gravity pulls them down, with drag.
+      // v2.24.26 — gMul lets the glowing embers fall SLOWER (a gentle descent to the ground).
+      p.vLat += 0.0000009 * (p.gMul || 1) * dt;
       p.vLon *= 0.99;
     } else if (p.kind === 'ismoke') {
       // v2.24.18 — intercept cloud BILLOWS then plateaus and keeps drifting on a steady wind, so it
