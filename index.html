@@ -2075,6 +2075,20 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.24.17 — Audit fixes (B1,B5,B6,B7,B11) + battery role swap + launch-site suppression (user).
+//            B1: AI cluster missiles now DISPERSE in flight — threat.clusterWarhead = isCluster &&
+//            !isPlayerLaunch (was player-only; enemy "(cluster)" MRBMs only did an impact puff).
+//            B5: Binyamina drone event guard ph.drones → ph.id==='drones' (never fired before).
+//            B6: removed the front-advance term using the never-defined w.frontBase (silently 0).
+//            B7: dist/ETA/arc now computed to the actual impact point (impLat/impLon), matching the
+//            post-v2.24.12 targetLat/Lon, so snapped player launches show correct range/ETA.
+//            B11: the launch-time early warning stores threat._orefCity and the terminal alert
+//            reuses it (new preCity arg), so the orange standby always fades on the red.
+//            BATTERY ROLES: heavy rockets → Iron Dome; SRBM (tacBallistic) + cruise → David's Sling
+//            (Iron Dome no longer does cruise/SRBM; David's Sling no longer does heavy rockets;
+//            keeps ballistic/cluster/bomblet backup). priorityFor split accordingly.
+//            LAUNCH SITES: strikeable in EVERY scenario (removed the intel-reveal gate) and a strike
+//            now suppresses the site for 30 s (was a 5-min disable).
 //   2.24.16 — Iron Dome coverage on the GOLAN HEIGHTS (user-supplied coords) + Mt Hermon. Added 5
 //            ironDome entries to BATTERY_LAYOUT's NORTH section (Golan South 32.885/35.713, Katzrin
 //            32.985/35.727, Golan North 1 33.170/35.718, Golan North 2 33.167/35.720, Mt Hermon
@@ -2976,7 +2990,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.24.16';
+const GAME_VERSION = '2.24.17';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -2986,7 +3000,7 @@ const BATTERY_TYPES = {
     capacity: 60, launchers: 3,
     // heavyRocket added — Tamir interceptor IS rated for Fajr-5/M-302/A-120 in terminal phase
     // (real-world: Iron Dome shot down hundreds of heavy rockets in 2014 + 2021 + 2023 wars)
-    canTarget: ['rocket', 'mortar', 'drone', 'cruise', 'tacBallistic', 'heavyRocket', 'submunition'],   // v2.23.0 — Tamir swats cluster bomblets
+    canTarget: ['rocket', 'mortar', 'drone', 'heavyRocket', 'submunition'],   // v2.24.17 — Iron Dome: rockets/mortars/drones/HEAVY rockets (+bomblets). Cruise & SRBM are David's Sling's job now.
     cost: 50000, accuracy: 0.94                 // 0.96 → 0.94 — occasional misses near target are realistic
   },
   davidsSling: {
@@ -2994,7 +3008,7 @@ const BATTERY_TYPES = {
     rangeKm: 200, altitudeRange: '15–60 km',
     speed: 0.16, reloadTime: 4000,             // v2.19.1: 0.18→0.16 — slightly slower terminal intercept
     capacity: 24, launchers: 3,
-    canTarget: ['heavyRocket', 'cruise', 'drone', 'tacBallistic', 'ballistic', 'cluster', 'submunition'],   // v2.23.0
+    canTarget: ['tacBallistic', 'cruise', 'ballistic', 'cluster', 'submunition'],   // v2.24.17 — David's Sling: SRBM (tacBallistic) + cruise (primary), ballistic/cluster backup, bomblet counter. Heavy rockets → Iron Dome.
     cost: 1000000, accuracy: 0.94
   },
   arrow3: {
@@ -5964,6 +5978,32 @@ function pointInPolygon(lat, lon, poly) {
   return inside;
 }
 
+// v2.24.17 — COUNTER-BATTERY: a strike landing within ~10 km of an enemy launch site knocks that
+// site offline for 30 s (no fire from it) — in EVERY scenario. Refreshes silently on repeat bombs so
+// one strike only announces once. Covers both bare launch-site targets and co-located "X base" targets.
+function suppressNearestLaunchSite(lat, lon) {
+  let bestFid = null, bestIdx = -1, bestD = 10;
+  ['hamas', 'hezbollah', 'iran', 'houthi'].forEach(fid => {
+    const f = ENEMIES[fid];
+    if (!f || !f.launchSites) return;
+    f.launchSites.forEach((s, idx) => {
+      const d = haversineKm(lat, lon, s.lat, s.lon);
+      if (d < bestD) { bestD = d; bestFid = fid; bestIdx = idx; }
+    });
+  });
+  if (bestFid == null) return false;
+  state.disabledLaunchSites = state.disabledLaunchSites || {};
+  const key = bestFid + '_' + bestIdx;
+  const wasActive = (state.disabledLaunchSites[key] || 0) > Date.now();
+  state.disabledLaunchSites[key] = Date.now() + 30000;
+  if (!wasActive) {
+    const sName = ENEMIES[bestFid].launchSites[bestIdx].name;
+    logEvent(`◉ Launch site SUPPRESSED: ${sName} (30s) — no fire from this position`, 'success');
+    showNotification('LAUNCHER SUPPRESSED', `${sName} suppressed for 30 s — no fire from this position.`, 'success');
+  }
+  return true;
+}
+
 // АВИАУДАР: F-35 с израильских авиабаз бьёт по конкретной вражеской цели
 function launchAirStrike(lat, lon) {
   if (state.strikesLeft <= 0 || state.strikeCooldown > 0) return;
@@ -5985,12 +6025,14 @@ function launchAirStrike(lat, lon) {
     }
   });
 
-  // === REVEALED LAUNCH SITES (intel scan / KH-11 satellite pass) — clickable while visible ===
-  // If satellite reveal is active, treat enemy launch sites as virtual strike targets.
-  // Damage to a launch site temporarily disables it (for player-as-defender mode).
-  if (!target && Date.now() < (state.intelRevealUntil || 0)) {
+  // === ENEMY LAUNCH SITES — strikeable counter-battery targets ===
+  // v2.24.17 — ALWAYS strikeable (not only during an intel reveal), and chosen if a launch site is
+  // the CLOSEST strikeable thing to the click (bestSiteDist starts at the nearest enemy-target
+  // distance), so clicking on a firing position hits it even with other targets ~80 km away. Works
+  // in EVERY scenario; striking one suppresses it for ~30 s (see below).
+  {
     const FACTIONS = isGaza ? ['hamas'] : ['hamas', 'hezbollah', 'iran', 'houthi'];
-    let bestSite = null, bestSiteDist = Infinity, bestFid = null, bestSiteIdx = -1;
+    let bestSite = null, bestSiteDist = minDist, bestFid = null, bestSiteIdx = -1;
     FACTIONS.forEach(fid => {
       const f = ENEMIES[fid];
       if (!f || !f.launchSites) return;
@@ -6160,6 +6202,7 @@ function updateAirStrikes(dt) {
             const durability = targetDurability(target);
             const dmg = Math.round((dmgRange * gazaMul) / durability);
             target.damage = (target.damage || 0) + dmg;
+            try { suppressNearestLaunchSite(target.lat, target.lon); } catch (e) {}   // v2.24.17 — counter-battery 30s suppress on hit
             if (a.isSingleBombing) a.bombHits = (a.bombHits || 0) + 1;
             if (target.damage >= 100) {
               target.alive = false;
@@ -6168,14 +6211,7 @@ function updateAirStrikes(dt) {
               createExplosion(target.lat, target.lon, 42, 1800, true);
               logEvent(`✈ ★${target.importance} DESTROYED: ${target.name}`, 'success');
               showNotification('DESTROYED', `${target.name} (★${target.importance})`, 'success');
-              // Launch site (intel-revealed) destruction
-              if (target._isLaunchSite) {
-                state.disabledLaunchSites = state.disabledLaunchSites || {};
-                const key = target._siteFaction + '_' + target._siteIdx;
-                state.disabledLaunchSites[key] = Date.now() + 300000;
-                logEvent(`◉ Launch site OFFLINE: ${target.name} (5 min)`, 'success');
-                showNotification('LAUNCHER DESTROYED', `${target.name} disabled for 5 minutes — no fire from this position.`, 'success');
-              }
+              // v2.24.17 — launch-site suppression now handled on hit by suppressNearestLaunchSite()
             }
           }
         }
@@ -6242,6 +6278,7 @@ function updateAirStrikes(dt) {
         const durability = targetDurability(target);
         const damage = Math.round(((40 + Math.random() * 40) * gazaMul) / durability);
         target.damage = (target.damage || 0) + damage;
+        try { suppressNearestLaunchSite(target.lat, target.lon); } catch (e) {}   // v2.24.17 — counter-battery 30s suppress on hit
         const reward = STRIKE_REWARD[target.type] || 1500;
         // Don't pay the player for IDF strikes when they're playing AS the attacker (they're being struck, not striking)
         if (state.playAs !== 'attacker') state.money += reward;
@@ -6256,14 +6293,7 @@ function updateAirStrikes(dt) {
           createExplosion(a.targetLat, a.targetLon, 38, 1800, true);
           logEvent(`✈ ★${target.importance} DESTROYED: ${target.name} +$${reward}`, 'success');
           showNotification('TARGET DESTROYED', `${target.name} +$${(reward/1000).toFixed(1)}K`, 'success');
-          // === LAUNCH SITE DESTRUCTION → disable that site for 5 minutes (no incoming threats from there) ===
-          if (target._isLaunchSite) {
-            state.disabledLaunchSites = state.disabledLaunchSites || {};
-            const key = target._siteFaction + '_' + target._siteIdx;
-            state.disabledLaunchSites[key] = Date.now() + 300000;
-            logEvent(`◉ Launch site OFFLINE: ${target.name} (5 min)`, 'success');
-            showNotification('LAUNCHER DESTROYED', `${target.name} disabled for 5 minutes — no fire from this position.`, 'success');
-          }
+          // v2.24.17 — launch-site suppression now handled on hit by suppressNearestLaunchSite()
           // === SANDBOX MISSION HOOK: enemy_strikes / enemy_strike_hv ===
           if (state.sandbox && state.sandbox.missionStats) {
             state.sandbox.missionStats.enemyStrikes++;
@@ -10958,8 +10988,12 @@ function spawnThreat(typeId, enemyId, targetCityId, explicitLat, explicitLon, ex
   }
   if (!targetCity) return;
 
-  const dist = geoDist(sLat, sLon, targetCity.lat, targetCity.lon);
-  const distKm = haversineKm(sLat, sLon, targetCity.lat, targetCity.lon);
+  // v2.24.17 (B7) — the threat IMPACTS at the actual aimed point (explicit player launch) or the
+  // city centre (AI). Compute dist/ETA/arc to that SAME point so displayed range/ETA match the flight.
+  const impLat = (typeof explicitLat === 'number') ? explicitLat : targetCity.lat;
+  const impLon = (typeof explicitLon === 'number') ? explicitLon : targetCity.lon;
+  const dist = geoDist(sLat, sLon, impLat, impLon);
+  const distKm = haversineKm(sLat, sLon, impLat, impLon);
 
   // Speed scaling per faction — distance-aware so flight feels right
   // Hamas: short range, slow propellant — keep at 1.0×; Hezbollah: 1.2×; Iran/Houthi: 1.5× (long-range jets)
@@ -10974,12 +11008,16 @@ function spawnThreat(typeId, enemyId, targetCityId, explicitLat, explicitLon, ex
     siteName: site.name,
     weaponName: weapon,
     isCluster,
+    // v2.24.17 (B1) — an AI cluster missile (name-based, e.g. "Shahab-3 (cluster)") now actually
+    // disperses in flight: clusterWarhead drives splitCluster/submunitions (was player-only before).
+    // Gated to !isPlayerLaunch so the player's cluster stays controlled by the explicit UI toggle
+    // (applyRoute sets it true) and a random "(cluster)" name doesn't auto-disperse their shot.
+    clusterWarhead: isCluster && !isPlayerLaunch,
     startLat: sLat, startLon: sLon,
     curLat: sLat, curLon: sLon,
-    // v2.24.12 — player launches impact the ACTUAL aimed/spread point, not the snapped city centre,
-    // so a spread salvo scatters across the city and onto open terrain instead of piling on the centre.
-    targetLat: (typeof explicitLat === 'number') ? explicitLat : targetCity.lat,
-    targetLon: (typeof explicitLon === 'number') ? explicitLon : targetCity.lon,
+    // v2.24.12 — player launches impact the ACTUAL aimed/spread point, not the snapped city centre;
+    // v2.24.17 (B7) — uses the same impLat/impLon as the dist/ETA/arc above.
+    targetLat: impLat, targetLon: impLon,
     targetCity,
     speed: tType.speed * speedScale,
     arcRatio: tType.arcRatio || 0.25,
@@ -11053,6 +11091,7 @@ function spawnThreat(typeId, enemyId, targetCityId, explicitLat, explicitLon, ex
   if (isTrueBallistic) {
     try {
       const oc = resolveOrefCity(targetCity);
+      threat._orefCity = oc;   // v2.24.17 (B11) — terminal fade reuses this exact zone so the orange standby always fades on the red
       if (oc) triggerEarlyWarning(oc);
     } catch (e) { console.warn('[OREF] early-warn failed:', e); }
     // alertFired stays FALSE so updateThreats fires the regional corridor alert at terminal phase
@@ -11172,7 +11211,9 @@ function resolveOrefCity(targetLike) {
   }
   return best;
 }
-function triggerOrefZoneAlert(targetCity, threatType, approach) {
+function triggerOrefZoneAlert(targetCity, threatType, approach, preCity) {
+  // preCity (v2.24.17, B11): a pre-resolved OREF zone (from the launch-time early warning) to reuse,
+  // so the terminal red corridor + its early-warning fade key off the EXACT same zone/region.
   // approach (v2.24.4, optional): {fromLat, fromLon} — where the threat is coming FROM. For
   // ballistic/cluster the regional alert then forms a CORRIDOR along the approach path (sirens
   // start from where the missile enters and run down to the target — real Tzofar pattern, e.g.
@@ -11181,7 +11222,7 @@ function triggerOrefZoneAlert(targetCity, threatType, approach) {
     console.warn('[OREF] Data not loaded');
     return;
   }
-  let orefCity = lookupOrefCity(targetCity.name);
+  let orefCity = preCity || lookupOrefCity(targetCity.name);
   // Fallback: closest by coordinates (only if name lookup failed)
   if (!orefCity) {
     const idx = buildOrefIndex();
@@ -11697,7 +11738,8 @@ function updateThreats(dt) {
     if (!t.alertFired && t.progress >= threshold) {
       t.alertFired = true;
       // v2.24.4 — pass the launch point so ballistic alerts form a corridor along the approach
-      triggerOrefZoneAlert(t.targetCity, t.type, { fromLat: t.startLat, fromLon: t.startLon });
+      // v2.24.17 (B11) — reuse the early-warning's resolved zone so the orange standby fades reliably
+      triggerOrefZoneAlert(t.targetCity, t.type, { fromLat: t.startLat, fromLon: t.startLon }, t._orefCity);
       // For drones (which suppress launch-time alert), also fire shelter alert NOW
       if (t.type === 'drone' && t.targetCity && t.targetCity.population > 0) {
         triggerAlert(t.targetCity);
@@ -12629,14 +12671,25 @@ function findBestBattery(threat, ripple) {
   // Per-threat-type priority: ballistic → Arrow-3 first; cruise → D.Sling first; else cheap-first
   const isBallistic = threat.type === 'ballistic' || threat.type === 'tacBallistic';
   const priorityFor = (b) => {
+    if (threat.type === 'tacBallistic') {   // v2.24.17 — SRBM → David's Sling primary (Arrow-3 is exo-atmo, for MRBM)
+      if (b.type === 'davidsSling') return 0;
+      if (b.type === 'thaad')       return 1;
+      if (b.type === 'arrow3')      return 2;
+      return 3;
+    }
     if (isBallistic) {
-      // Ballistic: Arrow-3 first (exo-atmo, fastest), then THAAD (US backup), then D.Sling, then Iron Dome
+      // True ballistic (MRBM): Arrow-3 first (exo-atmo, fastest), then THAAD (US backup), then D.Sling
       if (b.type === 'arrow3')      return 0;
       if (b.type === 'thaad')       return 1;
       if (b.type === 'davidsSling') return 2;
       return 3;          // Iron Dome — last resort for ballistic
     }
-    if (threat.type === 'cruise' || threat.type === 'heavyRocket') {
+    if (threat.type === 'heavyRocket') {   // v2.24.17 — heavy rockets are Iron Dome's job
+      if (b.type === 'ironDome')    return 0;
+      if (b.type === 'davidsSling') return 1;
+      return 2;
+    }
+    if (threat.type === 'cruise') {        // v2.24.17 — cruise → David's Sling
       if (b.type === 'davidsSling') return 0;
       if (b.type === 'ironDome')    return 1;
       return 2;
@@ -21470,17 +21523,15 @@ function tickHezbollahWar(dt) {
     try { createExplosion(HEZ_DAHIEH.lat, HEZ_DAHIEH.lon, 40, 2000, true); } catch (e) {}
   }
   if (ph.iranSalvo && !w.iranSalvoFired && pFrac >= 0.25) { w.iranSalvoFired = true; hezIranSalvo(); }
-  if (ph.drones && !w.droneEventFired && pFrac >= 0.5) {
+  if (ph.id === 'drones' && !w.droneEventFired && pFrac >= 0.5) {   // v2.24.17 (B5) — was ph.drones (no such prop) → never fired
     w.droneEventFired = true;
     logEvent('★ Binyamina drone strike — a Golani base mess hall hit, 4 soldiers killed', 'danger');
     showNotification('DRONE STRIKE · BINYAMINA', 'A Hezbollah attack drone evades air defences (masked by a rocket barrage) and hits a Golani training base near Binyamina — 4 soldiers killed.', 'danger');
     w.ilKilled += 4;
   }
-  // ground front advances toward the Litani during ground phases
-  if (ph.ground) {
-    const target = ph.front;
-    if (w.front < target) w.front = Math.min(target, w.front + (gdtSec / (ph.durationMs/1000)) * (target - (w.frontBase||0)) + 0.0002 * gdtSec);
-  }
+  // ground front advances toward the Litani during ground phases.
+  // v2.24.17 (B6) — removed the broken incremental that referenced the never-defined w.frontBase
+  // (silently 0); the pFrac ramp below already drives the front smoothly to each phase's ph.front.
   w.front = Math.max(w.front, ph.ground ? ph.front * pFrac : w.front);
   // v2.24.7 — LAUNCH SITES OVERRUN BY THE IDF FRONT can no longer fire. The front line latitude is
   // 33.10 (Blue Line) → 33.35 (Litani) as w.front 0→1 — same line the border-launch retreat uses.
