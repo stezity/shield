@@ -2075,6 +2075,14 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.24.22 — Loop/smoke/cloud realism pass (user: the loop is too "dumb"/mechanical; the smoke is
+//            too flat; Iron Dome intercept clouds should start small then expand big). (1) LOOP is now
+//            a teardrop/pigtail, not a perfect ring: tighter radius (~0.9-1.6 km), varied per missile
+//            (size + CW/CCW), sweeps a bit PAST a full turn (2.25π) so entry/exit cross, with a sin
+//            envelope easing the radius in/out for a smooth natural curve. (2) SMOKE less flat: added
+//            a WIDE soft low-alpha fuzz halo around the spine (volume, still one continuous stroke)
+//            plus denser tail wisping. (3) Intercept cloud starts SMALL (base 1.4-3.1) and EXPANDS
+//            big (~6-9× → asymptotic billow) instead of a medium static puff.
 //   2.24.21 — Contrail/loop/dot refinements (user, reference photos). (1) Trail is now a CONTINUOUS
 //            thin transparent line like real Iron Dome smoke: trail length cap 46→150 (spans the
 //            whole flight, no short stub), and the day trail is two thin unbroken passes (soft haze
@@ -3025,7 +3033,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.24.21';
+const GAME_VERSION = '2.24.22';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -10469,7 +10477,14 @@ function drawInterceptors() {
       // point, so it's one clean line the wind bends. Only the OLDER tail wisps out (light puffs);
       // the head stays a crisp line. No fat lumpy puffs that read as a dashed/cut strip.
       ctx.globalAlpha = 1;
-      ctx.strokeStyle = `rgba(233, 240, 248, ${0.085 * fadeMul})`;
+      // v2.24.21b — give the line VOLUME (it was too flat): a WIDE soft low-alpha fuzz halo around the
+      // spine. Continuous (one stroke), so it reads as a soft smoke column, not a flat vector line.
+      ctx.strokeStyle = `rgba(228, 236, 246, ${0.05 * fadeMul})`;
+      ctx.lineWidth = 8.5 * trailMul;
+      ctx.beginPath();
+      pts.forEach((p, idx) => { if (idx === 0) ctx.moveTo(p.sx, p.sy); else ctx.lineTo(p.sx, p.sy); });
+      ctx.stroke();
+      ctx.strokeStyle = `rgba(233, 240, 248, ${0.09 * fadeMul})`;
       ctx.lineWidth = 3.6 * trailMul;
       ctx.beginPath();
       pts.forEach((p, idx) => { if (idx === 0) ctx.moveTo(p.sx, p.sy); else ctx.lineTo(p.sx, p.sy); });
@@ -10479,13 +10494,13 @@ function drawInterceptors() {
       ctx.beginPath();
       pts.forEach((p, idx) => { if (idx === 0) ctx.moveTo(p.sx, p.sy); else ctx.lineTo(p.sx, p.sy); });
       ctx.stroke();
-      // light tail wisping — sparse soft puffs ONLY on older smoke (dispersal); head stays a crisp line
-      for (let idx = 0; idx < N; idx += 4) {
+      // tail wisping — soft billowing puffs on older smoke (dispersal volume); head stays a crisp line
+      for (let idx = 0; idx < N; idx += 3) {
         const p = pts[idx];
         const ageF = Math.min(1, p.age / 7000);
-        if (ageF < 0.18) continue;
-        const r = (2.0 + ageF * 7.0) * trailMul;
-        const a = 0.05 * (1 - ageF * 0.5) * fadeMul;
+        if (ageF < 0.16) continue;
+        const r = (2.5 + ageF * 9.0) * trailMul;
+        const a = 0.055 * (1 - ageF * 0.5) * fadeMul;
         if (a <= 0.004) continue;
         const g = ctx.createRadialGradient(p.sx, p.sy, 0, p.sx, p.sy, r);
         g.addColorStop(0, `rgba(240, 245, 251, ${a})`);
@@ -13040,14 +13055,23 @@ function updateInterceptors(dt) {
       // landing/descent stage (progress 0.6–0.82), and only while the Tamir is still ~>1.3 km out so
       // there's room to loop and then line up for the close terminal kill (user: "the loop is done at
       // the border to intercept the rocket precisely when it's already in the landing stage").
+      // v2.24.21b — a REALISTIC teardrop/pigtail, not a mechanical perfect ring: tighter radius,
+      // varied per missile (size + CW/CCW direction), and it sweeps a bit PAST a full turn (2.25π) so
+      // the entry and exit cross at an angle (a natural pigtail) instead of closing into a clean circle.
+      // The radius eases in/out (sin envelope) so the curve enters and leaves the path smoothly.
+      const _LOOP_MAX = Math.PI * 2.25;
       if (i._loops && threat.progress > 0.6 && threat.progress < 0.82 && dToLead > 0.012) {
-        if (i._loopPh == null || i._loopPh < Math.PI * 2) {
-          const lw = 7.5;                                  // ~0.84 s per full loop
+        if (i._loopPh == null || i._loopPh < _LOOP_MAX) {
+          if (i._loopR == null)   i._loopR   = 0.0085 + Math.random() * 0.006;   // ~0.9–1.6 km, varied
+          if (i._loopDir == null) i._loopDir = (Math.random() < 0.5 ? 1 : -1);   // CW or CCW
+          const lw = 9.0;
           const prevLp = (i._loopPh == null ? (i._loopPh = 0) : i._loopPh);
-          i._loopPh = Math.min(Math.PI * 2, prevLp + (dt / 1000) * lw);
+          i._loopPh = Math.min(_LOOP_MAX, prevLp + (dt / 1000) * lw);
+          // ease the radius in over the first ~30% and out over the last ~30% (smooth entry/exit)
+          const env = Math.min(1, Math.sin(Math.min(1, i._loopPh / _LOOP_MAX) * Math.PI) * 1.6);
+          const R = i._loopR * Math.max(0.25, env);
           const fwLat = dLatI / dToLead, fwLon = dLonI / dToLead;
-          const ppLat = -fwLon, ppLon = fwLat;
-          const R = 0.018;                                 // ~2 km loop radius — a clear visible 360
+          const ppLat = -fwLon * i._loopDir, ppLon = fwLat * i._loopDir;
           i.curLat += ppLat * (Math.sin(i._loopPh) - Math.sin(prevLp)) * R
                     + fwLat * (Math.cos(i._loopPh) - Math.cos(prevLp)) * R;
           i.curLon += ppLon * (Math.sin(i._loopPh) - Math.sin(prevLp)) * R
@@ -13326,7 +13350,7 @@ function createInterceptFlash(lat, lon, screenYOffset, exo, lift, groundProg) {
       const a = Math.random() * Math.PI * 2;
       const sp = (0.04 + Math.random() * 0.10) * 0.0008;   // a touch more initial spread (puff opens up)
       const life = 24000 + Math.random() * 9000;           // ~24-33 s
-      const baseSize = 2.2 + Math.random() * 2.4;
+      const baseSize = 1.4 + Math.random() * 1.7;   // v2.24.21 — SMALL puff at first (user)
       state.particles.push({
         kind: 'ismoke', lat, lon, screenYOffset: screenYOffset || 0,
         lift: lift || null,                        // v2.22.7 — recompute altitude at current zoom
@@ -13336,7 +13360,7 @@ function createInterceptFlash(lat, lon, screenYOffset, exo, lift, groundProg) {
         life: life, maxLife: life,
         shade: 206 + Math.random() * 26,           // bright cordite-white
         size: baseSize,
-        maxSize: baseSize * (3.0 + Math.random() * 2.0)   // billows to ~3-5× then plateaus & drifts
+        maxSize: baseSize * (5.5 + Math.random() * 3.5)   // v2.24.21 — then EXPANDS into a big cloud (~6-9×)
       });
     }
     // brief warm fire sparks at the contact point (the warhead flash)
