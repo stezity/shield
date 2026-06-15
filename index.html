@@ -2075,6 +2075,12 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.24.25 — Prettier NIGHT intercept (user, reference photos). (1) FLARE: the night intercept burst
+//            is now a vivid orange-white detonation — a wide orange bloom + a white-hot core + a
+//            radiating star flare (alternating long/short rays) during the flash, instead of a plain
+//            disc. Day burst unchanged. (2) EMBERS: the night debris is a fuller shower (16-24 → 24-36)
+//            of GLOWING orange embers — each drawn as a soft halo + bright hot core (glow:true) that
+//            sprays out then rains down under gravity, like the reference falling-spark footage.
 //   2.24.24 — Burkan range fix + lingering/wavy/diffuse smoke (user). (1) BURKAN-1 was a Hezbollah
 //            rocket name with a 60 km range, so the picker used it for any 25-60 km strike — wrong:
 //            it's a short-range (~5 km) heavy-warhead BORDER rocket. Set range 60→5 and added proper
@@ -3051,7 +3057,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.24.24';
+const GAME_VERSION = '2.24.25';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -10715,6 +10721,40 @@ function drawExplosions() {
     // daylight (the grey smoke puff carries it) and big & bright at night. radius comes from
     // e.maxRadius (day 13 / night 20), so one code path handles both.
     if (e.intercept) {
+      if (e.night) {
+        // v2.24.25 — vivid orange-white detonation FLARE (real Iron Dome night kill, reference).
+        // (1) wide soft orange bloom
+        const bloom = ctx.createRadialGradient(sx, sy, 0, sx, sy, radius * 3.0);
+        bloom.addColorStop(0, `rgba(255, 198, 110, ${t * 0.75})`);
+        bloom.addColorStop(0.4, `rgba(255, 138, 48, ${t * 0.42})`);
+        bloom.addColorStop(1, 'rgba(255, 90, 20, 0)');
+        ctx.fillStyle = bloom;
+        ctx.beginPath(); ctx.arc(sx, sy, radius * 3.0, 0, Math.PI * 2); ctx.fill();
+        // (2) white-hot core
+        const core = ctx.createRadialGradient(sx, sy, 0, sx, sy, radius * 0.95);
+        core.addColorStop(0, `rgba(255, 255, 250, ${t})`);
+        core.addColorStop(0.45, `rgba(255, 234, 168, ${t * 0.9})`);
+        core.addColorStop(1, 'rgba(255, 175, 85, 0)');
+        ctx.fillStyle = core;
+        ctx.beginPath(); ctx.arc(sx, sy, radius * 0.95, 0, Math.PI * 2); ctx.fill();
+        // (3) radiating star flare during the bright flash (alternating long/short rays = sparkle)
+        if (e.flash > 0) {
+          ctx.save(); ctx.translate(sx, sy);
+          ctx.strokeStyle = `rgba(255, 244, 210, ${e.flash * 0.85})`;
+          ctx.lineWidth = 1.4; ctx.lineCap = 'round';
+          const len = radius * (3.2 + e.flash * 2.4);
+          for (let s = 0; s < 6; s++) {
+            const ang = (Math.PI * 2 * s / 6) + 0.4;
+            const L = (s % 2 === 0) ? len : len * 0.55;
+            ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(Math.cos(ang) * L, Math.sin(ang) * L); ctx.stroke();
+          }
+          ctx.restore(); ctx.lineCap = 'butt';
+          ctx.fillStyle = `rgba(255, 250, 232, ${e.flash * 0.95})`;
+          ctx.beginPath(); ctx.arc(sx, sy, radius * 1.1, 0, Math.PI * 2); ctx.fill();
+        }
+        return;
+      }
+      // DAY intercept burst (the grey smoke puff carries the visual)
       const iOuter = ctx.createRadialGradient(sx, sy, 0, sx, sy, radius * 2.3);
       iOuter.addColorStop(0, `rgba(255, 244, 200, ${t * 0.85})`);
       iOuter.addColorStop(0.4, `rgba(255, 168, 68, ${t * 0.48})`);
@@ -10794,11 +10834,23 @@ function drawParticles() {
     const sy = sy0 + fxLiftOffset(p);   // v2.23.2 — sparks/debris share the cloud's recomputed altitude
     const a = p.life / p.maxLife;
     const sz = (p.size || 1.5);
-    ctx.fillStyle = p.color.replace(')', `, ${a})`).replace('rgb', 'rgba');
-    ctx.fillRect(sx - sz/2, sy - sz/2, sz, sz);
-    // лёгкое свечение вокруг искры
-    ctx.fillStyle = p.color.replace(')', `, ${a * 0.4})`).replace('rgb', 'rgba');
-    ctx.fillRect(sx - sz, sy - sz, sz * 2, sz * 2);
+    if (p.glow) {
+      // v2.24.25 — glowing ember: soft orange halo + bright hot core (the falling firework-spark look)
+      const rgb = p.color.replace('rgb(', '').replace(')', '');
+      const halo = ctx.createRadialGradient(sx, sy, 0, sx, sy, sz * 2.6);
+      halo.addColorStop(0, `rgba(${rgb}, ${a * 0.6})`);
+      halo.addColorStop(1, `rgba(${rgb}, 0)`);
+      ctx.fillStyle = halo;
+      ctx.beginPath(); ctx.arc(sx, sy, sz * 2.6, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = `rgba(255, 246, 222, ${a})`;
+      ctx.beginPath(); ctx.arc(sx, sy, sz * 0.75, 0, Math.PI * 2); ctx.fill();
+    } else {
+      ctx.fillStyle = p.color.replace(')', `, ${a})`).replace('rgb', 'rgba');
+      ctx.fillRect(sx - sz/2, sy - sz/2, sz, sz);
+      // лёгкое свечение вокруг искры
+      ctx.fillStyle = p.color.replace(')', `, ${a * 0.4})`).replace('rgb', 'rgba');
+      ctx.fillRect(sx - sz, sy - sz, sz * 2, sz * 2);
+    }
   });
 }
 
@@ -13347,20 +13399,20 @@ function createInterceptFlash(lat, lon, screenYOffset, exo, lift, groundProg) {
 
   if (isNight) {
     // NIGHT — glowing falling embers + a bright warm spark spray, no smoke.
-    const n = 16 + Math.floor(Math.random() * 8);
+    // v2.24.25 — a fuller shower of GLOWING orange embers that spray out then rain down (reference).
+    const n = 24 + Math.floor(Math.random() * 12);
     for (let i = 0; i < n; i++) {
       const a = Math.random() * Math.PI * 2;
-      const sp = (0.4 + Math.random() * 1.6) * 0.0003;   // v2.23.5 — tighter falling embers
+      const sp = (0.4 + Math.random() * 1.7) * 0.0003;
       state.particles.push({
-        kind: 'debris', lat, lon, screenYOffset: screenYOffset || 0, lift: lift || null,
+        kind: 'debris', glow: true, lat, lon, screenYOffset: screenYOffset || 0, lift: lift || null,
         vLat: Math.sin(a) * sp * 0.5 - 0.0004,    // outward + slight upward, gravity takes over
         vLon: Math.cos(a) * sp,
-        // close kill → live long enough for gravity to carry them down to the ground
-        life: closeKill ? (2200 + Math.random() * 2300) : (900 + Math.random() * 1000),
-        maxLife: closeKill ? 4500 : 1900,
-        color: Math.random() < 0.5 ? 'rgb(255, 210, 120)' : 'rgb(255, 120, 50)',
-        // v2.24.21 — close kills throw bigger glowing embers (the reference: bright orange dots raining down)
-        size: (closeKill ? 1.9 : 1.3) + Math.random() * (closeKill ? 2.4 : 1.9)
+        // close kill → live long enough for gravity to carry them down toward the ground
+        life: closeKill ? (2400 + Math.random() * 2400) : (1000 + Math.random() * 1100),
+        maxLife: closeKill ? 4800 : 2100,
+        color: Math.random() < 0.55 ? 'rgb(255, 196, 96)' : 'rgb(255, 120, 44)',
+        size: (closeKill ? 1.9 : 1.4) + Math.random() * (closeKill ? 2.4 : 1.9)
       });
     }
     const sparks = 14 + Math.floor(Math.random() * 8);
