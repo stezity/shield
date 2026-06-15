@@ -2075,6 +2075,15 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.24.23 — Dial-back pass (user: clouds too bright/big & screen-filling; loop too rigid + should
+//            be right next to the rocket & soft; smoke still cuts short + still too dense). (1) CLOUDS:
+//            fewer puffs (6-9→4-6), small base, expand to only ~2.6-4.2× (was 6-9×), and dimmer
+//            (draw alpha 0.55→0.38). (2) LOOP: now a SOFT clean ~2π loop (dropped the past-2π pigtail
+//            cross), slower (lw 9→6), strong sin ease-in/out on the radius, and fired only when the
+//            Tamir is already CLOSE to the threat in its landing stage (dToLead 0.02-0.06 ≈ 2-6.5 km)
+//            — "right next to the rocket". (3) SMOKE: thinner + lighter + more transparent (halo
+//            8.5px@.05→4.6px@.032, core 1.5@.30→1.25@.24, wisp sparser/far-tail-only) so it's not
+//            dense; trail cap 150→300 so the continuous line reaches back to the launch (was cut).
 //   2.24.22 — Loop/smoke/cloud realism pass (user: the loop is too "dumb"/mechanical; the smoke is
 //            too flat; Iron Dome intercept clouds should start small then expand big). (1) LOOP is now
 //            a teardrop/pigtail, not a perfect ring: tighter radius (~0.9-1.6 km), varied per missile
@@ -3033,7 +3042,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.24.22';
+const GAME_VERSION = '2.24.23';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -10477,30 +10486,31 @@ function drawInterceptors() {
       // point, so it's one clean line the wind bends. Only the OLDER tail wisps out (light puffs);
       // the head stays a crisp line. No fat lumpy puffs that read as a dashed/cut strip.
       ctx.globalAlpha = 1;
-      // v2.24.21b — give the line VOLUME (it was too flat): a WIDE soft low-alpha fuzz halo around the
-      // spine. Continuous (one stroke), so it reads as a soft smoke column, not a flat vector line.
-      ctx.strokeStyle = `rgba(228, 236, 246, ${0.05 * fadeMul})`;
-      ctx.lineWidth = 8.5 * trailMul;
+      // v2.24.23 — THIN, LIGHT, TRANSPARENT continuous contrail (was too dense/flat): a faint soft
+      // halo for a touch of softness + a crisp THIN core for the line. Low opacity → see-through, not
+      // a dense band; the long trail (raised cap) keeps it reaching back to the launch (was cut short).
+      ctx.strokeStyle = `rgba(228, 236, 246, ${0.032 * fadeMul})`;
+      ctx.lineWidth = 4.6 * trailMul;
       ctx.beginPath();
       pts.forEach((p, idx) => { if (idx === 0) ctx.moveTo(p.sx, p.sy); else ctx.lineTo(p.sx, p.sy); });
       ctx.stroke();
-      ctx.strokeStyle = `rgba(233, 240, 248, ${0.09 * fadeMul})`;
-      ctx.lineWidth = 3.6 * trailMul;
+      ctx.strokeStyle = `rgba(236, 243, 250, ${0.06 * fadeMul})`;
+      ctx.lineWidth = 2.4 * trailMul;
       ctx.beginPath();
       pts.forEach((p, idx) => { if (idx === 0) ctx.moveTo(p.sx, p.sy); else ctx.lineTo(p.sx, p.sy); });
       ctx.stroke();
-      ctx.strokeStyle = `rgba(246, 250, 254, ${0.30 * fadeMul})`;
-      ctx.lineWidth = 1.5 * trailMul;
+      ctx.strokeStyle = `rgba(247, 250, 254, ${0.24 * fadeMul})`;
+      ctx.lineWidth = 1.25 * trailMul;
       ctx.beginPath();
       pts.forEach((p, idx) => { if (idx === 0) ctx.moveTo(p.sx, p.sy); else ctx.lineTo(p.sx, p.sy); });
       ctx.stroke();
-      // tail wisping — soft billowing puffs on older smoke (dispersal volume); head stays a crisp line
-      for (let idx = 0; idx < N; idx += 3) {
+      // VERY light wisping on the FAR tail only (sparse) — slight dispersal, keeps the line transparent
+      for (let idx = 0; idx < N; idx += 6) {
         const p = pts[idx];
         const ageF = Math.min(1, p.age / 7000);
-        if (ageF < 0.16) continue;
-        const r = (2.5 + ageF * 9.0) * trailMul;
-        const a = 0.055 * (1 - ageF * 0.5) * fadeMul;
+        if (ageF < 0.35) continue;
+        const r = (2.0 + ageF * 5.5) * trailMul;
+        const a = 0.028 * (1 - ageF * 0.5) * fadeMul;
         if (a <= 0.004) continue;
         const g = ctx.createRadialGradient(p.sx, p.sy, 0, p.sx, p.sy, r);
         g.addColorStop(0, `rgba(240, 245, 251, ${a})`);
@@ -10742,7 +10752,7 @@ function drawParticles() {
     // v2.22.7 — lingering intercept clouds recompute their altitude lift at the CURRENT zoom
     // (shared with all other intercept FX via fxLiftOffset) so everything stays locked together.
     const sy = sy0 + fxLiftOffset(p);
-    const a = (p.life / p.maxLife) * (p.kind === 'ismoke' ? 0.55 : 0.45);
+    const a = (p.life / p.maxLife) * (p.kind === 'ismoke' ? 0.38 : 0.45);   // v2.24.23 — intercept cloud dimmer (0.55→0.38; was too bright)
     if (a <= 0) return;
     const r = p.size;
     // v2.22.0 — ground blast smoke gets a warm brown-grey tint (dirt + soot); the airburst
@@ -13059,17 +13069,23 @@ function updateInterceptors(dt) {
       // varied per missile (size + CW/CCW direction), and it sweeps a bit PAST a full turn (2.25π) so
       // the entry and exit cross at an angle (a natural pigtail) instead of closing into a clean circle.
       // The radius eases in/out (sin envelope) so the curve enters and leaves the path smoothly.
-      const _LOOP_MAX = Math.PI * 2.25;
-      if (i._loops && threat.progress > 0.6 && threat.progress < 0.82 && dToLead > 0.012) {
+      // v2.24.23 — SOFT loop RIGHT NEXT TO the rocket (user): fire it only when the Tamir is already
+      // close to the threat in its landing stage (dToLead ≈ 2.2–6.6 km), and make it a GENTLE clean
+      // loop — a smooth ~2π curve (no hard past-2π pigtail cross), slower rotation, and a strong
+      // ease-in/ease-out on the radius so it opens and closes softly instead of snapping into a ring.
+      const _LOOP_MAX = Math.PI * 2;
+      // distance to the ROCKET ITSELF (not the lead/aim point) — so the loop is flown right next to it
+      const _dThreat = Math.hypot(threat.curLat - i.curLat, threat.curLon - i.curLon);
+      if (i._loops && threat.progress > 0.6 && _dThreat > 0.028 && _dThreat < 0.062) {
         if (i._loopPh == null || i._loopPh < _LOOP_MAX) {
-          if (i._loopR == null)   i._loopR   = 0.0085 + Math.random() * 0.006;   // ~0.9–1.6 km, varied
-          if (i._loopDir == null) i._loopDir = (Math.random() < 0.5 ? 1 : -1);   // CW or CCW
-          const lw = 9.0;
+          if (i._loopR == null)   i._loopR   = 0.010 + Math.random() * 0.006;   // ~1.1–1.8 km, varied
+          if (i._loopDir == null) i._loopDir = (Math.random() < 0.5 ? 1 : -1);  // CW or CCW
+          const lw = 6.0;                                                       // gentle ~1.05 s loop
           const prevLp = (i._loopPh == null ? (i._loopPh = 0) : i._loopPh);
           i._loopPh = Math.min(_LOOP_MAX, prevLp + (dt / 1000) * lw);
-          // ease the radius in over the first ~30% and out over the last ~30% (smooth entry/exit)
-          const env = Math.min(1, Math.sin(Math.min(1, i._loopPh / _LOOP_MAX) * Math.PI) * 1.6);
-          const R = i._loopR * Math.max(0.25, env);
+          // strong sin ease so the curve enters/leaves the flight path softly (not a hard ring)
+          const env = Math.sin(Math.min(1, i._loopPh / _LOOP_MAX) * Math.PI);
+          const R = i._loopR * Math.max(0.15, env);
           const fwLat = dLatI / dToLead, fwLon = dLonI / dToLead;
           const ppLat = -fwLon * i._loopDir, ppLon = fwLat * i._loopDir;
           i.curLat += ppLat * (Math.sin(i._loopPh) - Math.sin(prevLp)) * R
@@ -13093,9 +13109,9 @@ function updateInterceptors(dt) {
       _altFrac = null;   // fall back to the interceptor's own arc at render time
     }
     i.trail.push({ lat: i.curLat, lon: i.curLon, prog: _prog, altFrac: _altFrac, t: Date.now() });
-    // v2.24.21 — LONG trail (was 46 ≈ <1 s) so the contrail is a continuous line all the way back to
-    // the launch, like real Iron Dome footage, not a short stub that ends behind the missile.
-    if (i.trail.length > 150) i.trail.shift();
+    // v2.24.23 — LONGER trail (150 → 300) so the continuous line reaches all the way back to the
+    // launch (was still getting cut short behind the missile), like real Iron Dome footage.
+    if (i.trail.length > 300) i.trail.shift();
 
     // РЕАЛЬНАЯ проверка контакта — SWEPT: closest distance from the threat to the path the
     // interceptor traced THIS frame (prev→cur), so a fast interceptor can't tunnel past it.
@@ -13344,13 +13360,13 @@ function createInterceptFlash(lat, lon, screenYOffset, exo, lift, groundProg) {
     // touch then slowly fading. Over a brief warm warhead flash. v2.22.7: long life, small size.
     // v2.24.18 — the intercept cloud now BILLOWS out (fast then plateau) and drifts on a steady
     // wind so it shears like a real Iron Dome / David's Sling kill cloud instead of freezing as a dot.
-    const puffs = 6 + Math.floor(Math.random() * 4);
+    const puffs = 4 + Math.floor(Math.random() * 3);   // v2.24.23 — fewer puffs (was 6-9; were too big on screen)
     const windLon = (Math.random() < 0.5 ? -1 : 1) * (0.000006 + Math.random() * 0.000007);
     for (let i = 0; i < puffs; i++) {
       const a = Math.random() * Math.PI * 2;
-      const sp = (0.04 + Math.random() * 0.10) * 0.0008;   // a touch more initial spread (puff opens up)
-      const life = 24000 + Math.random() * 9000;           // ~24-33 s
-      const baseSize = 1.4 + Math.random() * 1.7;   // v2.24.21 — SMALL puff at first (user)
+      const sp = (0.04 + Math.random() * 0.10) * 0.0008;   // a touch of initial spread (puff opens up)
+      const life = 22000 + Math.random() * 8000;           // ~22-30 s
+      const baseSize = 1.2 + Math.random() * 1.4;   // v2.24.23 — SMALL puff at first
       state.particles.push({
         kind: 'ismoke', lat, lon, screenYOffset: screenYOffset || 0,
         lift: lift || null,                        // v2.22.7 — recompute altitude at current zoom
@@ -13360,7 +13376,7 @@ function createInterceptFlash(lat, lon, screenYOffset, exo, lift, groundProg) {
         life: life, maxLife: life,
         shade: 206 + Math.random() * 26,           // bright cordite-white
         size: baseSize,
-        maxSize: baseSize * (5.5 + Math.random() * 3.5)   // v2.24.21 — then EXPANDS into a big cloud (~6-9×)
+        maxSize: baseSize * (2.6 + Math.random() * 1.6)   // v2.24.23 — expands to a MODERATE cloud (~2.6-4.2×), not screen-filling
       });
     }
     // brief warm fire sparks at the contact point (the warhead flash)
