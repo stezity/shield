@@ -2075,6 +2075,14 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.24.13 — SALVO SATURATION: a big incoming salvo makes batteries ripple-fire (user: "if there
+//            are many rockets, the dome should fire its whole ammo load at once, in all scenarios").
+//            autoTarget counts engageable incoming threats; at >=5 it flips on rippleMode, which lets
+//            findBestBattery/launchInterceptor ignore the per-shot reload gate so each battery
+//            empties its ready interceptors at the wave instead of one-per-reload (the reload
+//            bottleneck used to let salvos leak). Capped at 6 launches/battery/frame so the launch
+//            wall spreads over a few frames (perf). Ammo is still the cap; normal reload resumes once
+//            the salvo clears. Applies in every scenario (no scenario gate).
 //   2.24.12 — Spread scatters onto open terrain; open-terrain aim isn't re-aimed to a city (user).
 //            Two fixes in spawnThreat: (1) the player click-snap radius 12 km → 4 km — 12 km absorbed
 //            all spread so every rocket snapped to a city centre; 4 km ≈ a city's built-up extent, so
@@ -2951,7 +2959,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.24.12';
+const GAME_VERSION = '2.24.13';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -12528,7 +12536,9 @@ function batteryRegion(lat) {
   return 'north';
 }
 
-function findBestBattery(threat) {
+function findBestBattery(threat, ripple) {
+  // ripple (v2.24.13): SALVO SATURATION — when a big salvo is inbound, ignore the per-shot reload
+  // gate so a battery can ripple-fire its ready interceptors at the whole wave at once (ammo still caps it).
   // Helper — does this battery have any business engaging this threat?
   // Realistic doctrine: a battery only engages threats AIMED AT cities within its effective range.
   // This prevents a Tel Aviv Iron Dome (range 70km) from "stealing" a rocket headed for Karmiel
@@ -12555,7 +12565,7 @@ function findBestBattery(threat) {
   };
   const candidates = state.batteries.filter(b => {
     const t = BATTERY_TYPES[b.type];
-    if (b.ammo <= 0 || b.cooldown > 0) return false;
+    if (b.ammo <= 0 || (!ripple && b.cooldown > 0)) return false;
     if (b.cyberOffline) return false;          // hacked battery can't fire
     if (!t.canTarget.includes(threat.type)) return false;
     if (!isInProtectionZone(b)) return false;  // target city out of battery's protection footprint
@@ -12574,7 +12584,7 @@ function findBestBattery(threat) {
   if (pool.length === 0) {
     pool = state.batteries.filter(b => {
       const t = BATTERY_TYPES[b.type];
-      if (b.ammo <= 0 || b.cooldown > 0) return false;
+      if (b.ammo <= 0 || (!ripple && b.cooldown > 0)) return false;
       if (b.cyberOffline) return false;
       if (!t.canTarget.includes(threat.type)) return false;
       if (!isInProtectionZone(b)) return false;
@@ -12624,9 +12634,13 @@ function findBestBattery(threat) {
   return pool[0];
 }
 
-function launchInterceptor(battery, threat) {
+function launchInterceptor(battery, threat, ripple) {
   if (!battery || !threat) return false;
-  if (battery.ammo <= 0 || battery.cooldown > 0) return false;
+  // v2.24.13 — SALVO SATURATION: during a big salvo (ripple=true) the battery ignores the per-shot
+  // reload gate and ripple-fires its ready interceptors, engaging the whole wave at once instead of
+  // one-per-reload (a real Iron Dome battery empties many tubes in seconds). Ammo is still the cap.
+  if (battery.ammo <= 0) return false;
+  if (!ripple && battery.cooldown > 0) return false;
   if (threat.intercepted || threat.impacted) return false;
   const ip = predictInterceptPoint(battery, threat);
   if (!ip) return false;
@@ -12724,6 +12738,21 @@ function launchInterceptor(battery, threat) {
 }
 
 function autoTarget() {
+  // v2.24.13 — SALVO DETECTION: count engageable incoming threats. A big salvo flips every battery
+  // into ripple-fire (saturation) so it empties its ready interceptors at the whole wave at once,
+  // instead of dribbling one out per reload (which let salvos leak through). Applies in all scenarios.
+  let incoming = 0;
+  for (const t of state.threats) {
+    if (t.intercepted || t.impacted || t.assigned || t.foreignTheater) continue;
+    if (t.type === 'drone' && t.progress < 0.85) continue;
+    const tc = t.targetCity;
+    if (!tc || !tc.alive) continue;
+    if (!(tc.population > 0 || tc.importance >= 7)) continue;
+    incoming++;
+  }
+  const rippleMode = incoming >= 5;     // "many rockets (a salvo)" → saturation ripple fire
+  const RIPPLE_BURST = 6;               // max launches per battery per frame (smooths the visual + perf)
+  const burst = {};
   state.threats.forEach(threat => {
     if (threat.intercepted || threat.impacted || threat.assigned) return;
     if (threat.foreignTheater) return;          // foreign-theater (US base) strikes — IDF doesn't engage
@@ -12737,7 +12766,8 @@ function autoTarget() {
     const isStrategic = target.importance >= 7;
     if (!isPopulated && !isStrategic) return;
     // Pick the battery first — terminal-phase gate depends on which system is engaging.
-    const battery = findBestBattery(threat);
+    // During a salvo, ripple mode lets findBestBattery ignore the reload gate (saturation fire).
+    const battery = findBestBattery(threat, rippleMode);
     if (!battery) return;
     const btype = battery.type;
     const isBallistic = (threat.type === 'ballistic' || threat.type === 'tacBallistic');
@@ -12764,7 +12794,12 @@ function autoTarget() {
         : haversineKm(threat.curLat, threat.curLon, threat.targetLat, threat.targetLon) < 55;
       if (!overIsrael) return;
     }
-    launchInterceptor(battery, threat);
+    // SALVO SATURATION: ripple-fire (bypass reload), capped per battery per frame so the launch
+    // wall spreads over a few frames instead of a single-frame spike.
+    if (rippleMode && (burst[battery.id] || 0) >= RIPPLE_BURST) return;
+    if (launchInterceptor(battery, threat, rippleMode) && rippleMode) {
+      burst[battery.id] = (burst[battery.id] || 0) + 1;
+    }
   });
 }
 
