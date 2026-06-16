@@ -2182,6 +2182,14 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.26.9  — BUG FIXES (player reports). (1) 1v1 OPFOR couldn't launch: if the guest didn't pick a faction
+//            in the lobby, MP.guestFaction was undefined → ALL factions locked → nothing selectable. Now
+//            mpGuestStart/mpHostStart default it to 'hamas'. (2) Iran's permission modal popped on EVERY
+//            salvo (default count 11 ≥ the mass-salvo threshold) — added a 35s cooldown so Tehran weighs in
+//            periodically, not every launch. (3) КСИР/Iran directives + red-line crises never reached FFA
+//            axis players — mpFfaGuestOnMessage was missing the 'axistask' and 'redline' cases; added. (4)
+//            The Iran axis panel wrongly showed for a USA player (gated to playAs attacker) — now axis
+//            factions only. (5) USA player now sees its own involvement scale in the US panel.
 //   2.26.8  — FIX: USA player never saw Israel's aid requests. (1) mpFfaRequestUsAid now ALWAYS broadcasts
 //            usaReq (was gated by MP.usaPresent, which silently routed to the AI auto-grant if the flag was
 //            stale) + shows locally when the host IS the USA player. (2) AI Israel (host plays an attacker/
@@ -3354,7 +3362,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.26.8';
+const GAME_VERSION = '2.26.9';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -12960,7 +12968,7 @@ function attackerLaunchAt(lat, lon, opts) {
     const am = state.attackMode, fid = am.faction;
     if (fid === 'hamas' || fid === 'hezbollah' || fid === 'houthi') {
       if (state.iranSupplyDelayUntil && state.iranSupplyDelayUntil > Date.now() && (am.salvo || 1) > 1) am.salvo = 1;   // resupply delayed → salvos capped
-      if (iranSeverity(am, lat, lon) >= 2) { iranPermissionModal(fid, am, lat, lon, iranSeverity(am, lat, lon)); return false; }
+      if (iranSeverity(am, lat, lon) >= 2 && Date.now() > (state.iranGateUntil || 0)) { iranPermissionModal(fid, am, lat, lon, iranSeverity(am, lat, lon)); return false; }   // v2.26.9 — cooldown so Iran weighs in periodically, NOT every salvo
     }
   }
   // v2.25.0 — MULTIPLAYER OPFOR (guest): don't spawn locally. Validate geometry, then send the launch
@@ -14080,10 +14088,12 @@ function gameLoop(time) {
   try {
     if (typeof usPanel === 'function' && state.active && state.playAs !== 'attacker') usPanel();
     else { const _u = document.getElementById('us-panel'); if (_u) _u.style.display = 'none'; if (!state.active) { const _m = document.getElementById('us-perm-modal'); if (_m) _m.style.display = 'none'; } }
-    if (typeof iranPanel === 'function' && state.active && state.playAs === 'attacker') iranPanel();   // v2.26.5 #8 — axis panel for attacker players
+    const _axis = state.active && state.playAs === 'attacker' && state.attackMode && ['hamas', 'hezbollah', 'iran', 'houthi'].indexOf(state.attackMode.faction) >= 0;   // v2.26.9 — axis factions only (USA is not axis)
+    if (typeof iranPanel === 'function' && _axis) iranPanel();
     else { const _i = document.getElementById('iran-panel'); if (_i) _i.style.display = 'none'; if (!state.active) { const _im = document.getElementById('iran-perm-modal'); if (_im) _im.style.display = 'none'; } }
-    if (typeof mpInstallIranPanel === 'function' && state.active && state.playAs === 'attacker' && state.attackMode && state.attackMode.faction === 'iran') mpInstallIranPanel();   // v2.26.7 #8 — Iran command panel for the Iran player
+    if (typeof mpInstallIranPanel === 'function' && _axis && state.attackMode.faction === 'iran') mpInstallIranPanel();   // v2.26.7 #8 — Iran command panel for the Iran player
     else { const _ic = document.getElementById('iran-cmd-panel'); if (_ic) _ic.style.display = 'none'; }
+    if (typeof usInvVal === 'function' && MP && MP.enabled && MP.myFaction === 'usa' && state.active) { const _ie = document.getElementById('mp-usa-inv'); if (_ie) { const _ti = usInvTier(); _ie.innerHTML = '🇺🇸 Involvement: <b style="color:' + _ti.c + '">' + _ti.t + '</b> (' + Math.round(usInvVal()) + ')' + (usAtWar() ? ' <b style="color:#ff3b30">⚔ AT WAR</b>' : ''); } }   // v2.26.9 — USA player sees their involvement scale
   } catch (e) {}
   requestAnimationFrame(gameLoop);
 }
@@ -22512,7 +22522,7 @@ function startScenario(name) {
   state.enemyTargets = ENEMY_TARGETS.map(t => ({ ...t, alive: true, damage: 0 }));
   state.redLines = {};                                     // v2.26.4 — red-line crisis flags reset each game
   state.iranControl = 70; state.iranPatience = 0; state.iranChaos = 0;   // v2.26.5 #8 — Iran axis system reset
-  state.iranSupplyDelayUntil = 0; state.iranHoldUntil = 0; state.iranLastResponse = ''; state.iranTask = null;
+  state.iranSupplyDelayUntil = 0; state.iranHoldUntil = 0; state.iranLastResponse = ''; state.iranTask = null; state.iranGateUntil = 0;
   state.usInvolvement = 12; state.usTargets = null; state.usHasCasusBelli = false;   // v2.26.6 #9/#10 — US military reset
   state.iranDelayUntil = 0;
   state.sandstormUntil = 0;
@@ -23471,6 +23481,7 @@ function mpHostStart() {
   MP.enabled = true; MP.started = true; MP.role = 'host';
   mpInitHostEconomy();
   MP.unlocked[MP.guestFaction] = true;
+  if (!FACTION_ORDER.includes(MP.guestFaction)) MP.guestFaction = 'hamas';   // v2.26.9 FIX — default so the OPFOR always starts with a faction unlocked
   mpSend({ t: 'start', faction: MP.guestFaction });
   const m = el('mp-menu'); if (m) m.classList.add('hidden');
   startScenario('mpHost');
@@ -23749,6 +23760,7 @@ function mpBuildSnapshot() {
 function mpGuestStart(faction) {
   MP.enabled = true; MP.started = true; MP.role = 'guest';
   if (FACTION_ORDER.includes(faction)) MP.guestFaction = faction;
+  if (!FACTION_ORDER.includes(MP.guestFaction)) MP.guestFaction = 'hamas';   // v2.26.9 FIX — always have a usable faction (was: undefined → ALL locked → OPFOR couldn't pick/launch)
   MP.unlocked = { hamas: false, hezbollah: false, iran: false, houthi: false };
   MP.unlocked[MP.guestFaction] = true;
   const m = el('mp-menu'); if (m) m.classList.add('hidden');
@@ -24196,6 +24208,8 @@ function mpFfaGuestOnMessage(msg) {
     case 'oref': state.orefAlerts = msg.a || []; break;
     case 'pause': mpApplyRemotePause(!!msg.paused); break;
     case 'usaReq': if (MP.myFaction === 'usa') mpFfaUsaShowRequest(); break;
+    case 'redline': if (typeof showNotification === 'function') showNotification(msg.title || '🔴 RED LINE', msg.body || '', 'danger'); if (typeof logEvent === 'function') logEvent('🔴 ' + (msg.title || 'RED LINE'), 'danger'); break;   // v2.26.9 FIX — FFA axis players now see red-line crises
+    case 'axistask': state.iranTask = msg.task; if (typeof showNotification === 'function') showNotification('☪ IRGC / TEHRAN DIRECTIVE', msg.task, 'info'); if (typeof logEvent === 'function') logEvent('☪ Iran directive: ' + msg.task, 'info'); break;   // v2.26.9 FIX — FFA axis players now RECEIVE Iran's directives
   }
 }
 function mpFfaOnJoined() {
@@ -24283,6 +24297,7 @@ function mpFfaInstallUsaPanel() {
     p = document.createElement('div'); p.id = 'mp-usa-panel';
     p.style.cssText = 'position:fixed;top:70px;left:8px;z-index:9001;background:rgba(10,18,30,0.95);border:1px solid #5b8def;border-radius:8px;padding:12px;color:#dde;font:12px/1.5 sans-serif;width:230px;';
     p.innerHTML = '<div style="color:#7fb0ff;font-weight:bold;letter-spacing:1px;margin-bottom:8px;">🇺🇸 UNITED STATES · SUPPORT</div>' +
+      '<div id="mp-usa-inv" style="font-size:11px;color:#bfe0ff;margin-bottom:8px;">🇺🇸 Involvement: Low</div>' +
       '<div id="mp-usa-req" style="display:none;background:rgba(255,170,0,.18);border:1px solid #ffaa00;color:#ffd479;padding:5px 8px;border-radius:4px;margin-bottom:8px;font-size:11px;">⚠ Israel requests aid!</div>' +
       '<button class="mp-usa-btn" data-kind="money" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(40,90,150,.3);border:1px solid #5b8def;color:#bfe0ff;border-radius:4px;cursor:pointer;">💵 Send $5M</button>' +
       '<button class="mp-usa-btn" data-kind="interceptors" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(40,90,150,.3);border:1px solid #5b8def;color:#bfe0ff;border-radius:4px;cursor:pointer;">🚀 Refill interceptors</button>' +
@@ -24547,7 +24562,7 @@ function iranDefy(sev, fid) {
   if (typeof logEvent === 'function') logEvent('⚠ ' + ((ENEMIES[fid] && ENEMIES[fid].name) || fid) + ' acted AGAINST Iran — axis control ' + Math.round(iranControlVal()), 'danger');
 }
 function iranCloseModal() { const m = el('iran-perm-modal'); if (m) m.style.display = 'none'; }
-function iranExecPending() { iranCloseModal(); const p = state._iranPending; state._iranPending = null; if (!p) return; if (p.usTarget) { strikeUSTarget(p.usTarget); return; } attackerLaunchAt(p.lat, p.lon, { iranApproved: true }); }
+function iranExecPending() { iranCloseModal(); state.iranGateUntil = Date.now() + 35000; const p = state._iranPending; state._iranPending = null; if (!p) return; if (p.usTarget) { strikeUSTarget(p.usTarget); return; } attackerLaunchAt(p.lat, p.lon, { iranApproved: true }); }
 function iranMkBtn(parent, txt, color, fn) { const b = document.createElement('button'); b.textContent = txt; b.style.cssText = 'padding:8px 12px;font-size:12px;border-radius:5px;cursor:pointer;border:1px solid ' + color + ';background:rgba(255,255,255,0.05);color:' + color + ';'; b.onclick = fn; parent.appendChild(b); }
 function iranPermissionModal(fid, am, lat, lon, sev) {
   iranEnsure();
