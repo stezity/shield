@@ -2215,6 +2215,12 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.28.3  — US own AIR DEFENSE + Iran can bomb the US anytime (so the Iran player isn't idle). state.usAdLevel
+//            (Patriot/THAAD on US bases, default 40%): strikeUSTarget now rolls it FIRST — on success the
+//            strike is INTERCEPTED (exo flash + marker, no damage) but still raises US involvement; on a miss
+//            it damages the asset as before. USA panel gains 🛡 Reinforce US air defense (+18%, cap 95). IRAN
+//            can now strike US bases at ANY involvement (other axis factions still need the US heavily
+//            involved) — a deliberate way for Iran to drag the US into the war. (US still NEVER bombs Israel.)
 //   2.28.2  — AI EXECUTES IRAN'S ORDERS (#7). An UNOWNED axis faction (no human player) now acts on Iran's
 //            current directive by logic, not randomly: iranDirectiveBehavior maps the order (intensify N/S,
 //            launch drones, attack US, mass salvo, hold/conserve/de-escalate) to a region/target/intensity,
@@ -3489,7 +3495,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.28.2';
+const GAME_VERSION = '2.28.3';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -13137,7 +13143,7 @@ function attackerLaunchAt(lat, lon, opts) {
   if (state.ceasefire) { showNotification('🏳 CEASEFIRE', 'A ceasefire is in effect — hold fire.', 'warn'); return false; }   // v2.27.6
   // v2.26.6 (#10) — when the US is at DIRECT WAR its regional assets become attackable. A faction strike on
   // a US target routes through Iran (sev 3) for Hamas/Hez/Houthi; Iran/others strike directly.
-  if (!(opts && opts.iranApproved) && typeof usTargetsHot === 'function' && usTargetsHot()) {   // v2.28.0 — US assets attackable once Washington is heavily involved (so Iran can hit US bases)
+  if (!(opts && opts.iranApproved) && ((typeof usTargetsHot === 'function' && usTargetsHot()) || (state.attackMode && state.attackMode.faction === 'iran'))) {   // v2.28.3 — Iran can strike US bases ANYTIME (dragging the US in); other factions need Washington heavily involved
     usTargetsEnsure();
     let ut = null, ud = Infinity;
     for (let i = 0; i < state.usTargets.length; i++) { const t = state.usTargets[i]; if (t.alive === false) continue; const d = haversineKm(lat, lon, t.lat, t.lon); if (d < 18 && d < ud) { ud = d; ut = t; } }
@@ -22789,6 +22795,7 @@ function startScenario(name) {
   state.iranControl = 70; state.iranPatience = 0; state.iranChaos = 0;   // v2.26.5 #8 — Iran axis system reset
   state.iranSupplyDelayUntil = 0; state.iranHoldUntil = 0; state.iranLastResponse = ''; state.iranTask = null; state.iranGateUntil = 0;
   state.usInvolvement = 12; state.usTargets = null; state.usHasCasusBelli = false;   // v2.26.6 #9/#10 — US military reset
+  state.usAdLevel = 40; state.usFightersBanned = false; state.usIntelCutUntil = 0;   // v2.28.3 — US air-defense level + pressure flags reset
   state.iranDelayUntil = 0;
   state.sandstormUntil = 0;
   state.earlyWarningUntil = 0;
@@ -24673,6 +24680,7 @@ function mpFfaApplyUsaGrant(kind) {
   else if (kind === 'tomaHez') usTomahawk('hezbollah');
   else if (kind === 'tomaHouthi') usTomahawk('houthi');
   else if (kind === 'conusFighters') usConusFighters();           // v2.28.0 — fighters from the US mainland
+  else if (kind === 'usAd') { state.usAdLevel = Math.min(95, (state.usAdLevel || 40) + 18); if (typeof usInvSet === 'function') usInvSet((typeof usInvVal === 'function' ? usInvVal() : 12) + 4); if (typeof showNotification === 'function') showNotification('🛡 US AIR DEFENSE REINFORCED', 'Patriot/THAAD batteries deployed to US bases — intercept chance now ' + state.usAdLevel + '%.', 'success'); if (typeof logEvent === 'function') logEvent('🛡 US air defense reinforced → ' + state.usAdLevel + '%', 'success'); }   // v2.28.3 — US own ПВО
 }
 function mpFfaRequestUsAid() {
   const now = Date.now();
@@ -24909,7 +24917,8 @@ function mpFfaInstallUsaPanel() {
       '<button class="mp-usa-btn" data-kind="tomaIran" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(150,60,40,.3);border:1px solid #cf5b3a;color:#ffb3a0;border-radius:4px;cursor:pointer;">🚀 Tomahawk → Iran</button>' +
       '<button class="mp-usa-btn" data-kind="tomaHez" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(150,60,40,.3);border:1px solid #cf5b3a;color:#ffb3a0;border-radius:4px;cursor:pointer;">🚀 Tomahawk → Hezbollah</button>' +
       '<button class="mp-usa-btn" data-kind="tomaHouthi" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(150,60,40,.3);border:1px solid #cf5b3a;color:#ffb3a0;border-radius:4px;cursor:pointer;">🚀 Tomahawk → Houthis</button>' +
-      '<button class="mp-usa-btn" data-kind="conusFighters" style="width:100%;padding:7px;background:rgba(40,90,150,.3);border:1px solid #5b8def;color:#bfe0ff;border-radius:4px;cursor:pointer;">✈ Fighters from CONUS (mainland)</button>';
+      '<button class="mp-usa-btn" data-kind="conusFighters" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(40,90,150,.3);border:1px solid #5b8def;color:#bfe0ff;border-radius:4px;cursor:pointer;">✈ Fighters from CONUS (mainland)</button>' +
+      '<button class="mp-usa-btn" data-kind="usAd" style="width:100%;padding:7px;background:rgba(40,110,90,.3);border:1px solid #7fffb0;color:#bfffd8;border-radius:4px;cursor:pointer;">🛡 Reinforce US air defense (Patriot/THAAD)</button>';
     document.body.appendChild(p);
     p.querySelectorAll('.mp-usa-btn').forEach(function (b) { b.onclick = function () { const k = b.dataset.kind; if (MP.role === 'host') mpFfaApplyUsaGrant(k); else mpSend({ t: 'usaGrant', kind: k }); mpToast('US action: ' + k, 'success'); const r = el('mp-usa-req'); if (r) r.style.display = 'none'; }; });
   }
@@ -25315,6 +25324,17 @@ function strikeUSTarget(target) {
   usTargetsEnsure(); usInvEnsure();
   if (!target || target.alive === false) return;
   const imp = target.importance || 7;
+  // v2.28.3 — US AIR DEFENSE (Patriot/THAAD on US bases): chance to intercept the incoming strike (= usAdLevel).
+  const ad = (state.usAdLevel != null) ? state.usAdLevel : 40;
+  if (Math.random() * 100 < ad) {
+    if (typeof createExplosion === 'function') try { createExplosion(target.lat + 0.12, target.lon, 14, 700, false, true); } catch (e) {}
+    if (typeof spawnHitMarker === 'function') spawnHitMarker(target.lat, target.lon, '🛡 US AD INTERCEPT', '#7fffb0');
+    usInvSet(usInvVal() + 4 + Math.floor(imp / 2)); state.usHasCasusBelli = true;   // even an intercepted attack provokes Washington
+    if (typeof showNotification === 'function') showNotification('🛡 US AIR DEFENSE', 'US Patriot/THAAD intercepted a strike on ' + target.name + '. Washington is alarmed — involvement rising.', 'warn');
+    if (typeof logEvent === 'function') logEvent('🛡 US AD intercepted a strike on ' + target.name, 'warn');
+    if (typeof MP !== 'undefined' && MP.enabled && MP.role === 'host' && typeof mpSend === 'function') { try { mpSend({ t: 'redline', title: '🛡 US AIR DEFENSE', body: 'US AD intercepted a strike on ' + target.name + '.' }); } catch (e) {} }
+    return;
+  }
   target.damage = Math.min(100, (target.damage || 0) + 40 + Math.random() * 40);
   const killed = target.damage >= 100; if (killed) { target.alive = false; target.damage = 100; }
   usInvSet(usInvVal() + 8 + imp);                       // attacking US assets pulls the US deeper in
