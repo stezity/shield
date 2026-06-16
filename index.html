@@ -2182,6 +2182,12 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.27.4  — (player requests) AIRCRAFT: ×3 fighters per airbase AND jets RETURN to base + rearm ~40s
+//            after a sortie (renewable, no more "ran out of planes"). IRAN OVERSTEPS → US WAR: the Iran
+//            red line (escalation>=85) now also pulls the US into the war directly (usInvolvement->90,
+//            casus belli, US assets become targets). WAR → DAILY STRATEGIC STRIKES: once a full war is on
+//            (US at war / war declared / escalation maxed) a self-running campaign strikes 1-2 enemy
+//            strategic targets every ~50s ("each day"), with FX + log.
 //   2.27.3  — CRITICAL: OPFOR "clicks but nothing fires." Root cause: when no launch base was picked, the
 //            site was chosen at RANDOM — a faction whose sites span a country (Hezbollah: border→Beirut→
 //            Bekaa) almost always fired from a far site → out of range → silent fail (verified: 1/10 random
@@ -3392,7 +3398,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.27.3';
+const GAME_VERSION = '2.27.4';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -6561,8 +6567,11 @@ function launchAirStrike(lat, lon, approved) {
     bombsDropped: 0,
     lastBomb: 0,
     bombHits: 0,                        // count of bombs that landed on target
+    baseId: base.id,
     trail: []
   });
+  // v2.27.4 — the F-35 returns to base + rearms ~40s after takeoff (round trip), so fighters are renewable
+  (function (rbId, gen) { setTimeout(function () { if (state.scenarioGen === gen && state.airbaseFighters && state.airbaseFighters[rbId] != null) state.airbaseFighters[rbId]++; }, 40000); })(base.id, state.scenarioGen);
   audio.launch();
   // Auto-named operation (flavor + clearer logs)
   const opName = (typeof generateOpName === 'function') ? generateOpName() : 'STRIKE';
@@ -14109,6 +14118,7 @@ function gameLoop(time) {
       if (typeof tickStrikeOnSight === 'function') tickStrikeOnSight(dt);   // v2.25.11 — Strike-on-Sight doctrine
       if (typeof tickRedLines === 'function') tickRedLines(dt);             // v2.26.4 — red-line crisis triggers (#7)
       if (typeof usInvolvementTick === 'function') usInvolvementTick(dt);   // v2.26.6 — US drawn in by escalation (#9)
+      if (typeof tickWarDailyStrikes === 'function') tickWarDailyStrikes(dt);   // v2.27.4 — daily strategic strikes once war is on
       if (typeof mpAiIsraelMaybeRequestAid === 'function') mpAiIsraelMaybeRequestAid();   // v2.26.8 — AI Israel asks the USA player for help
       updateCivilian(dt);
       updateIntel(dt);
@@ -22569,6 +22579,7 @@ function startScenario(name) {
   // Свежие копии вражеских целей
   state.enemyTargets = ENEMY_TARGETS.map(t => ({ ...t, alive: true, damage: 0 }));
   state.redLines = {};                                     // v2.26.4 — red-line crisis flags reset each game
+  state._warStrikeAt = 0;                                  // v2.27.4 — daily war-strike timer reset
   state.iranControl = 70; state.iranPatience = 0; state.iranChaos = 0;   // v2.26.5 #8 — Iran axis system reset
   state.iranSupplyDelayUntil = 0; state.iranHoldUntil = 0; state.iranLastResponse = ''; state.iranTask = null; state.iranGateUntil = 0;
   state.usInvolvement = 12; state.usTargets = null; state.usHasCasusBelli = false;   // v2.26.6 #9/#10 — US military reset
@@ -22589,8 +22600,8 @@ function startScenario(name) {
   state.orefAlerts = [];          // active OREF alert zones
   // Истребители на каждой авиабазе
   state.airbaseFighters = {};
-  IL_AIRBASES.forEach(b => state.airbaseFighters[b.id] = b.fighters);
-  US_AIRBASES.forEach(b => state.airbaseFighters[b.id] = b.fighters);
+  IL_AIRBASES.forEach(b => state.airbaseFighters[b.id] = b.fighters * 3);   // v2.27.4 — bigger fighter pool (×3); jets also RETURN to base after a sortie, so they're renewable
+  US_AIRBASES.forEach(b => state.airbaseFighters[b.id] = b.fighters * 3);
   // === New mechanics state init ===
   state.panic = 0;                // 0–100 civilian panic level (rises on impact, decays over time)
   state.popularSupport = 80;      // 0–100 public support for war effort; falls on impact, rises on victories
@@ -24586,9 +24597,35 @@ function tickRedLines(dt) {
   if (intl >= 70 && intl < 80 && !rl.intl) warn('intl', 'International pressure peaking — isolation imminent.');
   if (sup <= 15 && !rl.usFroze) { rl.usFroze = true; state.usSupplyFrozenUntil = now + 180000; redLineFire('🇺🇸 RED LINE — US FREEZES ALL MILITARY AID', 'Support collapsed: interceptor & arms resupply frozen 3 min. Washington demands an immediate halt.'); }
   if (esc >= 70 && !rl.hez) { rl.hez = true; redLineFire('🔴 RED LINE — HEZBOLLAH EXPANDS THE WAR', 'Hezbollah widens the front and pushes rocket reach deeper into Israel.'); if (mpOn && MP.role === 'host') { MP.escalation = Math.min(100, MP.escalation + 4); if (typeof mpEscHoldMajor === 'function') mpEscHoldMajor(2); } }
-  if (esc >= 85 && !rl.iran) { rl.iran = true; redLineFire('🔴 RED LINE — IRAN ENTERS THE WAR DIRECTLY', 'Tehran launches direct strikes — full regional war. Escalation locked high.'); if (mpOn && MP.role === 'host') { MP.escalation = Math.max(MP.escalation, 92); if (typeof mpEscHoldMajor === 'function') mpEscHoldMajor(3); } if (state.world) state.world.intlPressure = Math.min(100, (state.world.intlPressure || 30) + 15); }
+  if (esc >= 85 && !rl.iran) { rl.iran = true; redLineFire('🔴 RED LINE — IRAN ENTERS THE WAR DIRECTLY', 'Tehran launches direct strikes — full regional war. Escalation locked high.'); if (mpOn && MP.role === 'host') { MP.escalation = Math.max(MP.escalation, 92); if (typeof mpEscHoldMajor === 'function') mpEscHoldMajor(3); } if (state.world) state.world.intlPressure = Math.min(100, (state.world.intlPressure || 30) + 15); if (typeof usInvSet === 'function') { usInvSet(Math.max(usInvVal(), 90)); state.usHasCasusBelli = true; redLineFire('🇺🇸 RED LINE — US ENTERS THE WAR', 'Iran overstepped — the United States enters the war directly. Its assets are committed and become targets.'); } }   // v2.27.4 — Iran oversteps → US joins the war
   if (intl >= 80 && !rl.intl) { rl.intl = true; redLineFire('🔴 RED LINE — INTERNATIONAL ISOLATION', 'Global pressure peaks: sanctions, embargoes, diplomatic isolation.'); if (typeof usSetSupport === 'function') usSetSupport(sup - 8); }
   if (esc >= 80 && warR >= 60 && !rl.newFront && Math.random() < 0.0008 * dt) { rl.newFront = true; redLineFire('🔴 RED LINE — A NEW FRONT OPENS', 'A second front ignites — the war spreads to a new theatre.'); }
+}
+// v2.27.4 — once a full war is on (US at war / war declared / escalation maxed), a strategic air campaign
+// runs on its own: every ~50s ("each day") it strikes 1-2 enemy strategic targets. Makes the war self-sustaining.
+function tickWarDailyStrikes(dt) {
+  if (!state.active) return;
+  if (typeof MP !== 'undefined' && MP.enabled && MP.role === 'guest') return;   // host / single-player authority only
+  const atWar = (typeof usAtWar === 'function' && usAtWar()) || (typeof MP !== 'undefined' && MP.enabled && MP.warDeclared) || ((state.escalationLevel || 0) >= 4);
+  if (!atWar) { state._warStrikeAt = 0; return; }
+  const now = Date.now();
+  if (!state._warStrikeAt) { state._warStrikeAt = now + 50000; return; }   // first daily strike ~50s after the war begins
+  if (now < state._warStrikeAt) return;
+  state._warStrikeAt = now + 50000;
+  const strat = (state.enemyTargets || []).filter(function (t) { return t.alive !== false && (t.type === 'strategic' || (t.importance || 0) >= 9); });
+  if (!strat.length) return;
+  const n = 1 + Math.floor(Math.random() * 2), names = [];
+  for (let i = 0; i < n && strat.length; i++) {
+    const t = strat[Math.floor(Math.random() * strat.length)];
+    t.damage = Math.min(100, (t.damage || 0) + 30 + Math.random() * 30);
+    const killed = t.damage >= 100; if (killed) { t.alive = false; t.damage = 100; }
+    if (typeof enemyTargetHitFx === 'function') enemyTargetHitFx(t, killed);
+    names.push(t.name);
+  }
+  if (names.length) {
+    if (typeof logEvent === 'function') logEvent('💥 WAR CAMPAIGN — daily strategic strike: ' + names.join(', '), 'warn');
+    if (typeof showNotification === 'function') showNotification('💥 WAR CAMPAIGN', 'Daily strikes hit ' + names.length + ' strategic target' + (names.length > 1 ? 's' : '') + '.', 'warn');
+  }
 }
 
 /* ============================================================================
