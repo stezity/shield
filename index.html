@@ -2182,6 +2182,15 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.27.6  — LAUNCH-SITE DESTRUCTION + CAPITULATION + CEASEFIRE. (1) Defender strikes on a launch site now
+//            ACCUMULATE on one persistent wrapper (was a fresh damage:0 wrapper per strike → never reached
+//            100). At 100 the site is PERMANENTLY destroyed (state.destroyedLaunchSites, synced to the OPFOR
+//            via lsd>=100) — it can't fire (host + guest + nearest-site picker all skip it) and can't be
+//            repaired. (2) When EVERY launch site of a faction is destroyed → checkCapitulation: that
+//            faction capitulates (notified to all) and can no longer fire. (3) CEASEFIRE: a bottom-left
+//            button — the host declares/lifts it (authoritative), any player can CALL one (request → host
+//            enacts); while active NO side launches (attacker, defender strike, host all blocked). Synced
+//            via snapshot cf.
 //   2.27.5  — SOUND. Fixed "no sound in multiplayer": the AudioContext starts SUSPENDED (browser autoplay
 //            policy) and the MP lobby flow never un-suspended it — added audio.resume() + a global gesture
 //            listener (pointerdown/keydown/touchstart) that resumes it in every mode, and the render-only
@@ -3404,7 +3413,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.27.5';
+const GAME_VERSION = '2.27.6';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -6457,6 +6466,7 @@ function suppressNearestLaunchSite(lat, lon) {
 // АВИАУДАР: F-35 с израильских авиабаз бьёт по конкретной вражеской цели
 function launchAirStrike(lat, lon, approved) {
   if (state.strikesLeft <= 0 || state.strikeCooldown > 0) return;
+  if (state.ceasefire) { showNotification('🏳 CEASEFIRE', 'A ceasefire is in effect — hold fire.', 'warn'); return; }   // v2.27.6
   // Gaza Campaign: warn the player if launching a strike would violate an agreed ceasefire.
   if (state.gaza && state.scenario && state.scenario.campaign === 'gaza') {
     if (!checkGazaCeasefire('air strike on Hamas target')) return;
@@ -6497,24 +6507,21 @@ function launchAirStrike(lat, lon, approved) {
       });
     });
     if (bestSite) {
-      // Build a virtual target wrapping the launch site
-      target = {
-        id: 'launch_site_' + bestFid + '_' + bestSiteIdx,
-        name: bestSite.name + ' launch site',
-        lat: bestSite.lat, lon: bestSite.lon,
-        faction: bestFid,
-        importance: 6,
-        type: 'launch',
-        hardness: 0.25,
-        alive: true,
-        damage: 0,
-        _isLaunchSite: true,
-        _siteFaction: bestFid,
-        _siteIdx: bestSiteIdx
-      };
-      // Push into enemyTargets so airstrike completion can find/damage it
+      // v2.27.6 — REUSE the wrapper so damage ACCUMULATES across strikes (was: a fresh damage:0 wrapper every
+      // strike → the site never reached 100 → never died → OPFOR kept firing). One persistent wrapper per site.
+      const _lsId = 'launch_site_' + bestFid + '_' + bestSiteIdx;
       state.enemyTargets = state.enemyTargets || [];
-      state.enemyTargets.push(target);
+      target = state.enemyTargets.find(t => t.id === _lsId);
+      if (!target) {
+        target = {
+          id: _lsId, name: bestSite.name + ' launch site',
+          lat: bestSite.lat, lon: bestSite.lon, faction: bestFid,
+          importance: 6, type: 'launch', hardness: 0.25, alive: true, damage: 0,
+          _isLaunchSite: true, _siteFaction: bestFid, _siteIdx: bestSiteIdx
+        };
+        state.enemyTargets.push(target);
+      }
+      if (target.alive === false) { showNotification('ALREADY DESTROYED', target.name + ' is already destroyed.', 'info'); return; }
       logEvent(`◉ TARGET ACQUIRED: ${target.name} (revealed by satellite)`, 'info');
     }
   }
@@ -13022,6 +13029,7 @@ function updateAttackerStatus() {
 // Called from the canvas mouseup handler when the player has armed a weapon
 function attackerLaunchAt(lat, lon, opts) {
   if (!state.attackMode || !state.attackMode.faction || !state.attackMode.type) return false;
+  if (state.ceasefire) { showNotification('🏳 CEASEFIRE', 'A ceasefire is in effect — hold fire.', 'warn'); return false; }   // v2.27.6
   // v2.26.6 (#10) — when the US is at DIRECT WAR its regional assets become attackable. A faction strike on
   // a US target routes through Iran (sev 3) for Hamas/Hez/Houthi; Iran/others strike directly.
   if (!(opts && opts.iranApproved) && typeof usAtWar === 'function' && usAtWar()) {
@@ -13822,6 +13830,11 @@ function applyTargetHitConsequence(target, destroyed) {
 function enemyTargetHitFx(target, destroyed) {
   if (!target) return;
   const imp = target.importance || 5;
+  if (destroyed && target._isLaunchSite) {   // v2.27.6 — a destroyed launch site is permanently down (no fire, no repair); capitulation if all gone
+    state.destroyedLaunchSites = state.destroyedLaunchSites || {};
+    state.destroyedLaunchSites[target._siteFaction + '_' + target._siteIdx] = true;
+    if (typeof checkCapitulation === 'function') try { checkCapitulation(target._siteFaction); } catch (e) {}
+  }
   if (destroyed) {
     createExplosion(target.lat, target.lon, 34 + imp * 1.8, 1900, true);
     if (imp >= 8) { const gen = state.scenarioGen; for (let k = 1; k <= 2; k++) setTimeout(function () { if (state.scenarioGen !== gen || !state.active) return; try { createExplosion(target.lat + (Math.random() - 0.5) * 0.03, target.lon + (Math.random() - 0.5) * 0.03, 16 + Math.random() * 12, 1400, true); } catch (e) {} }, k * 280); }
@@ -14185,6 +14198,7 @@ function gameLoop(time) {
     else { const _i = document.getElementById('iran-panel'); if (_i) _i.style.display = 'none'; if (!state.active) { const _im = document.getElementById('iran-perm-modal'); if (_im) _im.style.display = 'none'; } }
     if (typeof mpInstallIranPanel === 'function' && _axis && state.attackMode.faction === 'iran') mpInstallIranPanel();   // v2.26.7 #8 — Iran command panel for the Iran player
     else { const _ic = document.getElementById('iran-cmd-panel'); if (_ic) _ic.style.display = 'none'; }
+    if (MP && MP.enabled && state.active && typeof mpInstallCeasefireBtn === 'function') mpInstallCeasefireBtn();   // v2.27.6 — ceasefire button (host toggle / player request)
     if (typeof usInvVal === 'function' && MP && MP.enabled && MP.myFaction === 'usa' && state.active) { const _ie = document.getElementById('mp-usa-inv'); if (_ie) { const _ti = usInvTier(); _ie.innerHTML = '🇺🇸 Involvement: <b style="color:' + _ti.c + '">' + _ti.t + '</b> (' + Math.round(usInvVal()) + ')' + (usAtWar() ? ' <b style="color:#ff3b30">⚔ AT WAR</b>' : ''); } }   // v2.26.9 — USA player sees their involvement scale
   } catch (e) {}
   requestAnimationFrame(gameLoop);
@@ -22614,6 +22628,7 @@ function startScenario(name) {
   state.enemyTargets = ENEMY_TARGETS.map(t => ({ ...t, alive: true, damage: 0 }));
   state.redLines = {};                                     // v2.26.4 — red-line crisis flags reset each game
   state._warStrikeAt = 0;                                  // v2.27.4 — daily war-strike timer reset
+  state.destroyedLaunchSites = {}; state.capitulated = {}; state.ceasefire = false;   // v2.27.6 — base destruction / capitulation / ceasefire reset
   state.iranControl = 70; state.iranPatience = 0; state.iranChaos = 0;   // v2.26.5 #8 — Iran axis system reset
   state.iranSupplyDelayUntil = 0; state.iranHoldUntil = 0; state.iranLastResponse = ''; state.iranTask = null; state.iranGateUntil = 0;
   state.usInvolvement = 12; state.usTargets = null; state.usHasCasusBelli = false;   // v2.26.6 #9/#10 — US military reset
@@ -23552,7 +23567,7 @@ function mpReset() {
 function mpTeardownUI() {
   try { mpReset(); } catch (e) {}
   MP.started = false; MP.peerNick = ''; MP.ping = 0; MP.phase = 'battle'; MP.siteDamage = {};
-  ['mp-hud', 'mp-status', 'mp-chat', 'mp-opfor-info', 'mp-deploy-overlay', 'mp-usa-panel', 'mp-aid-btn', 'us-panel', 'iran-panel', 'iran-cmd-panel', 'us-perm-modal', 'iran-perm-modal', 'mp-ally-decide'].forEach(function (id) {
+  ['mp-hud', 'mp-status', 'mp-chat', 'mp-opfor-info', 'mp-deploy-overlay', 'mp-usa-panel', 'mp-aid-btn', 'us-panel', 'iran-panel', 'iran-cmd-panel', 'us-perm-modal', 'iran-perm-modal', 'mp-ally-decide', 'mp-ceasefire-btn'].forEach(function (id) {
     const e = el(id); if (e && e.parentNode) e.parentNode.removeChild(e);
   });
 }
@@ -23605,10 +23620,12 @@ function mpHostOnMessage(msg) {
     case 'smuggle': mpHostSmuggle(); break;
     case 'pause': mpApplyRemotePause(!!msg.paused); break;
     case 'ping': break;
+    case 'ceasefireReq': state.ceasefire = true; if (typeof showNotification === 'function') showNotification('🏳 CEASEFIRE CALLED', 'The OPFOR called a ceasefire — all fire halted.', 'success'); if (typeof mpSend === 'function') mpSend({ t: 'redline', title: '🏳 CEASEFIRE', body: 'A ceasefire is in effect — hold fire.' }); if (typeof mpUpdateCeasefireBtn === 'function') mpUpdateCeasefireBtn(); break;   // v2.27.6
   }
 }
 function mpHostApplyLaunch(cmd) {
   if (!MP.enabled || !state.active || MP.phase !== 'battle') return;   // v2.25.11 — no launches during deploy phase
+  if (state.ceasefire) return;   // v2.27.6 — ceasefire: host rejects all launches
   const fid = cmd.faction, type = cmd.type;
   if (!ENEMIES[fid] || !THREAT_TYPES[type]) return;
   if (!MP.ffa && !MP.unlocked[fid]) return;   // v2.27.0 FIX — 1v1 OPFOR is front-switch-gated by escalation; in FFA each player OWNS their faction (ownership already verified by the caller), so the unlock gate must NOT block them
@@ -23620,7 +23637,8 @@ function mpHostApplyLaunch(cmd) {
   const e = ENEMIES[fid];
   let siteIdx = (cmd.siteIndex == null) ? mpNearestLaunchSite(fid, cmd.targetLat, cmd.targetLon, false)
                                         : Math.max(0, Math.min(cmd.siteIndex | 0, e.launchSites.length - 1));
-  if (siteIdx < 0) siteIdx = 0;   // v2.27.3 — nearest launcher to the target, not random
+  if (siteIdx < 0) return;   // v2.27.6 — no live launch site (all destroyed/suppressed) → can't fire
+  if (mpSiteDestroyed(fid, siteIdx)) { siteIdx = mpNearestLaunchSite(fid, cmd.targetLat, cmd.targetLon, false); if (siteIdx < 0) return; }   // chosen site destroyed → nearest live one, or abort
   const spreadDeg = cmd.spread || 0.005;
   const lat = cmd.targetLat, lon = cmd.targetLon;
   if (state.disabledLaunchSites && state.disabledLaunchSites[fid + '_' + siteIdx] > Date.now()) return;   // v2.25.12 — suppressed site can't fire (authority)
@@ -23684,10 +23702,31 @@ function mpReachKm(fid) {
 // v2.27.3 — pick the NEAREST launch site to the target (random selection meant a faction with sites spread
 // across a country almost always fired from a far site → out of range → silent launch failure). Returns -1
 // if requireUnsuppressed and every site is suppressed.
+// v2.27.6 — a launch site is PERMANENTLY destroyed (can't fire, can't be repaired) once its damage hits 100.
+// Host authority is state.destroyedLaunchSites; the guest derives it from the synced site-damage (lsd >= 100).
+function mpSiteDestroyed(faction, idx) {
+  const key = faction + '_' + idx;
+  if (state.destroyedLaunchSites && state.destroyedLaunchSites[key]) return true;
+  if (typeof MP !== 'undefined' && MP.siteDamage && (MP.siteDamage[key] || 0) >= 100) return true;
+  return false;
+}
+// v2.27.6 — if EVERY launch site of a faction is destroyed, that faction capitulates (it can no longer fire).
+function checkCapitulation(faction) {
+  const e = ENEMIES[faction]; if (!e || !e.launchSites || !e.launchSites.length) return;
+  state.capitulated = state.capitulated || {};
+  if (state.capitulated[faction]) return;
+  for (let i = 0; i < e.launchSites.length; i++) { if (!mpSiteDestroyed(faction, i)) return; }   // still has a live site
+  state.capitulated[faction] = true;
+  const nm = e.name || faction;
+  if (typeof showNotification === 'function') showNotification('🏳 CAPITULATION', nm + ' has lost ALL launch sites and capitulates — it can no longer fire.', 'success');
+  if (typeof logEvent === 'function') logEvent('🏳 ' + nm + ' CAPITULATES — every launch site destroyed', 'success');
+  if (typeof MP !== 'undefined' && MP.enabled && MP.role === 'host' && typeof mpSend === 'function') { try { mpSend({ t: 'redline', title: '🏳 CAPITULATION', body: nm + ' capitulates — all launch sites destroyed, it can no longer fire.' }); } catch (e) {} }
+}
 function mpNearestLaunchSite(faction, lat, lon, requireUnsuppressed) {
   const e = ENEMIES[faction]; if (!e || !e.launchSites || !e.launchSites.length) return -1;
   const now = Date.now(); let best = -1, bestD = Infinity;
   for (let i = 0; i < e.launchSites.length; i++) {
+    if (mpSiteDestroyed(faction, i)) continue;   // v2.27.6 — destroyed sites never fire
     if (requireUnsuppressed && state.disabledLaunchSites && state.disabledLaunchSites[faction + '_' + i] > now) continue;
     const s = e.launchSites[i], d = haversineKm(s.lat, s.lon, lat, lon);
     if (d < bestD) { bestD = d; best = i; }
@@ -23851,7 +23890,7 @@ function mpBuildSnapshot() {
   return {
     t: 'snap', gt: Math.round(state.gameTime), dn: state.dayNight, sp: state.speed,
     esc: Math.round(MP.escalation), unl: Object.assign({}, MP.unlocked), gf: MP.guestFaction,
-    ars: MP.arsenal, rel: mpReloadRemaining(),
+    ars: MP.arsenal, rel: mpReloadRemaining(), cf: state.ceasefire ? 1 : 0,
     op: Math.round(MP.scoreOpf || 0), dfd: Math.round((st.intercepted || 0) * 10), cas: MP.casualties || 0,
     war: Math.round(MP.warRisk || 0), wd: MP.warDeclared ? 1 : 0, ui: Math.round(state.usInvolvement || 0),   // v2.26.7 — sync US involvement so US targets become attackable on the attacker's client
     smug: (function () { const o = {}, nw = Date.now(); FACTION_ORDER.forEach(function (f) { o[f] = Math.max(0, ((MP.smuggleReadyBy && MP.smuggleReadyBy[f]) || 0) - nw); }); return o; })(),
@@ -23903,6 +23942,7 @@ function mpGuestApplySnapshot(s) {
   state.gameTime = s.gt; state.dayNight = s.dn;
   MP.escalation = s.esc;
   if (s.ui != null) state.usInvolvement = s.ui;   // v2.26.7 — US involvement (drives usAtWar / attackable US targets)
+  state.ceasefire = !!s.cf;   // v2.27.6 — ceasefire state synced from the host
   if (!MP.ffa) { MP.unlocked = s.unl || MP.unlocked; MP.guestFaction = s.gf || MP.guestFaction; }   // FFA: keep my own faction lock
   MP.arsenal = s.ars || MP.arsenal; MP.reloadRemaining = s.rel || {}; MP.guestStats = s.st || null;
   MP.scoreOpf = s.op || 0; MP.scoreDef = s.dfd || 0; MP.casualties = s.cas || 0;
@@ -24047,10 +24087,11 @@ function mpGuestLaunchAt(lat, lon) {
   const _isSup = (idx) => !!(state.disabledLaunchSites && state.disabledLaunchSites[am.faction + '_' + idx] > _supNow);
   let siteIdx;
   if (am.siteIndex == null) {
-    siteIdx = mpNearestLaunchSite(am.faction, lat, lon, true);   // v2.27.3 FIX — nearest UNSUPPRESSED launcher (random pick was almost always out of range → silent launch failure)
-    if (siteIdx < 0) { showNotification('ALL LAUNCHERS SUPPRESSED', 'Every launch site is under counter-battery fire — wait for them to recover.', 'warn'); return false; }
+    siteIdx = mpNearestLaunchSite(am.faction, lat, lon, true);   // v2.27.3 FIX — nearest live UNSUPPRESSED launcher (random pick was almost always out of range → silent launch failure)
+    if (siteIdx < 0) { const allDead = e.launchSites.every(function (_, i) { return mpSiteDestroyed(am.faction, i); }); showNotification(allDead ? 'ALL BASES DESTROYED' : 'ALL LAUNCHERS SUPPRESSED', allDead ? 'Every launch site has been destroyed — this faction can no longer fire.' : 'Every launch site is under counter-battery fire — wait for them to recover.', 'warn'); return false; }
   } else {
     siteIdx = am.siteIndex;
+    if (mpSiteDestroyed(am.faction, siteIdx)) { showNotification('BASE DESTROYED', e.launchSites[siteIdx].name + ' is destroyed and cannot fire — pick another base.', 'warn'); return false; }   // v2.27.6 — destroyed site can't fire
     if (_isSup(siteIdx)) { showNotification('LAUNCHER SUPPRESSED', e.launchSites[siteIdx].name + ' is suppressed — pick another base or wait.', 'warn'); return false; }
   }
   const site = e.launchSites[siteIdx];
@@ -24236,6 +24277,7 @@ function mpFfaHostOnMessage(msg, cRec) {
   if (msg.t === 'axistask') { if (cRec.faction === 'iran') { state.iranTask = msg.task; if (typeof showNotification === 'function') showNotification('☪ TEHRAN DIRECTIVE', msg.task, 'info'); mpSend({ t: 'axistask', task: msg.task }); } return; }   // v2.26.7 #8 — Iran (guest) directive → host applies + rebroadcasts to the axis
   if (msg.t === 'permReq') { mpDeliverPermReq(msg, cRec); return; }   // v2.27.1 — relay an ally-permission request to the US/Iran player
   if (msg.t === 'permResp') { const rc = MP._permRoute && MP._permRoute[msg.reqId]; if (MP._permRoute) delete MP._permRoute[msg.reqId]; if (rc) mpSendTo(rc, msg); else mpApplyPermResp(msg); return; }   // v2.27.1 — relay the decision back to the requester
+  if (msg.t === 'ceasefireReq') { state.ceasefire = true; if (typeof showNotification === 'function') showNotification('🏳 CEASEFIRE CALLED', ((cRec && cRec.nick) || (typeof ffaRoleLabel === 'function' && cRec && ffaRoleLabel(cRec.faction)) || 'A player') + ' called a ceasefire — all fire halted.', 'success'); mpSend({ t: 'redline', title: '🏳 CEASEFIRE', body: 'A ceasefire is in effect — hold fire.' }); if (typeof mpUpdateCeasefireBtn === 'function') mpUpdateCeasefireBtn(); return; }   // v2.27.6 — a player calls a ceasefire → host enacts it
 }
 function mpFfaBroadcastRoster() { if (MP.role === 'host') mpSend({ t: 'roster', owners: MP.factionOwners, usa: MP.usaPresent }); }
 function mpFfaHostStart() {
@@ -24400,6 +24442,38 @@ function mpFfaInstallIsraelAidButton() {
   b.style.cssText = 'position:fixed;bottom:120px;left:14px;z-index:9999;background:rgba(20,40,70,0.95);border:1px solid #5b8def;color:#bfe0ff;padding:8px 12px;font-size:12px;cursor:pointer;border-radius:5px;';
   b.onclick = function () { mpFfaRequestUsAid(); };
   document.body.appendChild(b);
+}
+// v2.27.6 — CEASEFIRE: the host declares/lifts it (authoritative); any player can CALL one (request → host
+// enacts). While active, NO side can launch. Synced via the snapshot (cf).
+function mpInstallCeasefireBtn() {
+  if (!(typeof MP !== 'undefined' && MP.enabled)) return;
+  let b = el('mp-ceasefire-btn');
+  if (!b) {
+    b = document.createElement('button'); b.id = 'mp-ceasefire-btn';
+    b.style.cssText = 'position:fixed;bottom:80px;left:14px;z-index:9999;background:rgba(30,50,30,0.95);border:1px solid #7fcf8a;color:#bfffc8;padding:8px 12px;font-size:12px;cursor:pointer;border-radius:5px;';
+    b.onclick = function () { mpToggleCeasefire(); };
+    document.body.appendChild(b);
+  }
+  mpUpdateCeasefireBtn();
+}
+function mpUpdateCeasefireBtn() {
+  const b = el('mp-ceasefire-btn'); if (!b) return;
+  const on = !!state.ceasefire;
+  if (MP.role === 'host') b.textContent = on ? '🏳 CEASEFIRE ON — click to lift' : '🏳 Declare ceasefire';
+  else b.textContent = on ? '🏳 CEASEFIRE in effect' : '🏳 Request ceasefire';
+  b.style.borderColor = on ? '#ffd479' : '#7fcf8a';
+  b.style.background = on ? 'rgba(70,60,20,0.95)' : 'rgba(30,50,30,0.95)';
+}
+function mpToggleCeasefire() {
+  if (MP.role === 'host') {
+    state.ceasefire = !state.ceasefire;
+    if (typeof showNotification === 'function') showNotification('🏳 CEASEFIRE', state.ceasefire ? 'Ceasefire DECLARED — all fire halted.' : 'Ceasefire LIFTED — hostilities may resume.', state.ceasefire ? 'success' : 'warn');
+    if (typeof mpSend === 'function') mpSend({ t: 'redline', title: '🏳 CEASEFIRE', body: state.ceasefire ? 'A ceasefire is in effect — hold fire.' : 'Ceasefire lifted — hostilities resume.' });
+    mpUpdateCeasefireBtn();
+  } else {
+    mpSend({ t: 'ceasefireReq' });
+    if (typeof mpToast === 'function') mpToast(state.ceasefire ? 'Asked the host to lift the ceasefire' : 'Ceasefire requested', 'info');
+  }
 }
 function mpFfaInstallUsaPanel() {
   let p = el('mp-usa-panel');
