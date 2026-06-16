@@ -2182,6 +2182,14 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.27.8  — DIPLOMACY + TRUMP. (1) Ceasefire is now a NEGOTIATION: the button opens talks where success
+//            depends on escalation (esc 0 ≈ 80% / esc 100 ≈ 9%) and you can BRIBE ($50K/$200K) to raise the
+//            odds; host/single-player rolls authoritatively, guests propose to the host (diploPropose), and
+//            either side can request to lift. (2) TRUMP — unpredictable US events (tickTrumpEvents, ~75-165s):
+//            surprise ceasefire, huge aid package, warns Iran (+involvement), tantrum/freezes shipments,
+//            pulls back (−involvement), deal's-off. (3) Reactive: bombing Dahieh / a capital / a leader
+//            (trumpCheckStrike) can make Trump FURIOUS and cut supplies (freeze + support drop). Broadcast
+//            to all; host/single-player authority.
 //   2.27.7  — (1) SYNC FIX: the defender's damage to ALL enemy targets (HQ/leader/airbase/strategic/city —
 //            not just launch sites) now syncs to the OPFOR via a new snapshot field (etd), so both players
 //            see the same damaged/destroyed targets (was: defender saw ✕, OPFOR saw them intact). (2) MOBILE
@@ -3421,7 +3429,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.27.7';
+const GAME_VERSION = '2.27.8';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -6557,6 +6565,7 @@ function launchAirStrike(lat, lon, approved) {
   state.strikesLeft--;
   state.strikeCooldown = 8000;   // быстрая перезарядка
   if (typeof MP !== 'undefined' && MP.enabled && MP.role === 'host') mpEscalateDefenderStrike(target.lat, target.lon, target);   // v2.25.5 — deep/symbolic strikes raise escalation
+  if (!approved && typeof trumpCheckStrike === 'function') try { trumpCheckStrike(target); } catch (e) {}   // v2.27.8 — bombing Dahieh/capitals can make Trump cut supplies
   state.strikeMode = false;
   document.getElementById('btn-strike').classList.remove('active');
   document.getElementById('strike-count').textContent = state.strikesLeft;
@@ -14225,6 +14234,7 @@ function gameLoop(time) {
       if (typeof tickRedLines === 'function') tickRedLines(dt);             // v2.26.4 — red-line crisis triggers (#7)
       if (typeof usInvolvementTick === 'function') usInvolvementTick(dt);   // v2.26.6 — US drawn in by escalation (#9)
       if (typeof tickWarDailyStrikes === 'function') tickWarDailyStrikes(dt);   // v2.27.4 — daily strategic strikes once war is on
+      if (typeof tickTrumpEvents === 'function') tickTrumpEvents(dt);           // v2.27.8 — unpredictable Trump events
       if (typeof mpAiIsraelMaybeRequestAid === 'function') mpAiIsraelMaybeRequestAid();   // v2.26.8 — AI Israel asks the USA player for help
       updateCivilian(dt);
       updateIntel(dt);
@@ -22687,6 +22697,7 @@ function startScenario(name) {
   state.enemyTargets = ENEMY_TARGETS.map(t => ({ ...t, alive: true, damage: 0 }));
   state.redLines = {};                                     // v2.26.4 — red-line crisis flags reset each game
   state._warStrikeAt = 0;                                  // v2.27.4 — daily war-strike timer reset
+  state._trumpAt = 0;                                      // v2.27.8 — Trump-event timer reset
   state.destroyedLaunchSites = {}; state.capitulated = {}; state.ceasefire = false;   // v2.27.6 — base destruction / capitulation / ceasefire reset
   state.mobileLaunchers = [];                              // v2.27.7 — mobile launchers reset
   state.iranControl = 70; state.iranPatience = 0; state.iranChaos = 0;   // v2.26.5 #8 — Iran axis system reset
@@ -23627,7 +23638,7 @@ function mpReset() {
 function mpTeardownUI() {
   try { mpReset(); } catch (e) {}
   MP.started = false; MP.peerNick = ''; MP.ping = 0; MP.phase = 'battle'; MP.siteDamage = {};
-  ['mp-hud', 'mp-status', 'mp-chat', 'mp-opfor-info', 'mp-deploy-overlay', 'mp-usa-panel', 'mp-aid-btn', 'us-panel', 'iran-panel', 'iran-cmd-panel', 'us-perm-modal', 'iran-perm-modal', 'mp-ally-decide', 'mp-ceasefire-btn'].forEach(function (id) {
+  ['mp-hud', 'mp-status', 'mp-chat', 'mp-opfor-info', 'mp-deploy-overlay', 'mp-usa-panel', 'mp-aid-btn', 'us-panel', 'iran-panel', 'iran-cmd-panel', 'us-perm-modal', 'iran-perm-modal', 'mp-ally-decide', 'mp-ceasefire-btn', 'mp-diplo-modal'].forEach(function (id) {
     const e = el(id); if (e && e.parentNode) e.parentNode.removeChild(e);
   });
 }
@@ -23680,7 +23691,8 @@ function mpHostOnMessage(msg) {
     case 'smuggle': mpHostSmuggle(); break;
     case 'pause': mpApplyRemotePause(!!msg.paused); break;
     case 'ping': break;
-    case 'ceasefireReq': state.ceasefire = true; if (typeof showNotification === 'function') showNotification('🏳 CEASEFIRE CALLED', 'The OPFOR called a ceasefire — all fire halted.', 'success'); if (typeof mpSend === 'function') mpSend({ t: 'redline', title: '🏳 CEASEFIRE', body: 'A ceasefire is in effect — hold fire.' }); if (typeof mpUpdateCeasefireBtn === 'function') mpUpdateCeasefireBtn(); break;   // v2.27.6
+    case 'diploPropose': diploResolveCeasefire(msg.bribe || 0, false, 'The OPFOR'); break;   // v2.27.8 — negotiation roll
+    case 'ceasefireLift': state.ceasefire = false; if (typeof showNotification === 'function') showNotification('🏳 CEASEFIRE LIFTED', 'The OPFOR asked to resume — ceasefire lifted.', 'warn'); if (typeof mpSend === 'function') mpSend({ t: 'redline', title: '🏳 CEASEFIRE LIFTED', body: 'Hostilities resume.' }); if (typeof mpUpdateCeasefireBtn === 'function') mpUpdateCeasefireBtn(); break;
   }
 }
 function mpHostApplyLaunch(cmd) {
@@ -24341,7 +24353,8 @@ function mpFfaHostOnMessage(msg, cRec) {
   if (msg.t === 'axistask') { if (cRec.faction === 'iran') { state.iranTask = msg.task; if (typeof showNotification === 'function') showNotification('☪ TEHRAN DIRECTIVE', msg.task, 'info'); mpSend({ t: 'axistask', task: msg.task }); } return; }   // v2.26.7 #8 — Iran (guest) directive → host applies + rebroadcasts to the axis
   if (msg.t === 'permReq') { mpDeliverPermReq(msg, cRec); return; }   // v2.27.1 — relay an ally-permission request to the US/Iran player
   if (msg.t === 'permResp') { const rc = MP._permRoute && MP._permRoute[msg.reqId]; if (MP._permRoute) delete MP._permRoute[msg.reqId]; if (rc) mpSendTo(rc, msg); else mpApplyPermResp(msg); return; }   // v2.27.1 — relay the decision back to the requester
-  if (msg.t === 'ceasefireReq') { state.ceasefire = true; if (typeof showNotification === 'function') showNotification('🏳 CEASEFIRE CALLED', ((cRec && cRec.nick) || (typeof ffaRoleLabel === 'function' && cRec && ffaRoleLabel(cRec.faction)) || 'A player') + ' called a ceasefire — all fire halted.', 'success'); mpSend({ t: 'redline', title: '🏳 CEASEFIRE', body: 'A ceasefire is in effect — hold fire.' }); if (typeof mpUpdateCeasefireBtn === 'function') mpUpdateCeasefireBtn(); return; }   // v2.27.6 — a player calls a ceasefire → host enacts it
+  if (msg.t === 'diploPropose') { diploResolveCeasefire(msg.bribe || 0, false, ((cRec && cRec.nick) || (typeof ffaRoleLabel === 'function' && cRec && ffaRoleLabel(cRec.faction)) || 'A player')); return; }   // v2.27.8 — a player negotiates → host rolls (escalation + bribe)
+  if (msg.t === 'ceasefireLift') { state.ceasefire = false; if (typeof showNotification === 'function') showNotification('🏳 CEASEFIRE LIFTED', 'A player asked to resume — ceasefire lifted.', 'warn'); mpSend({ t: 'redline', title: '🏳 CEASEFIRE LIFTED', body: 'Hostilities resume.' }); if (typeof mpUpdateCeasefireBtn === 'function') mpUpdateCeasefireBtn(); return; }
 }
 function mpFfaBroadcastRoster() { if (MP.role === 'host') mpSend({ t: 'roster', owners: MP.factionOwners, usa: MP.usaPresent }); }
 function mpFfaHostStart() {
@@ -24523,20 +24536,107 @@ function mpInstallCeasefireBtn() {
 function mpUpdateCeasefireBtn() {
   const b = el('mp-ceasefire-btn'); if (!b) return;
   const on = !!state.ceasefire;
-  if (MP.role === 'host') b.textContent = on ? '🏳 CEASEFIRE ON — click to lift' : '🏳 Declare ceasefire';
-  else b.textContent = on ? '🏳 CEASEFIRE in effect' : '🏳 Request ceasefire';
+  if (MP.role === 'host') b.textContent = on ? '🏳 CEASEFIRE ON — click to lift' : '🕊 Negotiate ceasefire';
+  else b.textContent = on ? '🏳 CEASEFIRE — request lift' : '🕊 Negotiate ceasefire';
   b.style.borderColor = on ? '#ffd479' : '#7fcf8a';
   b.style.background = on ? 'rgba(70,60,20,0.95)' : 'rgba(30,50,30,0.95)';
 }
+// v2.27.8 — ceasefire is now a NEGOTIATION (diplomacy): success depends on escalation (higher = less
+// likely) and you can grease the deal with money. ON → click to lift (host) / request lift (guest).
 function mpToggleCeasefire() {
-  if (MP.role === 'host') {
-    state.ceasefire = !state.ceasefire;
-    if (typeof showNotification === 'function') showNotification('🏳 CEASEFIRE', state.ceasefire ? 'Ceasefire DECLARED — all fire halted.' : 'Ceasefire LIFTED — hostilities may resume.', state.ceasefire ? 'success' : 'warn');
-    if (typeof mpSend === 'function') mpSend({ t: 'redline', title: '🏳 CEASEFIRE', body: state.ceasefire ? 'A ceasefire is in effect — hold fire.' : 'Ceasefire lifted — hostilities resume.' });
-    mpUpdateCeasefireBtn();
+  if (state.ceasefire) {
+    if (MP.role === 'host') { state.ceasefire = false; if (typeof showNotification === 'function') showNotification('🏳 CEASEFIRE LIFTED', 'Hostilities may resume.', 'warn'); if (typeof mpSend === 'function') mpSend({ t: 'redline', title: '🏳 CEASEFIRE LIFTED', body: 'Hostilities resume.' }); mpUpdateCeasefireBtn(); }
+    else { mpSend({ t: 'ceasefireLift' }); if (typeof mpToast === 'function') mpToast('Asked the host to lift the ceasefire', 'info'); }
+  } else { mpOpenDiploModal(); }
+}
+function diploAcceptChance(bribe) {
+  const esc = (typeof MP !== 'undefined' && MP.enabled) ? (MP.escalation || 0) : ((state.escalationLevel || 0) * 20);
+  return Math.max(0.04, Math.min(0.97, 0.80 - esc / 140 + (bribe || 0) / 250000));   // esc 0 ≈ 80%, esc 100 ≈ 9%; $250K ≈ +100%
+}
+function mpCloseDiploModal() { const m = el('mp-diplo-modal'); if (m) m.style.display = 'none'; }
+function mpOpenDiploModal() {
+  const esc = Math.round((typeof MP !== 'undefined' && MP.enabled) ? (MP.escalation || 0) : ((state.escalationLevel || 0) * 20));
+  let m = el('mp-diplo-modal');
+  if (!m) { m = document.createElement('div'); m.id = 'mp-diplo-modal'; document.body.appendChild(m); }
+  m.style.cssText = 'position:fixed;top:46%;left:50%;transform:translate(-50%,-50%);z-index:10002;background:rgba(14,22,30,0.98);border:2px solid #7fcf8a;border-radius:10px;padding:18px 20px;color:#dfe;font:13px/1.5 sans-serif;width:380px;box-shadow:0 8px 40px rgba(0,0,0,.7);';
+  m.innerHTML = '<div style="color:#9fffc0;font-weight:bold;font-size:15px;margin-bottom:6px;">🕊 CEASEFIRE TALKS</div>' +
+    '<div style="margin-bottom:10px;color:#bfe;">Escalation <b>' + esc + '</b>/100 — the higher it is, the less they want to stop. Money greases the deal' + (MP.role !== 'guest' ? ' (you have $' + Math.round((state.money || 0) / 1000) + 'K)' : '') + '.</div>' +
+    '<div id="mp-diplo-btns" style="display:flex;flex-direction:column;gap:6px;"></div>';
+  m.style.display = 'block';
+  const btns = el('mp-diplo-btns'); btns.innerHTML = '';
+  const mk = function (txt, col, bribe) { const b = document.createElement('button'); b.textContent = txt; b.style.cssText = 'padding:8px 12px;font-size:12px;border-radius:5px;cursor:pointer;border:1px solid ' + col + ';background:rgba(255,255,255,0.05);color:' + col + ';text-align:left;'; b.onclick = function () { diploProposeCeasefire(bribe); }; btns.appendChild(b); };
+  mk('🕊 Propose ceasefire — ' + Math.round(diploAcceptChance(0) * 100) + '% chance', '#9fffc0', 0);
+  mk('💵 Bribe $50K — ' + Math.round(diploAcceptChance(50000) * 100) + '% chance', '#ffd479', 50000);
+  mk('💰 Bribe $200K — ' + Math.round(diploAcceptChance(200000) * 100) + '% chance', '#ffd479', 200000);
+  const cb = document.createElement('button'); cb.textContent = 'Cancel'; cb.style.cssText = 'padding:7px 12px;font-size:12px;border-radius:5px;cursor:pointer;border:1px solid #999;background:rgba(255,255,255,.05);color:#999;'; cb.onclick = mpCloseDiploModal; btns.appendChild(cb);
+}
+function diploProposeCeasefire(bribe) {
+  bribe = bribe || 0; mpCloseDiploModal();
+  if (typeof MP !== 'undefined' && MP.enabled && MP.role === 'guest') { mpSend({ t: 'diploPropose', bribe: bribe }); if (typeof mpToast === 'function') mpToast('Ceasefire proposed' + (bribe ? (' + $' + (bribe / 1000) + 'K') : ''), 'info'); return; }
+  diploResolveCeasefire(bribe, true, 'You');   // host / single-player rolls authoritatively (and pays the bribe)
+}
+function diploResolveCeasefire(bribe, deduct, who) {
+  bribe = bribe || 0;
+  if (deduct && bribe && (state.money || 0) >= bribe) state.money -= bribe;
+  const chance = diploAcceptChance(bribe), ok = Math.random() < chance;
+  if (typeof logEvent === 'function') logEvent('🕊 ' + (who || 'A side') + ' proposed a ceasefire' + (bribe ? (' + $' + (bribe / 1000) + 'K') : '') + ' — ' + (ok ? 'ACCEPTED' : 'REJECTED') + ' (' + Math.round(chance * 100) + '%)', ok ? 'success' : 'warn');
+  if (ok) {
+    state.ceasefire = true;
+    if (typeof showNotification === 'function') showNotification('🕊 CEASEFIRE AGREED', 'Both sides agreed to halt fire' + (bribe ? ' — the money helped' : '') + '.', 'success');
+    if (typeof MP !== 'undefined' && MP.enabled && MP.role === 'host' && typeof mpSend === 'function') mpSend({ t: 'redline', title: '🕊 CEASEFIRE AGREED', body: 'A ceasefire is in effect — hold fire.' });
+  } else if (typeof showNotification === 'function') showNotification('🕊 TALKS FAILED', 'They refused' + (bribe ? ' even with the money' : '') + ' — escalation too high. Lower it and try again.', 'warn');
+  if (typeof mpUpdateCeasefireBtn === 'function') mpUpdateCeasefireBtn();
+}
+// v2.27.8 — TRUMP: unpredictable US events. Random (tickTrumpEvents): surprise ceasefire, big aid, warns
+// Iran, freezes shipments, pulls back, deal's off. Reactive (trumpCheckStrike): bombing Dahieh / a capital
+// / a leader can make him FURIOUS and cut supplies. Host / single-player authority; broadcast to all.
+function trumpEvent(title, body, kind) {
+  if (typeof showNotification === 'function') showNotification(title, body, kind || 'warn');
+  if (typeof logEvent === 'function') logEvent('🇺🇸 ' + title + ' — ' + body, kind === 'danger' ? 'danger' : (kind === 'success' ? 'success' : 'warn'));
+  if (typeof MP !== 'undefined' && MP.enabled && MP.role === 'host' && typeof mpSend === 'function') { try { mpSend({ t: 'redline', title: title, body: body }); } catch (e) {} }
+}
+function trumpCheckStrike(target) {
+  if (!target) return;
+  if (typeof MP !== 'undefined' && MP.enabled && MP.role === 'guest') return;
+  const nm = target.name || '';
+  const sensitive = target.id === 't_dahieh' || target.type === 'capital' || target.type === 'leader' || /beirut|dahieh|gaza city|tehran|sanaa/i.test(nm);
+  if (!sensitive) return;
+  if (Math.random() < 0.45) {
+    state.usSupplyFrozenUntil = Date.now() + 90000;
+    if (typeof usSetSupport === 'function') usSetSupport((typeof usSupportVal === 'function' ? usSupportVal() : 60) - 12);
+    trumpEvent('😡 TRUMP — FURIOUS', 'You hit ' + (nm || 'a target I told you to leave alone') + '?! No more weapons until you behave — shipments CUT.', 'danger');
+  }
+}
+function tickTrumpEvents(dt) {
+  if (!state.active) return;
+  if (typeof MP !== 'undefined' && MP.enabled && MP.role === 'guest') return;
+  const now = Date.now();
+  if (!state._trumpAt) { state._trumpAt = now + 60000 + Math.random() * 60000; return; }   // first ~1-2 min in
+  if (now < state._trumpAt) return;
+  state._trumpAt = now + 75000 + Math.random() * 90000;   // then every ~75-165s
+  const r = Math.random();
+  if (r < 0.22) {
+    state.ceasefire = true;
+    trumpEvent('🕊 TRUMP — SURPRISE CEASEFIRE', 'I just ended it. Total peace, very beautiful. Everybody STOP — right now!', 'success');
+    if (typeof MP !== 'undefined' && MP.enabled && MP.role === 'host' && typeof mpSend === 'function') mpSend({ t: 'redline', title: '🕊 TRUMP CEASEFIRE', body: 'A ceasefire is in effect — hold fire.' });
+    if (typeof mpUpdateCeasefireBtn === 'function') mpUpdateCeasefireBtn();
+  } else if (r < 0.45) {
+    if (typeof MP !== 'undefined' && MP.enabled && MP.role === 'host' && typeof mpFfaApplyUsaGrant === 'function') mpFfaApplyUsaGrant('package');
+    else { state.money = (state.money || 0) + 3000000; if (state.batteries) state.batteries.forEach(function (b) { b.ammo = Math.min(b.capacity || 999, (b.ammo || 0) + 8); }); state.strikesLeft = (state.strikesLeft || 0) + 3; }
+    if (typeof usSetSupport === 'function') usSetSupport((typeof usSupportVal === 'function' ? usSupportVal() : 60) + 8);
+    trumpEvent('💰 TRUMP — BIG AID', 'Sending our friends everything — planes, money, the best missiles. Nobody does it better.', 'success');
+  } else if (r < 0.62) {
+    if (typeof usInvSet === 'function') usInvSet((typeof usInvVal === 'function' ? usInvVal() : 12) + 14);
+    trumpEvent('🇺🇸 TRUMP — WARNS IRAN', 'Iran, do NOT test me. You will see things nobody has ever seen before.', 'warn');
+  } else if (r < 0.78) {
+    state.usSupplyFrozenUntil = now + 75000; if (typeof usSetSupport === 'function') usSetSupport((typeof usSupportVal === 'function' ? usSupportVal() : 60) - 8);
+    trumpEvent('😡 TRUMP — TANTRUM', 'Frankly, not happy with how this is going. Freezing the shipments until people behave.', 'danger');
+  } else if (r < 0.90) {
+    if (typeof usInvSet === 'function') usInvSet(Math.max(0, (typeof usInvVal === 'function' ? usInvVal() : 12) - 15));
+    trumpEvent('🚪 TRUMP — PULLS BACK', 'Not our war. Bringing our people home. Let them figure it out.', 'warn');
   } else {
-    mpSend({ t: 'ceasefireReq' });
-    if (typeof mpToast === 'function') mpToast(state.ceasefire ? 'Asked the host to lift the ceasefire' : 'Ceasefire requested', 'info');
+    if (state.ceasefire) { state.ceasefire = false; trumpEvent('💥 TRUMP — DEAL’S OFF', 'They blew it. No more ceasefire. Sad!', 'danger'); if (typeof mpUpdateCeasefireBtn === 'function') mpUpdateCeasefireBtn(); }
+    else { state.money = (state.money || 0) + 1500000; trumpEvent('🤝 TRUMP — A DEAL', 'Made a great deal. Tremendous. Money is coming.', 'success'); }
   }
 }
 function mpFfaInstallUsaPanel() {
