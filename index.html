@@ -2125,6 +2125,10 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.25.1  — MP pause is manual + synced (user: "отключи ограничение на паузу"). Removed the
+//            auto-pause on disconnect/timeout (now just a one-time banner + recovery notice). The
+//            pause button / Space now broadcasts {t:'pause'} so either player OR the host pauses &
+//            resumes BOTH sides; the host can also pause locally to wait for an AFK opponent.
 //   2.25.0  — MULTIPLAYER (user): 1v1 Defender (host) vs OPFOR (guest) over WebRTC P2P (PeerJS,
 //            room code, no backend — works on GitHub Pages). Host is authoritative: runs the full
 //            sim, applies the guest's launch/faction-switch commands, broadcasts a lightweight
@@ -3129,7 +3133,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.25.0';
+const GAME_VERSION = '2.25.1';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -22957,14 +22961,30 @@ function mpSend(msg) { try { if (MP.conn && MP.connected) MP.conn.send(msg); } c
 function mpOnMessage(msg) {
   if (!msg || !msg.t) return;
   MP.lastRecvAt = Date.now();
+  if (MP._lostNotified) {   // messages flowing again → opponent recovered
+    MP._lostNotified = false;
+    const dot = el('mp-hud-conn'); if (dot) { dot.style.color = '#7fffb0'; dot.textContent = '●'; }
+    if (MP.enabled) mpToast('Opponent reconnected', 'info');
+  }
   if (MP.role === 'host') mpHostOnMessage(msg); else mpGuestOnMessage(msg);
 }
 function mpOnPeerLost(reason) {
   if (!MP.enabled) { mpStatus(reason); return; }
-  MP.connected = false;
-  if (!state.paused) { state.paused = true; const pb = el('btn-pause'); if (pb) pb.textContent = '▶ RESUME'; }
+  if (reason === 'closed') MP.connected = false;   // a hard channel close; a 'timeout' may still recover
   const dot = el('mp-hud-conn'); if (dot) { dot.style.color = '#ff5544'; dot.textContent = '○'; }
-  mpToast('Opponent ' + (reason === 'timeout' ? 'timed out' : 'disconnected') + ' — game paused', 'danger');
+  // v2.25.1 — DON'T auto-pause (user). If a player steps away, they (or the host) press ⏸ themselves.
+  if (!MP._lostNotified) {
+    MP._lostNotified = true;
+    mpToast('Opponent ' + (reason === 'timeout' ? 'connection lost' : 'disconnected') + ' — press ⏸ to pause if you want to wait', 'danger');
+  }
+}
+// v2.25.1 — pause is SYNCED across the network: either player (or the host) can pause/resume for both.
+function mpApplyRemotePause(paused) {
+  MP._applyingRemotePause = true;
+  state.paused = !!paused;
+  const pb = el('btn-pause'); if (pb) pb.textContent = paused ? '▶ RESUME' : '⏸ PAUSE';
+  MP._applyingRemotePause = false;
+  mpToast(paused ? 'Opponent paused the game' : 'Opponent resumed the game', 'info');
 }
 function mpReset() {
   try { if (MP.conn) MP.conn.close(); } catch (e) {}
@@ -23002,6 +23022,7 @@ function mpHostOnMessage(msg) {
       if (MP.unlocked[msg.faction]) MP.guestFaction = msg.faction;
       break;
     case 'launch': mpHostApplyLaunch(msg); break;
+    case 'pause': mpApplyRemotePause(!!msg.paused); break;
     case 'ping': break;
   }
 }
@@ -23052,7 +23073,7 @@ function mpReloadRemaining() { const now = Date.now(), o = {}; FACTION_ORDER.for
 function mpHostMaybeSnapshot(dt) {
   if (!MP.connected) return;
   const now = Date.now();
-  if (now - MP.lastRecvAt > 9000) { mpOnPeerLost('timeout'); return; }
+  if (now - MP.lastRecvAt > 9000 && !MP._lostNotified) mpOnPeerLost('timeout');   // notify once, keep simulating (no auto-pause)
   if (MP.escalation > 0) { MP.escalation = Math.max(0, MP.escalation - dt * 0.0015); mpRecomputeUnlocks(); }
   MP.snapAccum += dt;
   if (MP.snapAccum < MP.snapIntervalMs) return;
@@ -23104,6 +23125,7 @@ function mpGuestOnMessage(msg) {
     case 'hello': break;
     case 'start': mpGuestStart(msg.faction || MP.guestFaction); break;
     case 'snap': mpGuestApplySnapshot(msg); break;
+    case 'pause': mpApplyRemotePause(!!msg.paused); break;
   }
 }
 function mpGuestApplySnapshot(s) {
@@ -23165,7 +23187,7 @@ function mpGuestTick(dt) {
   }
   MP._pingAccum = (MP._pingAccum || 0) + dt;
   if (MP._pingAccum > 2000) { MP._pingAccum = 0; mpSend({ t: 'ping' }); }
-  if (MP.connected && now - MP.lastRecvAt > 9000) mpOnPeerLost('timeout');
+  if (MP.connected && now - MP.lastRecvAt > 9000 && !MP._lostNotified) mpOnPeerLost('timeout');
 }
 function mpGuestLaunchAt(lat, lon) {
   const am = state.attackMode; if (!am || !am.faction || !am.type) return false;
@@ -23289,6 +23311,10 @@ function mpLobbyStatus(s, extra) {
   const startBtn = el('mp-start-btn'); if (startBtn) startBtn.onclick = () => mpHostStart();
   const copyBtn = el('mp-copy-code'); if (copyBtn) copyBtn.onclick = () => { try { navigator.clipboard.writeText(MP.roomCode || ''); copyBtn.textContent = 'COPIED'; setTimeout(() => { copyBtn.textContent = 'COPY'; }, 1200); } catch (e) {} };
   const codeInput = el('mp-code-input'); if (codeInput) codeInput.addEventListener('keydown', (e) => { if (e.key === 'Enter' && connectBtn) connectBtn.click(); });
+  // v2.25.1 — broadcast pause/resume to the peer so a manual ⏸ (button or Space) pauses BOTH sides.
+  // (addEventListener fires AFTER the existing onclick that toggles state.paused, so we read the new value.)
+  const pauseBtn = el('btn-pause');
+  if (pauseBtn) pauseBtn.addEventListener('click', () => { if (MP.enabled && MP.connected && !MP._applyingRemotePause) mpSend({ t: 'pause', paused: !!state.paused }); });
 })();
 console.log('[MP] SHIELD multiplayer module loaded (v' + (typeof GAME_VERSION !== 'undefined' ? GAME_VERSION : '?') + ')');
 </script>
