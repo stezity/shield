@@ -2182,6 +2182,14 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.27.3  — CRITICAL: OPFOR "clicks but nothing fires." Root cause: when no launch base was picked, the
+//            site was chosen at RANDOM — a faction whose sites span a country (Hezbollah: border→Beirut→
+//            Bekaa) almost always fired from a far site → out of range → silent fail (verified: 1/10 random
+//            launches fired vs 10/10 from the nearest). Fix: mpNearestLaunchSite picks the closest
+//            UNSUPPRESSED launcher to the target in all three paths (guest, host authority, single-player).
+//            Also: the Iran permission modal no longer triggers on ordinary salvos (was salvo>=8 / drone
+//            swarm / heavyRocket → popped on nearly every launch) — now only capital/center strikes and
+//            strategic missiles (ballistic/cluster/cruise) ask Tehran. Rockets/drones/mortars fire freely.
 //   2.27.2  — HIT EFFECTS MATTER (#7): a defender strike on an OPFOR depot/arsenal cuts that faction's
 //            stockpile (−35% destroyed / −15% damaged, every weapon); an airbase strike cuts its drone/
 //            cruise capability. Host-authoritative, synced to the OPFOR via the arsenal snapshot, logged.
@@ -3384,7 +3392,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.27.2';
+const GAME_VERSION = '2.27.3';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -13024,8 +13032,9 @@ function attackerLaunchAt(lat, lon, opts) {
   // Per-weapon range sanity: don't let a mortar (≤10 km real range) "fly" 100 km.
   const e = ENEMIES[state.attackMode.faction];
   let siteIdx = (state.attackMode.siteIndex == null)
-    ? Math.floor(Math.random() * e.launchSites.length)
+    ? mpNearestLaunchSite(state.attackMode.faction, lat, lon, true)   // v2.27.3 — nearest launcher to the click, not random
     : state.attackMode.siteIndex;
+  if (siteIdx < 0) siteIdx = 0;
   // === ATTACKER CAMPAIGN: skip damaged launch sites (>=100 dmg = OFFLINE) ===
   if (state.attacker && state.attacker.factionId === state.attackMode.faction) {
     const damaged = state.attacker.damagedSites || {};
@@ -23564,8 +23573,9 @@ function mpHostApplyLaunch(cmd) {
   if (Math.floor(stockObj[type] || 0) <= 0) return;
   let salvo = Math.max(1, Math.min(cmd.salvo || 1, 500));
   const e = ENEMIES[fid];
-  let siteIdx = (cmd.siteIndex == null) ? Math.floor(Math.random() * e.launchSites.length)
+  let siteIdx = (cmd.siteIndex == null) ? mpNearestLaunchSite(fid, cmd.targetLat, cmd.targetLon, false)
                                         : Math.max(0, Math.min(cmd.siteIndex | 0, e.launchSites.length - 1));
+  if (siteIdx < 0) siteIdx = 0;   // v2.27.3 — nearest launcher to the target, not random
   const spreadDeg = cmd.spread || 0.005;
   const lat = cmd.targetLat, lon = cmd.targetLon;
   if (state.disabledLaunchSites && state.disabledLaunchSites[fid + '_' + siteIdx] > Date.now()) return;   // v2.25.12 — suppressed site can't fire (authority)
@@ -23625,6 +23635,19 @@ function mpReachKm(fid) {
   const r = MP_REACH[fid] || { floor: 45, span: 220 };
   const e = Math.max(0, Math.min(100, MP.escalation || 0));
   return r.floor + Math.pow(e / 100, 1.4) * r.span;
+}
+// v2.27.3 — pick the NEAREST launch site to the target (random selection meant a faction with sites spread
+// across a country almost always fired from a far site → out of range → silent launch failure). Returns -1
+// if requireUnsuppressed and every site is suppressed.
+function mpNearestLaunchSite(faction, lat, lon, requireUnsuppressed) {
+  const e = ENEMIES[faction]; if (!e || !e.launchSites || !e.launchSites.length) return -1;
+  const now = Date.now(); let best = -1, bestD = Infinity;
+  for (let i = 0; i < e.launchSites.length; i++) {
+    if (requireUnsuppressed && state.disabledLaunchSites && state.disabledLaunchSites[faction + '_' + i] > now) continue;
+    const s = e.launchSites[i], d = haversineKm(s.lat, s.lon, lat, lon);
+    if (d < bestD) { bestD = d; best = i; }
+  }
+  return best;
 }
 // v2.26.2 — VISUAL shooting radius: translucent reach circles for Hamas/Hezbollah around their launch
 // sites, scaling with escalation. States (Iran/Houthi) are unlimited → no circle. Drawn for the local
@@ -23979,9 +24002,8 @@ function mpGuestLaunchAt(lat, lon) {
   const _isSup = (idx) => !!(state.disabledLaunchSites && state.disabledLaunchSites[am.faction + '_' + idx] > _supNow);
   let siteIdx;
   if (am.siteIndex == null) {
-    const avail = e.launchSites.map((_, idx) => idx).filter((idx) => !_isSup(idx));
-    if (!avail.length) { showNotification('ALL LAUNCHERS SUPPRESSED', 'Every launch site is under counter-battery fire — wait for them to recover.', 'warn'); return false; }
-    siteIdx = avail[Math.floor(Math.random() * avail.length)];
+    siteIdx = mpNearestLaunchSite(am.faction, lat, lon, true);   // v2.27.3 FIX — nearest UNSUPPRESSED launcher (random pick was almost always out of range → silent launch failure)
+    if (siteIdx < 0) { showNotification('ALL LAUNCHERS SUPPRESSED', 'Every launch site is under counter-battery fire — wait for them to recover.', 'warn'); return false; }
   } else {
     siteIdx = am.siteIndex;
     if (_isSup(siteIdx)) { showNotification('LAUNCHER SUPPRESSED', e.launchSites[siteIdx].name + ' is suppressed — pick another base or wait.', 'warn'); return false; }
@@ -24582,12 +24604,13 @@ function iranSetControl(v) { iranEnsure(); state.iranControl = Math.max(0, Math.
 function iranStatus() { const c = iranControlVal(); return c >= 80 ? { t: 'Full axis control', c: '#7fffb0' } : c >= 50 ? { t: 'Working coordination', c: '#bfe0ff' } : c >= 25 ? { t: 'Weak control', c: '#ffd479' } : { t: 'Coordination collapse', c: '#ff5b50' }; }
 function iranSeverity(am, lat, lon) {
   if (!am) return 0;
-  const ty = am.type, salvo = am.salvo || 1;
-  if (typeof haversineKm === 'function') { for (let i = 0; i < IRAN_CENTER.length; i++) if (haversineKm(lat, lon, IRAN_CENTER[i].lat, IRAN_CENTER[i].lon) <= 30) return 3; }   // strike on Israel's center
-  if (ty === 'ballistic' || ty === 'cluster') return 3;
-  if (ty === 'cruise' || salvo >= 12) return 2;
-  if ((ty === 'drone' && salvo >= 3) || salvo >= 8 || ty === 'heavyRocket') return 2;
-  return 0;
+  const ty = am.type;
+  // v2.27.3 — only TRULY major actions ask Tehran, so normal barrages fire freely (was: any salvo>=8 / drone
+  // swarm / heavyRocket triggered the modal on nearly every launch → felt like "can't shoot").
+  if (typeof haversineKm === 'function') { for (let i = 0; i < IRAN_CENTER.length; i++) if (haversineKm(lat, lon, IRAN_CENTER[i].lat, IRAN_CENTER[i].lon) <= 25) return 3; }   // strike on Israel's CENTER (Tel Aviv / Jerusalem)
+  if (ty === 'ballistic' || ty === 'cluster') return 3;   // strategic missiles
+  if (ty === 'cruise') return 2;
+  return 0;   // rockets / drones / mortars / heavy rockets → fire freely, no Iran gate
 }
 function iranSevLabel(sev) { return sev >= 3 ? 'strike on Israel’s center / strategic missile' : 'major attack (mass salvo / drone swarm)'; }
 function iranEvaluate(sev) {
