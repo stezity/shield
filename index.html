@@ -2130,6 +2130,15 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.25.8  — MP sync overhaul (user: guest threats/interceptors jerk; speed desync x5 vs x1). Root
+//            causes + fixes: (1) the guest extrapolated with speed-scaled `dt` while the velocity is
+//            WALL-CLOCK → at the guest's own x5 it raced ahead then snapped back each snapshot (the
+//            jerk). Now motion is a SMOOTH-FOLLOW model: each snapshot stores an authoritative anchor
+//            + wall-clock velocity; mpGuestTick chases the extrapolated anchor using REAL frame time
+//            (rawDt), frame-rate-independent, with a 400 ms extrapolation cap + teleport-on-big-desync.
+//            (2) game SPEED is now synced host→guest (snapshot `sp`), so the HUD/FX match. (3) host
+//            snapshot rate is WALL-CLOCK (~12.5/s) instead of dt-accumulated — at x5+ it was flooding
+//            a snapshot nearly every frame (bandwidth + jerk). Result: stable, smooth sync at any speed.
 //   2.25.7  — MP: no AI faction RETALIATION (user: "Hamas striking back" after a defender strike).
 //            When the human defender air-struck an enemy target/launch site, scheduleFactionRetaliation
 //            (+ TST / doctrinal / major variants) fired an AI counter-barrage ("RETALIATION INCOMING").
@@ -3183,7 +3192,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.25.7';
+const GAME_VERSION = '2.25.8';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -13733,7 +13742,7 @@ function gameLoop(time) {
       // v2.25.2 — wrapped in try/catch so an incomplete synced object can NEVER kill the loop (freeze).
       state.gameTime += dt;
       try {
-        mpGuestTick(dt);
+        mpGuestTick(rawDt);   // v2.25.8 — extrapolate in WALL-CLOCK (not speed-scaled dt) → no jerk
         updateExplosions(dt);
         // OREF zones are synced from the host (drawn in render); don't run updateAlerts here — it
         // would recompute/clobber them from the guest's incomplete threat objects. (v2.25.4)
@@ -22987,6 +22996,7 @@ const FACTION_ORDER = ['hamas', 'hezbollah', 'iran', 'houthi'];
 const el = (id) => document.getElementById(id);
 function r5(x) { return x == null ? x : Math.round(x * 100000) / 100000; }
 function r3(x) { return x == null ? x : Math.round(x * 1000) / 1000; }
+function clampv(v) { return (v === v) ? (v < -0.02 ? -0.02 : (v > 0.02 ? 0.02 : v)) : 0; }   // v2.25.8 — clamp net velocity (reject NaN/garbage)
 
 // MP scenarios — reuse the existing sandbox (defender) / resistanceAxis (attacker) setup.
 try {
@@ -23304,9 +23314,10 @@ function mpHostMaybeSnapshot(dt) {
       else { dot.style.color = '#7fffb0'; dot.textContent = ['◐', '◓', '◑', '◒'][Math.floor(now / 250) % 4] + ' live · ' + (MP.ping || '?') + 'ms'; }
     }
   }
-  MP.snapAccum += dt;
-  if (MP.snapAccum < MP.snapIntervalMs) return;
-  MP.snapAccum = 0;
+  // v2.25.8 — snapshot rate is WALL-CLOCK (constant ~12.5/s) regardless of host game-speed. The old
+  // dt-based accumulator fired a snapshot almost every frame at x5+ (a flood that also caused guest jerk).
+  if (now - (MP._lastSnapSent || 0) < MP.snapIntervalMs) return;
+  MP._lastSnapSent = now;
   mpSend(mpBuildSnapshot());
 }
 function mpBuildSnapshot() {
@@ -23326,7 +23337,7 @@ function mpBuildSnapshot() {
   let fx = MP.fxQueue; if (fx.length > 250) fx = fx.slice(fx.length - 250); MP.fxQueue = [];
   const st = state.stats || {};
   return {
-    t: 'snap', gt: Math.round(state.gameTime), dn: state.dayNight,
+    t: 'snap', gt: Math.round(state.gameTime), dn: state.dayNight, sp: state.speed,
     esc: Math.round(MP.escalation), unl: Object.assign({}, MP.unlocked), gf: MP.guestFaction,
     ars: MP.arsenal, rel: mpReloadRemaining(),
     op: Math.round(MP.scoreOpf || 0), dfd: Math.round((st.intercepted || 0) * 10), cas: MP.casualties || 0,
@@ -23372,7 +23383,8 @@ function mpGuestApplySnapshot(s) {
   MP.arsenal = s.ars || MP.arsenal; MP.reloadRemaining = s.rel || {}; MP.guestStats = s.st || null;
   MP.scoreOpf = s.op || 0; MP.scoreDef = s.dfd || 0; MP.casualties = s.cas || 0;
   MP.warRisk = s.war || 0; MP.warDeclared = !!s.wd; MP.smuggleRemaining = s.smug || 0;
-  // THREATS — merge by id, preserve local trail, store velocity for extrapolation
+  if (s.sp && s.sp !== state.speed) { state.speed = s.sp; const sb = el('btn-speed'); if (sb) sb.textContent = '× ' + s.sp; }   // v2.25.8 — sync game speed from host
+  // THREATS — merge by id, preserve local trail, store WALL-CLOCK anchor + velocity for smooth-follow
   const oldT = {}; state.threats.forEach((t) => { oldT[t.id] = t; });
   state.threats = (s.th || []).map((n) => {
     const o = oldT[n.id] || { trail: [] };
@@ -23382,8 +23394,15 @@ function mpGuestApplySnapshot(s) {
     o.weaponName = n.wn; o.eta = n.eta;                       // v2.25.2 — fields the threat-list UI needs
     if (!o.targetCity) o.targetCity = {};
     o.targetCity.name = n.tcn || '—'; o.targetCity.lat = n.tla; o.targetCity.lon = n.tlo;
-    if (o.curLat != null) { const el2 = Math.max(16, now - (o._t || now)); o._vLat = (n.cla - o.curLat) / el2; o._vLon = (n.clo - o.curLon) / el2; }
-    o.curLat = n.cla; o.curLon = n.clo; o._t = now; if (!o.trail) o.trail = [];
+    // v2.25.8 — smooth-follow: anchor + wall-clock velocity (from the last two anchors); the render
+    // position chases the extrapolated anchor in mpGuestTick, so motion never snaps/jerks and is
+    // independent of the guest's own game-speed.
+    if (o._aLat != null) { const el2 = Math.max(16, now - (o._aT || now)); o._vLat = clampv((n.cla - o._aLat) / el2); o._vLon = clampv((n.clo - o._aLon) / el2); }
+    else { o._vLat = 0; o._vLon = 0; }
+    o._aLat = n.cla; o._aLon = n.clo; o._aT = now;
+    if (o.curLat == null) { o.curLat = n.cla; o.curLon = n.clo; }
+    if (Math.abs(o.curLat - n.cla) > 1.0 || Math.abs(o.curLon - n.clo) > 1.0) { o.curLat = n.cla; o.curLon = n.clo; }  // teleport on big desync
+    if (!o.trail) o.trail = [];
     return o;
   });
   // INTERCEPTORS — keep trail + local bornAt/deadAt (host wall-clock differs)
@@ -23392,8 +23411,12 @@ function mpGuestApplySnapshot(s) {
     const o = oldI[n.id] || { trail: [], bornAt: now, bornAtGameTime: state.gameTime };
     o.id = n.id; o.batteryType = n.bt; o.startLat = n.sla; o.startLon = n.slo;
     o.targetLat = n.tla; o.targetLon = n.tlo; o.exo = !!n.ex; o.arcRatio = n.ar; o.alive = !!n.al;
-    if (o.curLat != null) { const el2 = Math.max(16, now - (o._t || now)); o._vLat = (n.cla - o.curLat) / el2; o._vLon = (n.clo - o.curLon) / el2; }
-    o.curLat = n.cla; o.curLon = n.clo; o._t = now; if (!o.trail) o.trail = []; seen[n.id] = 1;
+    if (o._aLat != null) { const el2 = Math.max(16, now - (o._aT || now)); o._vLat = clampv((n.cla - o._aLat) / el2); o._vLon = clampv((n.clo - o._aLon) / el2); }
+    else { o._vLat = 0; o._vLon = 0; }
+    o._aLat = n.cla; o._aLon = n.clo; o._aT = now;
+    if (o.curLat == null) { o.curLat = n.cla; o.curLon = n.clo; }
+    if (Math.abs(o.curLat - n.cla) > 1.0 || Math.abs(o.curLon - n.clo) > 1.0) { o.curLat = n.cla; o.curLon = n.clo; }
+    if (!o.trail) o.trail = []; seen[n.id] = 1;
     return o;
   });
   Object.keys(oldI).forEach((id) => { if (!seen[id]) { const o = oldI[id]; if (!o.deadAt) { o.deadAt = now; o.alive = false; } if (now - o.deadAt < 7300) list.push(o); } });
@@ -23409,24 +23432,35 @@ function mpGuestPlayFx(fx) {
     else if (fx.k === 'e' && MP._origExpl) MP._origExpl(fx.la, fx.lo, fx.mr, fx.du, !!fx.big, !!fx.exo, 0);
   } catch (e) {}
 }
-function mpGuestTick(dt) {
+function mpGuestTick(rawDt) {
   const now = Date.now();
+  // v2.25.8 — smooth-follow: the render position chases the WALL-CLOCK-extrapolated authoritative anchor.
+  // Speed-independent → never overshoots/snaps (the old jerk), and stays in sync at any host speed.
+  const f = 1 - Math.pow(0.75, Math.max(1, rawDt) / 16);   // frame-rate-independent ease (~0.25 @60fps)
   for (const t of state.threats) {
-    if (t._vLat != null && !t.impacted && !t.intercepted) { t.curLat += t._vLat * dt; t.curLon += t._vLon * dt; }
+    if (t._aLat != null && !t.impacted && !t.intercepted) {
+      const ahead = Math.min(400, now - (t._aT || now));
+      t.curLat += ((t._aLat + t._vLat * ahead) - t.curLat) * f;
+      t.curLon += ((t._aLon + t._vLon * ahead) - t.curLon) * f;
+    }
     if (!t.trail) t.trail = [];
     t.trail.push({ lat: t.curLat, lon: t.curLon, progress: t.progress });
     if (t.trail.length > 28) t.trail.shift();
   }
   for (const i of state.interceptors) {
     if (!i.alive) continue;
-    if (i._vLat != null) { i.curLat += i._vLat * dt; i.curLon += i._vLon * dt; }
+    if (i._aLat != null) {
+      const ahead = Math.min(400, now - (i._aT || now));
+      i.curLat += ((i._aLat + i._vLat * ahead) - i.curLat) * f;
+      i.curLon += ((i._aLon + i._vLon * ahead) - i.curLon) * f;
+    }
     if (!i.trail) i.trail = [];
     let prog = 0; const dTot = Math.hypot(i.targetLat - i.startLat, i.targetLon - i.startLon);
     if (dTot > 1e-9) prog = Math.min(1, Math.hypot(i.curLat - i.startLat, i.curLon - i.startLon) / dTot);
     i.trail.push({ lat: i.curLat, lon: i.curLon, prog: prog, altFrac: null, t: now });
     if (i.trail.length > 300) i.trail.shift();
   }
-  MP._pingAccum = (MP._pingAccum || 0) + dt;
+  MP._pingAccum = (MP._pingAccum || 0) + rawDt;
   if (MP._pingAccum > 2000) { MP._pingAccum = 0; mpSend({ t: 'ping', ts: now }); }   // v2.25.6 — timestamped ping for RTT
   if (MP.connected && now - MP.lastRecvAt > 9000 && !MP._lostNotified) mpOnPeerLost('timeout');
   // v2.25.3 — visible heartbeat in the HUD; v2.25.6 — with live ping (RTT)
