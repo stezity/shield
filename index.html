@@ -1214,6 +1214,7 @@ body.targeting-cursor #map-canvas {
   <button class="menu-button" id="btn-scenarios">▶ PLAY · SCENARIOS</button>
   <button class="menu-button" id="btn-sandbox" style="background:rgba(192,57,43,0.15);border-color:#c0392b;color:#ff8a76;">⚡ SANDBOX · FREE PLAY</button>
   <button class="menu-button" id="btn-multiplayer" style="background:rgba(40,90,150,0.18);border-color:#2e6da4;color:#7fd1ff;">🌐 MULTIPLAYER · 1v1 DEFENDER vs OPFOR <small style="color:#ffaa00;font-size:10px;">BETA</small></button>
+  <button class="menu-button" id="btn-multiplayer-ffa" style="background:rgba(60,110,170,0.18);border-color:#3d7fd4;color:#9fd0ff;">🌐 MULTI-FACTION · 2–6 PLAYERS <small style="color:#ffaa00;font-size:10px;">NEW</small></button>
   <button class="menu-button" id="btn-info">ⓘ ABOUT THE DEFENCE SYSTEMS</button>
 
   <div class="systems-info" id="systems-info-block" style="display:none;">
@@ -1332,6 +1333,55 @@ body.targeting-cursor #map-canvas {
   </div>
 
   <button class="menu-button" id="mp-back" style="margin-top:28px; min-width:160px; padding:9px 20px; font-size:12px;">◀ BACK</button>
+</div>
+
+<!-- ===== MULTI-FACTION LOBBY (v2.26.0) ===== -->
+<div id="mp-ffa-menu" class="fullscreen hidden">
+  <div class="menu-title" style="font-size:42px; letter-spacing:6px; color:#9fd0ff;">MULTI-FACTION</div>
+  <div class="menu-subtitle">2–6 PLAYERS · EACH PLAYS A FACTION · ISRAEL HOSTS</div>
+  <div style="margin:14px 0 4px;">
+    <input id="mp-ffa-nick" maxlength="16" placeholder="Your nickname" autocomplete="off" spellcheck="false"
+           style="width:260px; text-align:center; font-size:15px; background:rgba(20,30,45,0.9); border:1px solid #2e6da4; color:#cfe8ff; padding:8px 10px; border-radius:5px;">
+  </div>
+
+  <div class="scenarios" id="mp-ffa-role" style="grid-template-columns:repeat(2,1fr); max-width:820px;">
+    <div class="scenario-card" id="mp-ffa-host-card" style="border-left-color:#00d4ff; cursor:pointer;">
+      <h3 style="color:#00d4ff;">🛡 HOST · ISRAEL</h3>
+      <p>You defend Israel and host the match. Share the room code; everyone else joins as an attacking faction or the USA.</p>
+    </div>
+    <div class="scenario-card" id="mp-ffa-join-card" style="border-left-color:#c0392b; cursor:pointer;">
+      <h3 style="color:#ff6b5e;">⚔ JOIN</h3>
+      <p>Enter the host's code, then pick a free side: Hamas / Hezbollah / Iran / Houthis, or the 🇺🇸 USA (support Israel).</p>
+    </div>
+  </div>
+
+  <div id="mp-ffa-host-panel" class="hidden" style="margin-top:22px; text-align:center; max-width:560px;">
+    <div id="mp-ffa-host-status" style="font-size:14px; color:#9fe0ff; margin-bottom:12px;">Creating room…</div>
+    <div style="font-size:12px; letter-spacing:3px; color:var(--text-dim);">ROOM CODE</div>
+    <div style="display:flex; align-items:center; justify-content:center; gap:12px; margin:4px 0;">
+      <span id="mp-ffa-code" style="font-size:40px; font-weight:bold; letter-spacing:10px; color:#7fd1ff; font-family:monospace;">····</span>
+      <button id="mp-ffa-copy" class="menu-button" style="min-width:0; padding:8px 14px; font-size:11px;">COPY</button>
+    </div>
+    <div style="font-size:12px; letter-spacing:2px; color:var(--text-dim); margin-top:10px;">PLAYERS</div>
+    <div id="mp-ffa-roster" style="font-size:13px; color:#cfe8ff; margin:6px 0; min-height:20px;">Israel (you) · waiting for players…</div>
+    <button id="mp-ffa-start" class="menu-button" style="margin-top:10px; display:none; background:rgba(39,174,96,0.18); border-color:#27ae60; color:#7fffb0;">▶ START BATTLE</button>
+  </div>
+
+  <div id="mp-ffa-join-panel" class="hidden" style="margin-top:22px; text-align:center; max-width:560px;">
+    <div id="mp-ffa-join-status" style="font-size:14px; color:#ffc0b0; margin-bottom:12px;">Enter the room code:</div>
+    <div style="display:flex; align-items:center; justify-content:center; gap:10px;">
+      <input id="mp-ffa-code-input" maxlength="4" placeholder="ABCD" autocomplete="off" spellcheck="false"
+             style="width:200px; text-transform:uppercase; text-align:center; font-size:30px; letter-spacing:10px; font-family:monospace; background:rgba(20,10,10,0.9); border:1px solid #c0392b; color:#ff8a76; padding:8px 6px; border-radius:5px;">
+      <button id="mp-ffa-connect" class="menu-button" style="min-width:0; padding:10px 18px; font-size:12px;">CONNECT</button>
+    </div>
+    <div id="mp-ffa-pick" class="hidden" style="margin-top:18px;">
+      <div style="font-size:12px; letter-spacing:2px; color:var(--text-dim); margin-bottom:8px;">PICK YOUR SIDE</div>
+      <div id="mp-ffa-pick-row" style="display:flex; gap:8px; justify-content:center; flex-wrap:wrap;"></div>
+      <div id="mp-ffa-join-wait" class="hidden" style="margin-top:14px; font-size:13px; color:var(--amber);">Waiting for Israel to start the battle…</div>
+    </div>
+  </div>
+
+  <button class="menu-button" id="mp-ffa-back" style="margin-top:24px; min-width:160px; padding:9px 20px; font-size:12px;">◀ BACK</button>
 </div>
 
 <!-- ===== ОСНОВНОЙ ИГРОВОЙ ИНТЕРФЕЙС ===== -->
@@ -2130,6 +2180,13 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.26.0  — MULTI-FACTION multiplayer (user). New mode alongside 1v1: host = Israel (authority);
+//            up to 5 others each pick ONE faction (Hamas/Hezbollah/Iran/Houthi) or the USA. Multi-peer
+//            STAR — host accepts many PeerJS conns (MP.conns), broadcasts snapshots to all, verifies
+//            launch ownership (a conn may only fire its own faction). Attackers reuse the OPFOR guest,
+//            locked to one faction. USA = support role: grant Israel money / interceptor refills /
+//            strike tokens; Israel's "Request US aid" pings the USA player, or an AI auto-grants a
+//            package if the USA is unmanned. Lobby: pick a free side + live roster + host READY.
 //   2.25.13 — MP: restore the standard IDF grid (user: "верни старое расположение пво"). The deploy
 //            phase was clearing the auto-deployed grid (place-from-scratch); now it keeps it — the
 //            defender starts with the normal layout and may still add/reposition during deploy, then
@@ -3223,7 +3280,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.25.13';
+const GAME_VERSION = '2.26.0';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -23051,6 +23108,7 @@ var MP = (window.MP = {
   scoreOpf: 0, scoreDef: 0, casualties: 0, warRisk: 0, warDeclared: false,
   smuggleReady: 0, smuggleRemaining: 0, _regenAt: 0, _orefSig: '', _orefAt: 0,
   nick: 'Player', peerNick: '', ping: 0, phase: 'battle', siteDamage: {},
+  ffa: false, conns: [], myFaction: null, factionOwners: {}, usaPresent: false, usaReqAt: 0,
   _peerLoading: false, _peerWaiters: [], _origFlash: null, _origExpl: null
 });
 const MP_REGEN_MULT = 1.0;   // passive resupply rate multiplier (smuggling gives the bursts)
@@ -23094,7 +23152,7 @@ function mpToast(msg, type) { if (typeof showNotification === 'function') showNo
 
 /* ---------------- connection ---------------- */
 function mpHostCreate() {
-  MP.role = 'host';
+  MP.role = 'host'; MP.ffa = false; MP.onStatus = mpLobbyStatus;
   mpReadNick();
   mpEnsurePeer((ok) => {
     if (!ok) { mpStatus('error', 'could not load PeerJS (network?)'); return; }
@@ -23118,7 +23176,7 @@ function mpHostCreate() {
   });
 }
 function mpGuestJoin(code) {
-  MP.role = 'guest';
+  MP.role = 'guest'; MP.ffa = false; MP.onStatus = mpLobbyStatus;
   mpReadNick();
   mpEnsurePeer((ok) => {
     if (!ok) { mpStatus('error', 'could not load PeerJS (network?)'); return; }
@@ -23144,7 +23202,17 @@ function mpWireConn(conn) {
   conn.on('close', () => { MP.connected = false; mpOnPeerLost('closed'); });
   conn.on('error', (err) => { mpStatus('error', (err && err.type) || String(err)); });
 }
-function mpSend(msg) { try { if (MP.conn && MP.connected) MP.conn.send(msg); } catch (e) {} }
+function mpSend(msg) {
+  try {
+    // v2.26.0 — FFA host broadcasts to ALL connected players; otherwise (1v1, or any guest) the single link.
+    if (MP.role === 'host' && MP.conns && MP.conns.length) {
+      for (const c of MP.conns) { if (c && c.open && c.conn) { try { c.conn.send(msg); } catch (e) {} } }
+      return;
+    }
+    if (MP.conn && MP.connected) MP.conn.send(msg);
+  } catch (e) {}
+}
+function mpSendTo(c, msg) { try { if (c && c.conn) c.conn.send(msg); } catch (e) {} }
 function mpOnMessage(msg) {
   if (!msg || !msg.t) return;
   MP.lastRecvAt = Date.now();
@@ -23180,15 +23248,17 @@ function mpApplyRemotePause(paused) {
 }
 function mpReset() {
   try { if (MP.conn) MP.conn.close(); } catch (e) {}
+  try { (MP.conns || []).forEach(function (c) { try { c.conn.close(); } catch (e) {} }); } catch (e) {}
   try { if (MP.peer) MP.peer.destroy(); } catch (e) {}
-  MP.peer = null; MP.conn = null; MP.connected = false; MP.enabled = false; MP.role = null; MP.roomCode = null;
+  MP.peer = null; MP.conn = null; MP.conns = []; MP.connected = false; MP.enabled = false; MP.role = null; MP.roomCode = null;
+  MP.ffa = false; MP.myFaction = null; MP.factionOwners = {}; MP.usaPresent = false;
 }
 // v2.25.9 — full teardown when leaving an MP game: drop the connection AND remove the body-level MP
 // UI (HUD chip, status panel, chat, OPFOR panel) so nothing lingers on the menu.
 function mpTeardownUI() {
   try { mpReset(); } catch (e) {}
   MP.started = false; MP.peerNick = ''; MP.ping = 0; MP.phase = 'battle'; MP.siteDamage = {};
-  ['mp-hud', 'mp-status', 'mp-chat', 'mp-opfor-info', 'mp-deploy-overlay'].forEach(function (id) {
+  ['mp-hud', 'mp-status', 'mp-chat', 'mp-opfor-info', 'mp-deploy-overlay', 'mp-usa-panel', 'mp-aid-btn'].forEach(function (id) {
     const e = el(id); if (e && e.parentNode) e.parentNode.removeChild(e);
   });
 }
@@ -23196,7 +23266,7 @@ function mpTeardownUI() {
 /* ============================ HOST ============================ */
 function mpInitHostEconomy() {
   MP.escalation = 0; MP.warRisk = 0; MP.warDeclared = false;
-  MP.scoreOpf = 0; MP.casualties = 0; MP.smuggleReady = 0; MP._regenAt = 0; MP._orefSig = ''; MP._orefAt = 0;
+  MP.scoreOpf = 0; MP.casualties = 0; MP.smuggleReady = 0; MP.smuggleReadyBy = {}; MP._regenAt = 0; MP._orefSig = ''; MP._orefAt = 0;
   MP.unlocked = { hamas: false, hezbollah: false, iran: false, houthi: false };
   MP.arsenal = {}; MP.reload = {};
   FACTION_ORDER.forEach((fid) => {
@@ -23329,18 +23399,20 @@ function mpEscalateDefenderStrike(lat, lon, target) {
 }
 function mpReloadRemaining() { const now = Date.now(), o = {}; FACTION_ORDER.forEach((f) => { o[f] = Math.max(0, (MP.reload[f] || 0) - now); }); return o; }
 // v2.25.4 — OPFOR resupply: a smuggling run (Egypt/sea) delivers a burst of stock on a cooldown.
-function mpHostSmuggle() {
+function mpHostSmuggle(fid) {
   if (!MP.enabled || !state.active) return;
+  fid = fid || MP.guestFaction;
   const now = Date.now();
-  if (now < (MP.smuggleReady || 0)) return;
-  const fid = MP.guestFaction, f = (typeof ATTACKER_FACTIONS !== 'undefined' && ATTACKER_FACTIONS[fid]) || {};
+  MP.smuggleReadyBy = MP.smuggleReadyBy || {};
+  if (now < (MP.smuggleReadyBy[fid] || 0)) return;   // per-faction cooldown (so FFA factions don't share)
+  const f = (typeof ATTACKER_FACTIONS !== 'undefined' && ATTACKER_FACTIONS[fid]) || {};
   const cap = f.arsenalCap || {}, start = f.arsenalStart || {}, ars = MP.arsenal[fid] || (MP.arsenal[fid] = {});
   Object.keys(start).forEach(function (ty) {
     const max = cap[ty] || start[ty] || 0;
     ars[ty] = Math.min(max, (ars[ty] || 0) + Math.ceil((cap[ty] || start[ty] || 1) * 0.35));
   });
-  MP.smuggleReady = now + 45000;
-  if (typeof logEvent === 'function') logEvent('📦 OPFOR resupply: smuggling run reached ' + fid + ' — fresh stock delivered', 'warn');
+  MP.smuggleReadyBy[fid] = now + 45000;
+  if (typeof logEvent === 'function') logEvent('📦 OPFOR resupply: smuggling run reached ' + fid, 'warn');
 }
 // v2.25.4 — host-side conflict status panel (escalation / scores / casualties / war risk)
 function mpRenderHostStatus() {
@@ -23424,7 +23496,8 @@ function mpBuildSnapshot() {
     esc: Math.round(MP.escalation), unl: Object.assign({}, MP.unlocked), gf: MP.guestFaction,
     ars: MP.arsenal, rel: mpReloadRemaining(),
     op: Math.round(MP.scoreOpf || 0), dfd: Math.round((st.intercepted || 0) * 10), cas: MP.casualties || 0,
-    war: Math.round(MP.warRisk || 0), wd: MP.warDeclared ? 1 : 0, smug: Math.max(0, (MP.smuggleReady || 0) - Date.now()),
+    war: Math.round(MP.warRisk || 0), wd: MP.warDeclared ? 1 : 0,
+    smug: (function () { const o = {}, nw = Date.now(); FACTION_ORDER.forEach(function (f) { o[f] = Math.max(0, ((MP.smuggleReadyBy && MP.smuggleReadyBy[f]) || 0) - nw); }); return o; })(),
     th: th, ic: ic, ct: ct, fx: fx,
     as: (state.airstrikes || []).filter(function (a) { return !a.done; }).map(function (a) { return { id: a.id, cla: r5(a.curLat), clo: r5(a.curLon), tla: r5(a.targetLat), tlo: r5(a.targetLon) }; }),
     ds: (function () { const o = {}, dm = state.disabledLaunchSites || {}, nw = Date.now(); for (const k in dm) { const rem = dm[k] - nw; if (rem > 0) o[k] = Math.round(rem); } return o; })(),
@@ -23468,10 +23541,12 @@ function mpGuestApplySnapshot(s) {
   const now = Date.now();
   MP.lastSnapAt = now;                 // v2.25.3 — heartbeat: last time real state arrived from the host
   state.gameTime = s.gt; state.dayNight = s.dn;
-  MP.escalation = s.esc; MP.unlocked = s.unl || MP.unlocked; MP.guestFaction = s.gf || MP.guestFaction;
+  MP.escalation = s.esc;
+  if (!MP.ffa) { MP.unlocked = s.unl || MP.unlocked; MP.guestFaction = s.gf || MP.guestFaction; }   // FFA: keep my own faction lock
   MP.arsenal = s.ars || MP.arsenal; MP.reloadRemaining = s.rel || {}; MP.guestStats = s.st || null;
   MP.scoreOpf = s.op || 0; MP.scoreDef = s.dfd || 0; MP.casualties = s.cas || 0;
-  MP.warRisk = s.war || 0; MP.warDeclared = !!s.wd; MP.smuggleRemaining = s.smug || 0;
+  MP.warRisk = s.war || 0; MP.warDeclared = !!s.wd;
+  MP.smuggleRemaining = (s.smug && typeof s.smug === 'object') ? (s.smug[MP.guestFaction] || 0) : (s.smug || 0);   // per-faction (FFA) or single
   if (s.sp && s.sp !== state.speed) { state.speed = s.sp; const sb = el('btn-speed'); if (sb) sb.textContent = '× ' + s.sp; }   // v2.25.8 — sync game speed from host
   // THREATS — merge by id, preserve local trail, store WALL-CLOCK anchor + velocity for smooth-follow
   const oldT = {}; state.threats.forEach((t) => { oldT[t.id] = t; });
@@ -23637,6 +23712,7 @@ function mpGuestLaunchAt(lat, lon) {
   return true;
 }
 function mpGuestPickFaction(fid) {
+  if (MP.ffa) return;   // v2.26.0 — FFA: each player is locked to one faction (no switching)
   if (!(MP.unlocked && MP.unlocked[fid])) { mpToast((ENEMIES[fid] ? ENEMIES[fid].name : fid) + ' is locked — raise escalation to open new fronts', 'warn'); return; }
   const am = state.attackMode || (state.attackMode = {});
   if (am.faction === fid) return;
@@ -23674,7 +23750,7 @@ function mpUpdateGuestPanel() {
     `<div style="height:4px;background:rgba(255,255,255,0.1);border-radius:3px;margin-top:1px;overflow:hidden;"><div style="height:100%;width:${war}%;background:#ff3b30;"></div></div>` +
     smugBtn;
 }
-window.__mpSmuggle = function () { if (MP.enabled && MP.role === 'guest' && MP.connected) mpSend({ t: 'smuggle' }); };
+window.__mpSmuggle = function () { if (MP.enabled && MP.role === 'guest' && MP.connected) mpSend({ t: 'smuggle', faction: MP.myFaction || MP.guestFaction }); };
 
 /* ---------------- shared HUD chip ---------------- */
 function mpHudShow(roleLabel) {
@@ -23733,6 +23809,217 @@ function mpChatAppend(who, text, self) {
   log2.appendChild(div);
   while (log2.children.length > 60) log2.removeChild(log2.firstChild);
   log2.scrollTop = log2.scrollHeight;
+}
+
+/* ============================================================================
+   FFA / MULTI-FACTION (v2.26.0) — host = Israel; up to 5 others each pick ONE
+   faction (Hamas/Hezbollah/Iran/Houthi) or the USA (support). Multi-peer star,
+   host = authoritative hub. Reuses the sim/snapshot/guest-render of 1v1.
+   ============================================================================ */
+const FFA_ROLES = ['hamas', 'hezbollah', 'iran', 'houthi', 'usa'];
+function ffaRoleLabel(r) { return r === 'usa' ? 'USA' : (ENEMIES[r] ? ENEMIES[r].name : r); }
+
+/* ---- HOST ---- */
+function mpFfaHostCreate() {
+  MP.role = 'host'; MP.ffa = true; MP.myFaction = 'israel'; mpReadNick();
+  MP.conns = []; MP.factionOwners = {}; MP.usaPresent = false; MP.onStatus = mpFfaLobbyStatus;
+  mpEnsurePeer(function (ok) {
+    if (!ok) { mpStatus('error', 'could not load PeerJS'); return; }
+    let attempt = 0;
+    (function tryHost() {
+      const code = mpGenCode(); MP.roomCode = code;
+      let peer; try { peer = new Peer(mpPeerId(code), { debug: 1 }); } catch (e) { mpStatus('error', String(e)); return; }
+      MP.peer = peer;
+      peer.on('open', function () { mpStatus('waiting', code); });
+      peer.on('connection', function (conn) {
+        if (MP.conns.length >= 5) { try { conn.close(); } catch (e) {} return; }
+        const cRec = { conn: conn, open: false, faction: null, nick: '' };
+        MP.conns.push(cRec);
+        conn.on('open', function () { cRec.open = true; MP.connected = true; MP.lastRecvAt = Date.now(); mpFfaBroadcastRoster(); });
+        conn.on('data', function (msg) { MP.lastRecvAt = Date.now(); mpFfaHostOnMessage(msg, cRec); });
+        conn.on('close', function () { cRec.open = false; if (cRec.faction) { delete MP.factionOwners[cRec.faction]; if (cRec.faction === 'usa') MP.usaPresent = false; } MP.conns = MP.conns.filter(function (c) { return c !== cRec; }); mpFfaBroadcastRoster(); mpFfaUpdateHostLobby(); });
+        conn.on('error', function () {});
+      });
+      peer.on('error', function (err) { const t = (err && err.type) || String(err); if (t === 'unavailable-id' && attempt < 6) { attempt++; try { peer.destroy(); } catch (e) {} tryHost(); return; } mpStatus('error', t); });
+      peer.on('disconnected', function () { try { peer.reconnect(); } catch (e) {} });
+    })();
+  });
+}
+function mpFfaHostOnMessage(msg, cRec) {
+  if (!msg || !msg.t) return;
+  if (msg.t === 'ping') { mpSendTo(cRec, { t: 'pong', ts: msg.ts }); return; }
+  if (msg.t === 'pong') { if (msg.ts) MP.ping = Math.max(0, Math.min(9999, Date.now() - msg.ts)); return; }
+  if (msg.t === 'chat') { const who = cRec.nick || ffaRoleLabel(cRec.faction) || 'Player'; mpChatAppend(who, msg.text, false); mpSend({ t: 'chatRelay', who: who, text: msg.text }); return; }
+  if (msg.t === 'join') {
+    const f = msg.faction; cRec.nick = String(msg.nick || 'Player').slice(0, 16);
+    if (!FFA_ROLES.includes(f) || MP.factionOwners[f]) { mpSendTo(cRec, { t: 'reject', reason: 'taken', owners: MP.factionOwners }); return; }
+    cRec.faction = f; MP.factionOwners[f] = cRec.nick; if (f === 'usa') MP.usaPresent = true;
+    mpSendTo(cRec, { t: 'joined', faction: f });
+    mpFfaBroadcastRoster(); mpFfaUpdateHostLobby();
+    if (MP.started) mpSendTo(cRec, { t: 'start', faction: f });
+    return;
+  }
+  if (msg.t === 'launch') { if (cRec.faction && cRec.faction === msg.faction) mpHostApplyLaunch(msg); return; }
+  if (msg.t === 'smuggle') { if (cRec.faction && cRec.faction !== 'usa') mpHostSmuggle(cRec.faction); return; }
+  if (msg.t === 'usaGrant') { if (cRec.faction === 'usa') mpFfaApplyUsaGrant(msg.kind); return; }
+}
+function mpFfaBroadcastRoster() { if (MP.role === 'host') mpSend({ t: 'roster', owners: MP.factionOwners, usa: MP.usaPresent }); }
+function mpFfaHostStart() {
+  if (!MP.conns.some(function (c) { return c.open && c.faction; })) { mpToast('No players have joined yet', 'warn'); return; }
+  MP.enabled = true; MP.started = true; MP.role = 'host'; MP.ffa = true;
+  mpInitHostEconomy();
+  FACTION_ORDER.forEach(function (f) { MP.unlocked[f] = true; });   // FFA: each faction is player-owned, always available
+  mpSend({ t: 'start' });
+  const m = el('mp-ffa-menu'); if (m) m.classList.add('hidden');
+  startScenario('mpHost');
+  state.strikesLeft = Math.max(state.strikesLeft || 0, 99);
+  MP.phase = 'deploy';
+  state.buildPhase = true; state.buildTimer = 90;
+  state.batteryStock = { ironDome: 4, davidsSling: 2, arrow3: 1, thaad: 1 };
+  const bp = el('build-panel'); if (bp) bp.style.display = 'block';
+  if (typeof updateBuildPanel === 'function') updateBuildPanel();
+  if (typeof showDoctrinesPanel === 'function') showDoctrinesPanel();
+  mpSend({ t: 'phase', phase: 'deploy' });
+  mpHudShow('ISRAEL'); mpEnsureChat(); mpFfaInstallIsraelAidButton();
+  mpChatAppend('—', 'You are ISRAEL (host). Deploy + pick doctrines, then READY. Players: ' + (Object.keys(MP.factionOwners).map(function (k) { return MP.factionOwners[k] + '=' + ffaRoleLabel(k); }).join(', ') || '—'), true);
+}
+
+/* ---- GUEST ---- */
+function mpFfaGuestJoin(code) {
+  MP.role = 'guest'; MP.ffa = true; mpReadNick(); MP.onStatus = mpFfaLobbyStatus;
+  mpEnsurePeer(function (ok) {
+    if (!ok) { mpStatus('error', 'could not load PeerJS'); return; }
+    let peer; try { peer = new Peer({ debug: 1 }); } catch (e) { mpStatus('error', String(e)); return; }
+    MP.peer = peer;
+    peer.on('open', function () {
+      mpStatus('connecting', code);
+      const conn = peer.connect(mpPeerId(code), { reliable: true });
+      MP.conn = conn;
+      conn.on('open', function () { MP.connected = true; MP.lastRecvAt = Date.now(); mpStatus('connected'); });
+      conn.on('data', function (msg) { MP.lastRecvAt = Date.now(); mpFfaGuestOnMessage(msg); });
+      conn.on('close', function () { MP.connected = false; mpOnPeerLost('closed'); });
+      conn.on('error', function () {});
+    });
+    peer.on('error', function (err) { mpStatus('error', (err && err.type) || String(err)); });
+    peer.on('disconnected', function () { try { peer.reconnect(); } catch (e) {} });
+  });
+}
+function mpFfaGuestOnMessage(msg) {
+  if (!msg || !msg.t) return;
+  if (msg.t === 'ping') { mpSend({ t: 'pong', ts: msg.ts }); return; }
+  if (msg.t === 'pong') { if (msg.ts) MP.ping = Math.max(0, Math.min(9999, Date.now() - msg.ts)); return; }
+  if (msg.t === 'chatRelay') { mpChatAppend(msg.who || 'Player', msg.text, false); return; }
+  switch (msg.t) {
+    case 'roster': MP.factionOwners = msg.owners || {}; MP.usaPresent = !!msg.usa; mpFfaBuildPicker(); break;
+    case 'joined': MP.myFaction = msg.faction; mpFfaOnJoined(); break;
+    case 'reject': MP.factionOwners = msg.owners || MP.factionOwners; mpToast('That side is taken — pick another', 'warn'); mpFfaBuildPicker(); break;
+    case 'start': mpFfaGuestStart(); break;
+    case 'phase': MP.phase = msg.phase || 'battle'; if (MP.phase === 'battle') mpHideDeployOverlay(); else mpShowDeployOverlay(); break;
+    case 'snap': mpGuestApplySnapshot(msg); break;
+    case 'oref': state.orefAlerts = msg.a || []; break;
+    case 'pause': mpApplyRemotePause(!!msg.paused); break;
+    case 'usaReq': if (MP.myFaction === 'usa') mpFfaUsaShowRequest(); break;
+  }
+}
+function mpFfaOnJoined() {
+  const st = el('mp-ffa-join-status'); if (st) st.textContent = 'Joined as ' + ffaRoleLabel(MP.myFaction).toUpperCase() + ' ✓';
+  const pr = el('mp-ffa-pick'); if (pr) pr.classList.remove('hidden');
+  const w = el('mp-ffa-join-wait'); if (w) w.classList.remove('hidden');
+  mpFfaBuildPicker();
+}
+function mpFfaGuestStart() {
+  MP.enabled = true; MP.started = true; MP.role = 'guest'; MP.ffa = true; MP.phase = 'deploy';
+  const m = el('mp-ffa-menu'); if (m) m.classList.add('hidden');
+  if (MP.myFaction === 'usa') {
+    startScenario('mpGuest');                 // reuse render-only scaffold (map + snapshots)
+    const ap = el('attacker-panel'); if (ap) ap.style.display = 'none';
+    mpFfaInstallUsaPanel(); mpHudShow('USA');
+  } else {
+    MP.guestFaction = MP.myFaction;
+    MP.unlocked = { hamas: false, hezbollah: false, iran: false, houthi: false }; MP.unlocked[MP.myFaction] = true;
+    startScenario('mpGuest');
+    const am = state.attackMode || (state.attackMode = {});
+    am.faction = MP.myFaction; am.type = null; am.siteIndex = null;
+    if (typeof renderAttackerFactions === 'function') renderAttackerFactions();
+    if (typeof renderAttackerBases === 'function') renderAttackerBases();
+    if (typeof renderAttackerWeapons === 'function') renderAttackerWeapons();
+    const af = el('attacker-factions'); if (af) af.style.display = 'none';   // locked to one faction — no switch UI
+    document.querySelectorAll('.attacker-cheats, .attacker-cheats-header').forEach(function (e) { e.style.display = 'none'; });
+    mpHudShow(ffaRoleLabel(MP.myFaction).toUpperCase());
+  }
+  mpEnsureChat(); mpShowDeployOverlay();
+}
+
+/* ---- USA support ---- */
+function mpFfaApplyUsaGrant(kind) {
+  if (MP.role !== 'host' || !state.active) return;
+  if (kind === 'money' || kind === 'package') state.money = (state.money || 0) + 5000000;
+  if (kind === 'interceptors' || kind === 'package') state.batteries.forEach(function (b) { b.ammo = Math.min(b.capacity || 999, (b.ammo || 0) + 10); });
+  if (kind === 'strikes' || kind === 'package') { state.strikesLeft = (state.strikesLeft || 0) + 3; const sc = el('strike-count'); if (sc) sc.textContent = state.strikesLeft; }
+  if (typeof showNotification === 'function') showNotification('🇺🇸 US SUPPORT', kind === 'package' ? 'Aid package: $5M + interceptors + strike tokens' : ('US delivered: ' + kind), 'success');
+  if (typeof logEvent === 'function') logEvent('🇺🇸 US support delivered: ' + kind, 'success');
+}
+function mpFfaRequestUsAid() {
+  const now = Date.now();
+  if (now < (MP.usaReqAt || 0)) { mpToast('US aid on cooldown (' + Math.ceil((MP.usaReqAt - now) / 1000) + 's)', 'warn'); return; }
+  MP.usaReqAt = now + 30000;
+  if (MP.usaPresent) { mpSend({ t: 'usaReq' }); mpToast('Requested US aid — awaiting the US player', 'info'); }
+  else { mpToast('Requesting US aid…', 'info'); setTimeout(function () { if (MP.enabled && MP.role === 'host') { mpFfaApplyUsaGrant('package'); } }, 4000); }
+}
+function mpFfaInstallIsraelAidButton() {
+  if (el('mp-aid-btn')) return;
+  const b = document.createElement('button'); b.id = 'mp-aid-btn'; b.textContent = '🇺🇸 Request US aid';
+  b.style.cssText = 'position:fixed;bottom:120px;left:14px;z-index:9999;background:rgba(20,40,70,0.95);border:1px solid #5b8def;color:#bfe0ff;padding:8px 12px;font-size:12px;cursor:pointer;border-radius:5px;';
+  b.onclick = function () { mpFfaRequestUsAid(); };
+  document.body.appendChild(b);
+}
+function mpFfaInstallUsaPanel() {
+  let p = el('mp-usa-panel');
+  if (!p) {
+    p = document.createElement('div'); p.id = 'mp-usa-panel';
+    p.style.cssText = 'position:fixed;top:70px;left:8px;z-index:9001;background:rgba(10,18,30,0.95);border:1px solid #5b8def;border-radius:8px;padding:12px;color:#dde;font:12px/1.5 sans-serif;width:230px;';
+    p.innerHTML = '<div style="color:#7fb0ff;font-weight:bold;letter-spacing:1px;margin-bottom:8px;">🇺🇸 UNITED STATES · SUPPORT</div>' +
+      '<div id="mp-usa-req" style="display:none;background:rgba(255,170,0,.18);border:1px solid #ffaa00;color:#ffd479;padding:5px 8px;border-radius:4px;margin-bottom:8px;font-size:11px;">⚠ Israel requests aid!</div>' +
+      '<button class="mp-usa-btn" data-kind="money" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(40,90,150,.3);border:1px solid #5b8def;color:#bfe0ff;border-radius:4px;cursor:pointer;">💵 Send $5M</button>' +
+      '<button class="mp-usa-btn" data-kind="interceptors" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(40,90,150,.3);border:1px solid #5b8def;color:#bfe0ff;border-radius:4px;cursor:pointer;">🚀 Refill interceptors</button>' +
+      '<button class="mp-usa-btn" data-kind="strikes" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(40,90,150,.3);border:1px solid #5b8def;color:#bfe0ff;border-radius:4px;cursor:pointer;">✈ +3 strike tokens</button>' +
+      '<button class="mp-usa-btn" data-kind="package" style="width:100%;padding:7px;background:rgba(39,174,96,.25);border:1px solid #27ae60;color:#9fffc0;border-radius:4px;cursor:pointer;">📦 Full aid package</button>';
+    document.body.appendChild(p);
+    p.querySelectorAll('.mp-usa-btn').forEach(function (b) { b.onclick = function () { mpSend({ t: 'usaGrant', kind: b.dataset.kind }); mpToast('Sent ' + b.dataset.kind + ' to Israel', 'success'); const r = el('mp-usa-req'); if (r) r.style.display = 'none'; }; });
+  }
+  p.style.display = 'block';
+}
+function mpFfaUsaShowRequest() { const r = el('mp-usa-req'); if (r) r.style.display = 'block'; mpToast('Israel is requesting US aid', 'warn'); try { audio.alarm(); } catch (e) {} }
+
+/* ---- FFA lobby UI ---- */
+function mpFfaLobbyStatus(s, extra) {
+  if (MP.role === 'host') {
+    const st = el('mp-ffa-host-status');
+    if (s === 'waiting') { const c = el('mp-ffa-code'); if (c) c.textContent = extra || MP.roomCode || '····'; if (st) st.textContent = 'Room ready — share the code.'; }
+    else if (s === 'error') { if (st) st.textContent = 'Error: ' + extra; }
+  } else {
+    const st = el('mp-ffa-join-status');
+    if (s === 'connecting') { if (st) st.textContent = 'Connecting…'; }
+    else if (s === 'connected') { if (st) st.textContent = 'Connected ✓ — pick your side'; const pk = el('mp-ffa-pick'); if (pk) pk.classList.remove('hidden'); mpFfaBuildPicker(); }
+    else if (s === 'error') { if (st) st.textContent = 'Error: ' + extra + ' — check the code'; }
+  }
+}
+function mpFfaUpdateHostLobby() {
+  const r = el('mp-ffa-roster'); if (!r) return;
+  const list = Object.keys(MP.factionOwners).map(function (k) { return ffaRoleLabel(k) + ' (' + MP.factionOwners[k] + ')'; });
+  r.innerHTML = 'Israel (you, host)' + (list.length ? ' · ' + list.join(' · ') : ' · waiting for players…');
+  const sb = el('mp-ffa-start'); if (sb) sb.style.display = list.length ? 'inline-block' : 'none';
+}
+function mpFfaBuildPicker() {
+  const row = el('mp-ffa-pick-row'); if (!row) return; row.innerHTML = '';
+  FFA_ROLES.forEach(function (r) {
+    const taken = MP.factionOwners && MP.factionOwners[r] && MP.factionOwners[r] !== MP.nick;
+    const mine = MP.myFaction === r;
+    const b = document.createElement('button'); b.className = 'menu-button'; b.style.cssText = 'min-width:0;padding:8px 12px;font-size:11px;' + (taken ? 'opacity:.4;' : '') + (mine ? 'border-color:#7fffb0;color:#7fffb0;' : '');
+    b.textContent = (r === 'usa' ? '🇺🇸 USA' : ffaRoleLabel(r).toUpperCase()) + (taken ? ' ✓' : '');
+    b.onclick = function () { if (taken) return; mpSend({ t: 'join', faction: r, nick: MP.nick }); };
+    row.appendChild(b);
+  });
 }
 
 /* ---------------- FX capture (host) — wrap the two FX entry points ---------------- */
@@ -23802,6 +24089,20 @@ function mpLobbyStatus(s, extra) {
   // (addEventListener fires AFTER the existing onclick that toggles state.paused, so we read the new value.)
   const pauseBtn = el('btn-pause');
   if (pauseBtn) pauseBtn.addEventListener('click', () => { if (MP.enabled && MP.connected && !MP._applyingRemotePause) mpSend({ t: 'pause', paused: !!state.paused }); });
+})();
+/* ---------------- FFA lobby wiring ---------------- */
+(function mpWireFfaLobby() {
+  const show = function (id) { const e = el(id); if (e) e.classList.remove('hidden'); };
+  const hide = function (id) { const e = el(id); if (e) e.classList.add('hidden'); };
+  function reset() { show('mp-ffa-role'); hide('mp-ffa-host-panel'); hide('mp-ffa-join-panel'); const pk = el('mp-ffa-pick'); if (pk) pk.classList.add('hidden'); const sb = el('mp-ffa-start'); if (sb) sb.style.display = 'none'; }
+  const btn = el('btn-multiplayer-ffa'); if (btn) btn.onclick = function () { hide('start-menu'); show('mp-ffa-menu'); reset(); mpEnsurePeer(function () {}); try { const ni = el('mp-ffa-nick'); if (ni) ni.value = localStorage.getItem('shieldNick') || ''; } catch (e) {} };
+  const back = el('mp-ffa-back'); if (back) back.onclick = function () { mpReset(); hide('mp-ffa-menu'); show('start-menu'); reset(); };
+  const hostCard = el('mp-ffa-host-card'); if (hostCard) hostCard.onclick = function () { hide('mp-ffa-role'); hide('mp-ffa-join-panel'); show('mp-ffa-host-panel'); mpFfaHostCreate(); mpFfaUpdateHostLobby(); };
+  const joinCard = el('mp-ffa-join-card'); if (joinCard) joinCard.onclick = function () { hide('mp-ffa-role'); hide('mp-ffa-host-panel'); show('mp-ffa-join-panel'); const inp = el('mp-ffa-code-input'); if (inp) inp.focus(); };
+  const connectBtn = el('mp-ffa-connect'); if (connectBtn) connectBtn.onclick = function () { const inp = el('mp-ffa-code-input'); const code = ((inp && inp.value) || '').trim().toUpperCase(); if (code.length < 4) { MP.role = 'guest'; MP.onStatus = mpFfaLobbyStatus; mpFfaLobbyStatus('error', 'enter the 4-letter code'); return; } mpFfaGuestJoin(code); };
+  const startBtn = el('mp-ffa-start'); if (startBtn) startBtn.onclick = function () { mpFfaHostStart(); };
+  const copyBtn = el('mp-ffa-copy'); if (copyBtn) copyBtn.onclick = function () { try { navigator.clipboard.writeText(MP.roomCode || ''); copyBtn.textContent = 'COPIED'; setTimeout(function () { copyBtn.textContent = 'COPY'; }, 1200); } catch (e) {} };
+  const codeInput = el('mp-ffa-code-input'); if (codeInput) codeInput.addEventListener('keydown', function (e) { if (e.key === 'Enter' && connectBtn) connectBtn.click(); });
 })();
 console.log('[MP] SHIELD multiplayer module loaded (v' + (typeof GAME_VERSION !== 'undefined' ? GAME_VERSION : '?') + ')');
 </script>
