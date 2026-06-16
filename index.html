@@ -2182,6 +2182,15 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.26.5  — IRAN AXIS system (#8), mirror of the US system but for the resistance axis. state.iranControl
+//            0-100 with 4 tiers (Full control / Working coordination / Weak control / Collapse). A major
+//            faction action (strike on Israel's center, ballistic/cluster, mass salvo, drone swarm) opens an
+//            Iran coordination modal with 6 responses: APPROVE / APPROVE-WITH-LIMITS / CUSTOM PLAN / ESCALATE
+//            (Tehran wants more) / HOLD / DENY. Defying Tehran drops axis control, delays resupply 45s (caps
+//            salvos), raises chaos & patience, risks dragging Iran in — logged + warned. Axis panel for
+//            attacker players (control bar/status/last response/hold/supply-delay/chaos). Gates
+//            attackerLaunchAt for Hamas/Hezbollah/Houthi (Iran exempt). NEXT: Iran tasking + Iran-player
+//            controls (#8 rest), US full military player (#9), US targets layer (#10/#11).
 //   2.26.4  — FINAL STAGE 3 of 3 (#5/#6/#7) — completes the 7-part mega-spec.
 //            (#7) RED LINES: tickRedLines fires once-per-game irreversible crises as escalation / US
 //            defiance / intl pressure cross thresholds — US freezes ALL aid (support<=15, 3-min freeze),
@@ -3321,7 +3330,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.26.4';
+const GAME_VERSION = '2.26.5';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -12906,8 +12915,18 @@ function updateAttackerStatus() {
 }
 
 // Called from the canvas mouseup handler when the player has armed a weapon
-function attackerLaunchAt(lat, lon) {
+function attackerLaunchAt(lat, lon, opts) {
   if (!state.attackMode || !state.attackMode.faction || !state.attackMode.type) return false;
+  // v2.26.5 (#8) — IRAN AXIS gate: major faction actions need Tehran's position (mirror of the US gate on
+  // the defender's strikes). Hamas/Hezbollah/Houthi only; Iran itself doesn't ask. Supply delay (a defy
+  // consequence) caps salvos. The modal's execute re-calls with {iranApproved:true} to bypass.
+  if (!(opts && opts.iranApproved) && typeof iranSeverity === 'function') {
+    const am = state.attackMode, fid = am.faction;
+    if (fid === 'hamas' || fid === 'hezbollah' || fid === 'houthi') {
+      if (state.iranSupplyDelayUntil && state.iranSupplyDelayUntil > Date.now() && (am.salvo || 1) > 1) am.salvo = 1;   // resupply delayed → salvos capped
+      if (iranSeverity(am, lat, lon) >= 2) { iranPermissionModal(fid, am, lat, lon, iranSeverity(am, lat, lon)); return false; }
+    }
+  }
   // v2.25.0 — MULTIPLAYER OPFOR (guest): don't spawn locally. Validate geometry, then send the launch
   // command to the host, which is authoritative over arsenal/reload/spawning.
   if (MP && MP.enabled && MP.role === 'guest') return mpGuestLaunchAt(lat, lon);
@@ -14023,6 +14042,8 @@ function gameLoop(time) {
   try {
     if (typeof usPanel === 'function' && state.active && state.playAs !== 'attacker') usPanel();
     else { const _u = document.getElementById('us-panel'); if (_u) _u.style.display = 'none'; if (!state.active) { const _m = document.getElementById('us-perm-modal'); if (_m) _m.style.display = 'none'; } }
+    if (typeof iranPanel === 'function' && state.active && state.playAs === 'attacker') iranPanel();   // v2.26.5 #8 — axis panel for attacker players
+    else { const _i = document.getElementById('iran-panel'); if (_i) _i.style.display = 'none'; if (!state.active) { const _im = document.getElementById('iran-perm-modal'); if (_im) _im.style.display = 'none'; } }
   } catch (e) {}
   requestAnimationFrame(gameLoop);
 }
@@ -22450,6 +22471,8 @@ function startScenario(name) {
   // Свежие копии вражеских целей
   state.enemyTargets = ENEMY_TARGETS.map(t => ({ ...t, alive: true, damage: 0 }));
   state.redLines = {};                                     // v2.26.4 — red-line crisis flags reset each game
+  state.iranControl = 70; state.iranPatience = 0; state.iranChaos = 0;   // v2.26.5 #8 — Iran axis system reset
+  state.iranSupplyDelayUntil = 0; state.iranHoldUntil = 0; state.iranLastResponse = ''; state.iranTask = null;
   state.iranDelayUntil = 0;
   state.sandstormUntil = 0;
   state.earlyWarningUntil = 0;
@@ -24402,6 +24425,127 @@ function tickRedLines(dt) {
   if (esc >= 85 && !rl.iran) { rl.iran = true; redLineFire('🔴 RED LINE — IRAN ENTERS THE WAR DIRECTLY', 'Tehran launches direct strikes — full regional war. Escalation locked high.'); if (mpOn && MP.role === 'host') { MP.escalation = Math.max(MP.escalation, 92); if (typeof mpEscHoldMajor === 'function') mpEscHoldMajor(3); } if (state.world) state.world.intlPressure = Math.min(100, (state.world.intlPressure || 30) + 15); }
   if (intl >= 80 && !rl.intl) { rl.intl = true; redLineFire('🔴 RED LINE — INTERNATIONAL ISOLATION', 'Global pressure peaks: sanctions, embargoes, diplomatic isolation.'); if (typeof usSetSupport === 'function') usSetSupport(sup - 8); }
   if (esc >= 80 && warR >= 60 && !rl.newFront && Math.random() < 0.0008 * dt) { rl.newFront = true; redLineFire('🔴 RED LINE — A NEW FRONT OPENS', 'A second front ignites — the war spreads to a new theatre.'); }
+}
+
+/* ============================================================================
+   IRAN AXIS — INFLUENCE & PERMISSIONS (v2.26.5 #8). Mirror of the US system, but
+   for the resistance axis: Iran coordinates Hamas / Hezbollah / Houthi. Major
+   faction actions need Tehran's position; defying Iran costs axis control, delays
+   resupply, caps salvos and risks dragging Iran into the war.
+   ============================================================================ */
+const IRAN_CENTER = [{ lat: 32.0853, lon: 34.7818 }, { lat: 31.7683, lon: 35.2137 }];   // Tel Aviv, Jerusalem
+function iranEnsure() { if (state.iranControl == null) state.iranControl = 70; if (state.iranPatience == null) state.iranPatience = 0; if (state.iranChaos == null) state.iranChaos = 0; }
+function iranControlVal() { return (state.iranControl != null) ? state.iranControl : 70; }
+function iranSetControl(v) { iranEnsure(); state.iranControl = Math.max(0, Math.min(100, v)); }
+function iranStatus() { const c = iranControlVal(); return c >= 80 ? { t: 'Full axis control', c: '#7fffb0' } : c >= 50 ? { t: 'Working coordination', c: '#bfe0ff' } : c >= 25 ? { t: 'Weak control', c: '#ffd479' } : { t: 'Coordination collapse', c: '#ff5b50' }; }
+function iranSeverity(am, lat, lon) {
+  if (!am) return 0;
+  const ty = am.type, salvo = am.salvo || 1;
+  if (typeof haversineKm === 'function') { for (let i = 0; i < IRAN_CENTER.length; i++) if (haversineKm(lat, lon, IRAN_CENTER[i].lat, IRAN_CENTER[i].lon) <= 30) return 3; }   // strike on Israel's center
+  if (ty === 'ballistic' || ty === 'cluster') return 3;
+  if (ty === 'cruise' || salvo >= 12) return 2;
+  if ((ty === 'drone' && salvo >= 3) || salvo >= 8 || ty === 'heavyRocket') return 2;
+  return 0;
+}
+function iranSevLabel(sev) { return sev >= 3 ? 'strike on Israel’s center / strategic missile' : 'major attack (mass salvo / drone swarm)'; }
+function iranEvaluate(sev) {
+  iranEnsure(); state._iranLastMajorAt = Date.now();
+  const c = iranControlVal(), p = state.iranPatience || 0;
+  const esc = (typeof MP !== 'undefined' && MP.enabled) ? (MP.escalation || 0) : 0;
+  const score = c - p * 10 - sev * 8 + (Math.random() * 16 - 8);
+  if (score >= 72 && esc < 35 && Math.random() < 0.4) return 'stronger';   // high control + low heat → Tehran wants more pressure
+  if (score >= 60) return 'approve';
+  if (score >= 42) return (Math.random() < 0.5) ? 'limited' : 'custom';
+  if (score >= 20) return 'defer';
+  return 'deny';
+}
+function iranDefy(sev, fid) {
+  iranEnsure(); state._iranLastMajorAt = Date.now();
+  iranSetControl(iranControlVal() - (8 + sev * 5));
+  state.iranPatience = (state.iranPatience || 0) + 1;
+  state.iranSupplyDelayUntil = Date.now() + 45000;
+  state.iranChaos = Math.min(100, (state.iranChaos || 0) + 10 + sev * 4);
+  state.iranLastResponse = 'DEFIED';
+  if (typeof showNotification === 'function') showNotification('⚠ AGAINST TEHRAN', 'Action against Iran’s position. Axis control −' + (8 + sev * 5) + ', resupply delayed 45s, coordination falling, risk of dragging Iran in.', 'danger');
+  if (typeof logEvent === 'function') logEvent('⚠ ' + ((ENEMIES[fid] && ENEMIES[fid].name) || fid) + ' acted AGAINST Iran — axis control ' + Math.round(iranControlVal()), 'danger');
+}
+function iranCloseModal() { const m = el('iran-perm-modal'); if (m) m.style.display = 'none'; }
+function iranExecPending() { iranCloseModal(); const p = state._iranPending; state._iranPending = null; if (p) attackerLaunchAt(p.lat, p.lon, { iranApproved: true }); }
+function iranMkBtn(parent, txt, color, fn) { const b = document.createElement('button'); b.textContent = txt; b.style.cssText = 'padding:8px 12px;font-size:12px;border-radius:5px;cursor:pointer;border:1px solid ' + color + ';background:rgba(255,255,255,0.05);color:' + color + ';'; b.onclick = fn; parent.appendChild(b); }
+function iranPermissionModal(fid, am, lat, lon, sev) {
+  iranEnsure();
+  state._iranPending = { lat: lat, lon: lon, sev: sev, fid: fid };
+  let m = el('iran-perm-modal');
+  if (!m) { m = document.createElement('div'); m.id = 'iran-perm-modal'; m.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:10000;background:rgba(20,12,12,0.98);border:2px solid #cf5b3a;border-radius:10px;padding:18px 20px;color:#edd;font:13px/1.5 sans-serif;width:400px;box-shadow:0 8px 40px rgba(0,0,0,.7);'; document.body.appendChild(m); }
+  m.innerHTML = '<div style="color:#ff9b6b;font-weight:bold;font-size:15px;margin-bottom:6px;">☪ IRAN — AXIS COORDINATION</div>' +
+    '<div style="margin-bottom:8px;">' + ((ENEMIES[fid] && ENEMIES[fid].name) || fid) + ' requests: <b>' + iranSevLabel(sev) + '</b></div>' +
+    '<div id="iran-perm-body" style="margin-bottom:12px;color:#e0b0a0;">Coordinate with Tehran before acting — or act independently and weaken the axis.</div>' +
+    '<div id="iran-perm-btns" style="display:flex;gap:8px;flex-wrap:wrap;"></div>';
+  m.style.display = 'block';
+  const btns = el('iran-perm-btns');
+  iranMkBtn(btns, '☪ Request Iran’s position', '#ff9b6b', function () { iranShowVerdict(iranEvaluate(sev)); });
+  iranMkBtn(btns, '⚠ Act without coordinating', '#ff7a60', function () { iranDefy(sev, fid); iranExecPending(); });
+  iranMkBtn(btns, 'Cancel', '#999', function () { state._iranPending = null; iranCloseModal(); });
+}
+function iranShowVerdict(v) {
+  state.iranLastResponse = v.toUpperCase();
+  iranEnsure(); state.iranPatience = (state.iranPatience || 0) + 1;
+  const body = el('iran-perm-body'), btns = el('iran-perm-btns'); if (!body || !btns) return; btns.innerHTML = '';
+  const sev = state._iranPending ? state._iranPending.sev : 2, fid = state._iranPending && state._iranPending.fid;
+  const cancel = function () { state._iranPending = null; iranCloseModal(); };
+  if (v === 'approve') {
+    body.innerHTML = '<b style="color:#7fffb0">APPROVED.</b> Tehran backs the operation — axis coordinated, no penalty.';
+    iranSetControl(iranControlVal() + 1);
+    iranMkBtn(btns, '✓ Execute', '#7fffb0', iranExecPending); iranMkBtn(btns, 'Cancel', '#999', cancel);
+  } else if (v === 'limited') {
+    body.innerHTML = '<b style="color:#bfe0ff">APPROVED WITH LIMITS.</b> Tehran caps the scope — smaller salvo, keep it on the front.';
+    iranMkBtn(btns, 'Execute (reduced)', '#bfe0ff', function () { if (state.attackMode && (state.attackMode.salvo || 1) > 2) state.attackMode.salvo = 2; iranExecPending(); });
+    iranMkBtn(btns, 'Cancel', '#999', cancel);
+  } else if (v === 'custom') {
+    body.innerHTML = '<b style="color:#cfe0ff">CUSTOM PLAN.</b> Tehran proposes a measured, controlled strike rather than your plan.';
+    iranMkBtn(btns, 'Execute Iran’s plan', '#cfe0ff', function () { if (state.attackMode && (state.attackMode.salvo || 1) > 3) state.attackMode.salvo = 3; iranExecPending(); });
+    iranMkBtn(btns, '⚠ Do it my way', '#ff7a60', function () { iranDefy(sev, fid); iranExecPending(); });
+    iranMkBtn(btns, 'Cancel', '#999', cancel);
+  } else if (v === 'stronger') {
+    body.innerHTML = '<b style="color:#ffd479">ESCALATE.</b> Tehran wants MORE pressure — a heavier salvo to raise the stakes.';
+    iranMkBtn(btns, '🔥 Execute reinforced', '#ffd479', function () { if (state.attackMode) state.attackMode.salvo = Math.min(20, (state.attackMode.salvo || 1) + 4); iranSetControl(iranControlVal() + 2); iranExecPending(); });
+    iranMkBtn(btns, 'Execute as planned', '#bfe0ff', iranExecPending); iranMkBtn(btns, 'Cancel', '#999', cancel);
+  } else if (v === 'defer') {
+    body.innerHTML = '<b style="color:#ffd479">HOLD.</b> Tehran asks you to wait — wrong moment (US presence / Israeli response / too hot).';
+    state.iranHoldUntil = Date.now() + 40000;
+    iranMkBtn(btns, '⏳ Wait', '#ffd479', function () { iranSetControl(iranControlVal() + 2); cancel(); if (typeof showNotification === 'function') showNotification('AXIS HOLD', 'You held for Tehran — axis control +2.', 'info'); });
+    iranMkBtn(btns, '⚠ Act anyway', '#ff7a60', function () { iranDefy(sev, fid); iranExecPending(); });
+    iranMkBtn(btns, 'Cancel', '#999', cancel);
+  } else {
+    body.innerHTML = '<b style="color:#ff5b50">DENIED.</b> Tehran forbids this. Acting anyway weakens the axis, delays supply and risks dragging Iran into war.';
+    iranMkBtn(btns, '⚠ Act anyway', '#ff5b50', function () { iranDefy(sev, fid); iranExecPending(); });
+    iranMkBtn(btns, 'Cancel', '#999', cancel);
+  }
+}
+function iranAxisSummary() {
+  const parts = [];
+  if (state.iranChaos >= 30) parts.push('chaos ' + Math.round(state.iranChaos));
+  if (state.iranTask) parts.push('task: ' + state.iranTask);
+  return parts.length ? '<div style="color:#ffb38a;margin-top:3px;border-top:1px solid rgba(207,91,58,.3);padding-top:3px;">☪ ' + parts.join(' · ') + '</div>' : '';
+}
+function iranPanel() {
+  if (state._iranPanelAt && Date.now() - state._iranPanelAt < 300) return; state._iranPanelAt = Date.now();
+  iranEnsure();
+  if (state._iranLastMajorAt && Date.now() - state._iranLastMajorAt > 30000) { if (state.iranPatience > 0) state.iranPatience = Math.max(0, state.iranPatience - 0.02); if (state.iranChaos > 0) state.iranChaos = Math.max(0, state.iranChaos - 0.05); if (iranControlVal() < 70) iranSetControl(iranControlVal() + 0.02); }
+  let p = el('iran-panel');
+  if (!p) { p = document.createElement('div'); p.id = 'iran-panel'; p.style.cssText = 'position:fixed;top:92px;right:8px;z-index:8800;background:rgba(24,12,12,0.92);border:1px solid #cf5b3a;border-radius:6px;padding:8px 11px;color:#ffd9c8;font:11px/1.5 monospace;width:212px;pointer-events:none;'; document.body.appendChild(p); }
+  p.style.display = 'block';
+  const c = Math.round(iranControlVal()), st = iranStatus();
+  const delay = state.iranSupplyDelayUntil && state.iranSupplyDelayUntil > Date.now();
+  const hold = state.iranHoldUntil && state.iranHoldUntil > Date.now();
+  p.innerHTML = '<div style="color:#ff9b6b;font-weight:bold;letter-spacing:1px;">☪ IRAN — AXIS</div>' +
+    '<div>' + st.t + '</div>' +
+    '<div style="height:6px;background:rgba(255,255,255,.1);border-radius:3px;margin:3px 0;overflow:hidden;"><div style="height:100%;width:' + c + '%;background:' + st.c + ';transition:width .3s;"></div></div>' +
+    '<div>control <b style="color:' + st.c + '">' + c + '</b>/100 · patience ' + Math.floor(state.iranPatience || 0) + '</div>' +
+    (state.iranLastResponse ? '<div>last response: <b>' + state.iranLastResponse + '</b></div>' : '') +
+    (hold ? '<div style="color:#ffd479">⏳ Tehran asked to wait ' + Math.ceil((state.iranHoldUntil - Date.now()) / 1000) + 's</div>' : '') +
+    (delay ? '<div style="color:#ff7a60">⚠ resupply delayed ' + Math.ceil((state.iranSupplyDelayUntil - Date.now()) / 1000) + 's (salvos capped)</div>' : '') +
+    iranAxisSummary();
 }
 
 /* ---------------- FX capture (host) — wrap the two FX entry points ---------------- */
