@@ -2125,6 +2125,14 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.25.2  — FIX MP guest FREEZE after a launch (user: "после запуска ракеты всё зависает"). Root
+//            cause: updateUI()'s threat-list read `t.targetCity.name`, but synced guest threats had
+//            no targetCity → it threw EVERY frame, and since render()/updateUI() run before the
+//            rAF reschedule, the exception killed the loop (total freeze; the "opponent paused" was
+//            the frozen player clicking pause to recover). Fixes: (1) threat-list is now null-safe;
+//            (2) snapshot now syncs weaponName/targetCity name/eta so the OPFOR threat list shows
+//            real data; (3) render()/updateUI()/guest-tick are wrapped in try/catch so no single
+//            draw/UI exception can ever hard-freeze the loop again (degrades to one console error).
 //   2.25.1  — MP pause is manual + synced (user: "отключи ограничение на паузу"). Removed the
 //            auto-pause on disconnect/timeout (now just a one-time banner + recovery notice). The
 //            pause button / Space now broadcasts {t:'pause'} so either player OR the host pauses &
@@ -3133,7 +3141,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.25.1';
+const GAME_VERSION = '2.25.2';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -13640,11 +13648,14 @@ function gameLoop(time) {
       // v2.25.0 — OPFOR client: NO local simulation. Threats/interceptors/cities come from the
       // host's snapshots; here we only advance the local clock, smoothly extrapolate positions and
       // rebuild trails between snapshots, and tick local FX particles (flashes/embers/smoke).
+      // v2.25.2 — wrapped in try/catch so an incomplete synced object can NEVER kill the loop (freeze).
       state.gameTime += dt;
-      mpGuestTick(dt);
-      updateExplosions(dt);
-      if (typeof updateAlerts === 'function') updateAlerts(dt);
-      if (typeof mpUpdateGuestPanel === 'function') mpUpdateGuestPanel();
+      try {
+        mpGuestTick(dt);
+        updateExplosions(dt);
+        if (typeof updateAlerts === 'function') updateAlerts(dt);
+        if (typeof mpUpdateGuestPanel === 'function') mpUpdateGuestPanel();
+      } catch (e) { if (!window.__shieldGuestErr) { console.error('[MP] guest tick error', e); window.__shieldGuestErr = true; } }
     } else if (state.buildPhase) {
       state.buildTimer -= rawDt / 1000;
       document.getElementById('build-timer').textContent = Math.max(0, Math.ceil(state.buildTimer));
@@ -13682,8 +13693,11 @@ function gameLoop(time) {
     }
   }
 
-  render();
-  updateUI();
+  // v2.25.2 — render/UI wrapped so a single draw/UI exception (e.g. an incomplete synced object in
+  // multiplayer) degrades to a one-time console error instead of HARD-FREEZING the game (the rAF
+  // reschedule below was being skipped when render/updateUI threw, killing the loop).
+  try { render(); } catch (e) { if (!window.__shieldRenderErr) { console.error('[loop] render error', e); window.__shieldRenderErr = true; } }
+  try { updateUI(); } catch (e) { if (!window.__shieldUIErr) { console.error('[loop] updateUI error', e); window.__shieldUIErr = true; } }
   requestAnimationFrame(gameLoop);
 }
 
@@ -19693,7 +19707,7 @@ function updateThreatsList() {
   list.innerHTML = active.slice(0, 30).map(t => {
     const type = THREAT_TYPES[t.type];
     const enemy = ENEMIES[t.enemy];
-    const eta = (t.eta / 1000).toFixed(1);
+    const eta = ((t.eta || 0) / 1000).toFixed(1);
     return `
       <div class="threat-item ${state.selectedThreat === t.id ? 'selected' : ''}"
            style="border-left-color:${type.color}"
@@ -19703,7 +19717,7 @@ function updateThreatsList() {
           <span class="eta">⏱ ${eta}s</span>
         </div>
         <div class="meta">
-          ${enemy.name} → ${t.targetCity.name}
+          ${enemy ? enemy.name : '—'} → ${(t.targetCity && t.targetCity.name) || '—'}
           ${t.assigned ? '<br><span class="assigned">⚡ INTERCEPT ASSIGNED</span>' : ''}
         </div>
       </div>`;
@@ -23085,7 +23099,8 @@ function mpBuildSnapshot() {
     id: t.id, ty: t.type, en: t.enemy,
     cla: r5(t.curLat), clo: r5(t.curLon), sla: r5(t.startLat), slo: r5(t.startLon),
     tla: r5(t.targetLat), tlo: r5(t.targetLon), p: r3(t.progress), ar: t.arcRatio,
-    ic: t.intercepted ? 1 : 0, im: t.impacted ? 1 : 0
+    ic: t.intercepted ? 1 : 0, im: t.impacted ? 1 : 0,
+    wn: t.weaponName, tcn: (t.targetCity && t.targetCity.name) || null, eta: Math.round(t.eta || 0)
   }));
   const ic = state.interceptors.map((i) => ({
     id: i.id, bt: i.batteryType, sla: r5(i.startLat), slo: r5(i.startLon),
@@ -23141,6 +23156,9 @@ function mpGuestApplySnapshot(s) {
     o.id = n.id; o.type = n.ty; o.enemy = n.en;
     o.startLat = n.sla; o.startLon = n.slo; o.targetLat = n.tla; o.targetLon = n.tlo;
     o.arcRatio = n.ar; o.progress = n.p; o.intercepted = !!n.ic; o.impacted = !!n.im;
+    o.weaponName = n.wn; o.eta = n.eta;                       // v2.25.2 — fields the threat-list UI needs
+    if (!o.targetCity) o.targetCity = {};
+    o.targetCity.name = n.tcn || '—'; o.targetCity.lat = n.tla; o.targetCity.lon = n.tlo;
     if (o.curLat != null) { const el2 = Math.max(16, now - (o._t || now)); o._vLat = (n.cla - o.curLat) / el2; o._vLon = (n.clo - o.curLon) / el2; }
     o.curLat = n.cla; o.curLon = n.clo; o._t = now; if (!o.trail) o.trail = [];
     return o;
