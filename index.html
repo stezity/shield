@@ -2182,6 +2182,16 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.26.3  — US RELATIONS & PERMISSIONS, stage 2 of 3 (#1). Builds on state.world.usSupport (0-100).
+//            5 status tiers (Full / Cautious / Tension / Crisis / Open conflict). A major op — strike on
+//            a CAPITAL (≤35km of Beirut/Gaza City/Tehran/Sanaa) or a STRATEGIC target — opens a US
+//            permission modal: Request US permission → APPROVE / APPROVE-WITH-LIMITS / HOLD (diplomatic
+//            window) / DENY (verdict from support − patience×12 − severity×9 ± rng). Defying the US (or
+//            striking without asking) drops support, freezes arms supply 60s, spikes escalation (with the
+//            defy hold multiplier) and intl pressure. PATIENCE rises per request (repeats get harsher)
+//            and cools after a pause; support drifts back toward 65 when idle. Always-on US panel for the
+//            defender (support bar/status/last response/window/freeze). Auto doctrine + strike-on-sight
+//            bypass the modal. NEXT: (5) MP faction queues/UI, (6/7) more targets + hit FX + red-lines.
 //   2.26.2  — Escalation/radius overhaul, stage 1 of 3 (user mega-spec). (4) ESCALATION HOLD/INERTIA:
 //            after a major event the meter HOLDS (no decay) for a window LONGER than any reload, then
 //            decays SLOWLY — slower the higher it is (≥85 ≈ stays hot). Tunable ESC_HOLD_* params; ×1.6
@@ -3299,7 +3309,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.26.2';
+const GAME_VERSION = '2.26.3';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -6324,7 +6334,7 @@ function suppressNearestLaunchSite(lat, lon) {
 }
 
 // АВИАУДАР: F-35 с израильских авиабаз бьёт по конкретной вражеской цели
-function launchAirStrike(lat, lon) {
+function launchAirStrike(lat, lon, approved) {
   if (state.strikesLeft <= 0 || state.strikeCooldown > 0) return;
   // Gaza Campaign: warn the player if launching a strike would violate an agreed ceasefire.
   if (state.gaza && state.scenario && state.scenario.campaign === 'gaza') {
@@ -6396,6 +6406,12 @@ function launchAirStrike(lat, lon) {
     return;
   }
 
+  // v2.26.3 — US PERMISSION GATE: major ops (capitals/strategic targets) need Washington's nod. Only the
+  // human defender's manual strike triggers it (auto doctrine/strike-on-sight pass approved=true).
+  if (!approved && state.playAs !== 'attacker' && typeof usSeverity === 'function') {
+    const sev = usSeverity(target, lat, lon);
+    if (sev >= 1) { usPermissionModal(lat, lon, target, sev); return; }
+  }
   state.strikesLeft--;
   state.strikeCooldown = 8000;   // быстрая перезарядка
   if (typeof MP !== 'undefined' && MP.enabled && MP.role === 'host') mpEscalateDefenderStrike(target.lat, target.lon, target);   // v2.25.5 — deep/symbolic strikes raise escalation
@@ -12293,7 +12309,7 @@ function handleImpact(threat, smallBlast) {
         const tgt = enemyTargets.sort((a, b) => b.importance - a.importance)[0];
         setTimeout(() => {
           if (state.active && !state.ended && typeof launchAirStrike === 'function') {
-            launchAirStrike(tgt.lat, tgt.lon);
+            launchAirStrike(tgt.lat, tgt.lon, true);   // auto doctrine strike — bypass US permission modal
             logEvent(`◊ AUTO-RETAL: ${generateOpName()} — counter-strike on ${tgt.name}`, 'success');
           }
         }, 1500);
@@ -13922,6 +13938,10 @@ function gameLoop(time) {
   // reschedule below was being skipped when render/updateUI threw, killing the loop).
   try { render(); } catch (e) { if (!window.__shieldRenderErr) { console.error('[loop] render error', e); window.__shieldRenderErr = true; } }
   try { updateUI(); } catch (e) { if (!window.__shieldUIErr) { console.error('[loop] updateUI error', e); window.__shieldUIErr = true; } }
+  try {
+    if (typeof usPanel === 'function' && state.active && state.playAs !== 'attacker') usPanel();
+    else { const _u = document.getElementById('us-panel'); if (_u) _u.style.display = 'none'; if (!state.active) { const _m = document.getElementById('us-perm-modal'); if (_m) _m.style.display = 'none'; } }
+  } catch (e) {}
   requestAnimationFrame(gameLoop);
 }
 
@@ -13949,7 +13969,7 @@ function tickStrikeOnSight(dt) {
   if (!live.length) return;
   state._sosCD = 7000;   // ~7s between auto counter-battery strikes
   const t = live[live.length - 1];
-  try { launchAirStrike(t.startLat, t.startLon); } catch (e) {}
+  try { launchAirStrike(t.startLat, t.startLon, true); } catch (e) {}   // auto strike-on-sight — bypass US permission modal
 }
 function updateIDFRetaliation(dt) {
   if (state.playAs !== 'attacker') return;
@@ -24153,6 +24173,110 @@ function mpFfaBuildPicker() {
     b.onclick = function () { if (taken) return; mpSend({ t: 'join', faction: r, nick: MP.nick }); };
     row.appendChild(b);
   });
+}
+
+/* ============================================================================
+   US RELATIONS & PERMISSIONS (v2.26.3) — builds on state.world.usSupport (0-100).
+   Major ops (capitals, strategic targets) need US permission. Defying the US (or
+   not asking) costs support + freezes supply + raises escalation. Patience makes
+   repeated requests harsher. Applies to the DEFENDER (Israel) player.
+   ============================================================================ */
+const US_CAPITALS = [{ n: 'Beirut', lat: 33.8938, lon: 35.5018 }, { n: 'Gaza City', lat: 31.5018, lon: 34.4668 }, { n: 'Tehran', lat: 35.6892, lon: 51.3890 }, { n: 'Sanaa', lat: 15.3694, lon: 44.1910 }];
+function usEnsure() { if (typeof ensureWorldState === 'function') ensureWorldState(); if (!state.world) state.world = {}; if (state.world.usSupport == null) state.world.usSupport = 60; if (state.world.usPatience == null) state.world.usPatience = 0; }
+function usSupportVal() { return (state.world && state.world.usSupport != null) ? state.world.usSupport : 60; }
+function usSetSupport(v) { usEnsure(); state.world.usSupport = Math.max(0, Math.min(100, v)); }
+function usStatus() { const s = usSupportVal(); return s >= 80 ? { t: 'Full support', c: '#7fffb0' } : s >= 50 ? { t: 'Cautious support', c: '#bfe0ff' } : s >= 25 ? { t: 'Tension', c: '#ffd479' } : s >= 10 ? { t: 'Crisis', c: '#ff8a76' } : { t: 'Open conflict with US', c: '#ff3b30' }; }
+function usSeverity(target, lat, lon) {
+  if (!target) return 0;
+  const tl = (target.lat != null) ? target.lat : lat, to = (target.lon != null) ? target.lon : lon;
+  if (typeof haversineKm === 'function') { for (let i = 0; i < US_CAPITALS.length; i++) { if (haversineKm(tl, to, US_CAPITALS[i].lat, US_CAPITALS[i].lon) <= 35) return 3; } }
+  const imp = target.importance || 0, ty = target.type;
+  if (imp >= 9 || ty === 'strategic' || ty === 'leader' || ty === 'capital') return 2;
+  if (imp >= 7 || ty === 'HQ' || ty === 'powerplant' || ty === 'port' || ty === 'arsenal') return 1;
+  return 0;
+}
+function usSevLabel(sev) { return sev >= 3 ? 'strike on a CAPITAL' : sev >= 2 ? 'strike on a STRATEGIC target' : 'major strike'; }
+function usEvaluate(sev) {
+  usEnsure(); state._usLastMajorAt = Date.now();
+  const score = usSupportVal() - (state.world.usPatience || 0) * 12 - sev * 9 + (Math.random() * 16 - 8);
+  return score >= 58 ? 'approve' : score >= 36 ? 'limited' : score >= 16 ? 'delay' : 'deny';
+}
+function usDefy(sev, label) {
+  usEnsure(); state._usLastMajorAt = Date.now();
+  usSetSupport(usSupportVal() - (10 + sev * 5));
+  state.world.usPatience = (state.world.usPatience || 0) + 1;
+  state.usSupplyFrozenUntil = Date.now() + 60000;
+  state.usLastResponse = 'DEFIED';
+  if (state.world) state.world.intlPressure = Math.min(100, (state.world.intlPressure || 30) + 8 + sev * 4);
+  if (typeof MP !== 'undefined' && MP.enabled && MP.role === 'host') { MP.escalation = Math.min(100, (MP.escalation || 0) + 6 + sev * 3); if (typeof mpEscHoldMajor === 'function') mpEscHoldMajor(ESC_HOLD_DEFY_MULT); }
+  if (typeof showNotification === 'function') showNotification('⚠ AGAINST THE US POSITION', 'Operation conducted against Washington. US support −' + (10 + sev * 5) + ', arms supply frozen 60s, escalation up.', 'danger');
+  if (typeof logEvent === 'function') logEvent('⚠ ' + (label || 'Major op') + ' conducted AGAINST the US — support now ' + Math.round(usSupportVal()) + ', supply frozen', 'danger');
+}
+function usCloseModal() { const m = el('us-perm-modal'); if (m) m.style.display = 'none'; }
+function usExecPending() { usCloseModal(); const p = state._usPending; state._usPending = null; if (p) launchAirStrike(p.lat, p.lon, true); }
+function usMkBtn(parent, txt, color, fn) { const b = document.createElement('button'); b.textContent = txt; b.style.cssText = 'padding:8px 12px;font-size:12px;border-radius:5px;cursor:pointer;border:1px solid ' + color + ';background:rgba(255,255,255,0.05);color:' + color + ';'; b.onclick = fn; parent.appendChild(b); }
+function usPermissionModal(lat, lon, target, sev) {
+  usEnsure();
+  state._usPending = { lat: lat, lon: lon, target: target, sev: sev };
+  let m = el('us-perm-modal');
+  if (!m) { m = document.createElement('div'); m.id = 'us-perm-modal'; m.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:10000;background:rgba(12,18,30,0.98);border:2px solid #5b8def;border-radius:10px;padding:18px 20px;color:#dde;font:13px/1.5 sans-serif;width:390px;box-shadow:0 8px 40px rgba(0,0,0,.7);'; document.body.appendChild(m); }
+  m.innerHTML = '<div style="color:#7fb0ff;font-weight:bold;font-size:15px;margin-bottom:6px;">🇺🇸 US PERMISSION</div>' +
+    '<div style="margin-bottom:8px;">Requested: <b>' + ((target && target.name) ? target.name : usSevLabel(sev)) + '</b> <span style="color:#9fbada;">(' + usSevLabel(sev) + ')</span></div>' +
+    '<div id="us-perm-body" style="margin-bottom:12px;color:#9fbada;">Request Washington’s position before proceeding — or act unilaterally and accept the consequences.</div>' +
+    '<div id="us-perm-btns" style="display:flex;gap:8px;flex-wrap:wrap;"></div>';
+  m.style.display = 'block';
+  const btns = el('us-perm-btns');
+  usMkBtn(btns, '🇺🇸 Request US permission', '#7fb0ff', function () { usShowVerdict(usEvaluate(sev)); });
+  usMkBtn(btns, '⚠ Execute without asking', '#ff8a76', function () { usDefy(sev, target && target.name); usExecPending(); });
+  usMkBtn(btns, 'Cancel', '#999', function () { state._usPending = null; usCloseModal(); });
+}
+function usShowVerdict(v) {
+  state.usLastResponse = v.toUpperCase();
+  usEnsure(); state.world.usPatience = (state.world.usPatience || 0) + 1;
+  const body = el('us-perm-body'), btns = el('us-perm-btns'); if (!body || !btns) return; btns.innerHTML = '';
+  const sev = state._usPending ? state._usPending.sev : 1, name = state._usPending && state._usPending.target && state._usPending.target.name;
+  if (v === 'approve') {
+    body.innerHTML = '<b style="color:#7fffb0">APPROVED.</b> Washington backs the operation — no penalty.';
+    usSetSupport(usSupportVal() + 1);
+    usMkBtn(btns, '✓ Execute', '#7fffb0', usExecPending);
+    usMkBtn(btns, 'Cancel', '#999', function () { state._usPending = null; usCloseModal(); });
+  } else if (v === 'limited') {
+    body.innerHTML = '<b style="color:#bfe0ff">APPROVED WITH LIMITS.</b> Reduce scope — no capital strikes, fewer targets.';
+    usMkBtn(btns, 'Execute (reduced)', '#bfe0ff', usExecPending);
+    usMkBtn(btns, 'Cancel', '#999', function () { state._usPending = null; usCloseModal(); });
+  } else if (v === 'delay') {
+    body.innerHTML = '<b style="color:#ffd479">HOLD.</b> Washington asks you to wait for a diplomatic window.';
+    state.usDelayUntil = Date.now() + 45000;
+    usMkBtn(btns, '⏳ Wait (window)', '#ffd479', function () { usSetSupport(usSupportVal() + 2); state._usPending = null; usCloseModal(); if (typeof showNotification === 'function') showNotification('US DIPLOMATIC WINDOW', 'You agreed to wait — US support +2.', 'info'); });
+    usMkBtn(btns, '⚠ Execute anyway', '#ff8a76', function () { usDefy(sev, name); usExecPending(); });
+    usMkBtn(btns, 'Cancel', '#999', function () { state._usPending = null; usCloseModal(); });
+  } else {
+    body.innerHTML = '<b style="color:#ff3b30">DENIED.</b> Washington opposes this operation. Acting anyway will hit support, freeze supply and spike escalation.';
+    usMkBtn(btns, '⚠ Execute anyway', '#ff3b30', function () { usDefy(sev, name); usExecPending(); });
+    usMkBtn(btns, 'Cancel', '#999', function () { state._usPending = null; usCloseModal(); });
+  }
+}
+function usPanel() {
+  if (state._usPanelAt && Date.now() - state._usPanelAt < 300) return; state._usPanelAt = Date.now();
+  usEnsure();
+  // slow drift: patience cools + support recovers toward 65 after a pause in major ops
+  if (state._usLastMajorAt && Date.now() - state._usLastMajorAt > 30000) {
+    if (state.world.usPatience > 0) state.world.usPatience = Math.max(0, state.world.usPatience - 0.02);
+    if (usSupportVal() < 65) usSetSupport(usSupportVal() + 0.02);
+  }
+  let p = el('us-panel');
+  if (!p) { p = document.createElement('div'); p.id = 'us-panel'; p.style.cssText = 'position:fixed;top:92px;right:8px;z-index:8800;background:rgba(10,18,30,0.92);border:1px solid #5b8def;border-radius:6px;padding:8px 11px;color:#cfe0ff;font:11px/1.5 monospace;width:212px;pointer-events:none;'; document.body.appendChild(p); }
+  p.style.display = 'block';
+  const s = Math.round(usSupportVal()), st = usStatus();
+  const frozen = state.usSupplyFrozenUntil && state.usSupplyFrozenUntil > Date.now();
+  const delay = state.usDelayUntil && state.usDelayUntil > Date.now();
+  p.innerHTML = '<div style="color:#7fb0ff;font-weight:bold;letter-spacing:1px;">🇺🇸 US RELATIONS</div>' +
+    '<div>' + st.t + '</div>' +
+    '<div style="height:6px;background:rgba(255,255,255,.1);border-radius:3px;margin:3px 0;overflow:hidden;"><div style="height:100%;width:' + s + '%;background:' + st.c + ';transition:width .3s;"></div></div>' +
+    '<div>support <b style="color:' + st.c + '">' + s + '</b>/100 · patience ' + Math.floor(state.world.usPatience || 0) + '</div>' +
+    (state.usLastResponse ? '<div>last response: <b>' + state.usLastResponse + '</b></div>' : '') +
+    (delay ? '<div style="color:#ffd479">⏳ diplomatic window ' + Math.ceil((state.usDelayUntil - Date.now()) / 1000) + 's</div>' : '') +
+    (frozen ? '<div style="color:#ff8a76">⚠ arms supply frozen ' + Math.ceil((state.usSupplyFrozenUntil - Date.now()) / 1000) + 's</div>' : '');
 }
 
 /* ---------------- FX capture (host) — wrap the two FX entry points ---------------- */
