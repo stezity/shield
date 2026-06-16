@@ -2182,6 +2182,14 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.27.0  — CRITICAL FIX — multi-faction launches were silently dropped. mpHostApplyLaunch rejected any
+//            launch whose faction wasn't MP.unlocked[fid]; in FFA, MP.unlocked is derived from a single
+//            guestFaction (mpRecomputeUnlocks), so Hezbollah/Iran/Houthi/USA-side players were blocked until
+//            escalation>=40 — the guest passed all its own checks, sent the launch, and the host dropped it
+//            with no feedback. Now the unlock gate applies to 1v1 only (FFA verifies faction ownership at
+//            the message layer). Verified: FFA Hezbollah/Iran fire at escalation 0; 1v1 front-switch gate
+//            intact. (Radius/escalation/ammo/reload/suppression gating + reasons already work in
+//            mpGuestLaunchAt — they were just unreachable behind this bug.)
 //   2.26.9  — BUG FIXES (player reports). (1) 1v1 OPFOR couldn't launch: if the guest didn't pick a faction
 //            in the lobby, MP.guestFaction was undefined → ALL factions locked → nothing selectable. Now
 //            mpGuestStart/mpHostStart default it to 'hamas'. (2) Iran's permission modal popped on EVERY
@@ -3362,7 +3370,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.26.9';
+const GAME_VERSION = '2.27.0';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -23518,7 +23526,7 @@ function mpHostApplyLaunch(cmd) {
   if (!MP.enabled || !state.active || MP.phase !== 'battle') return;   // v2.25.11 — no launches during deploy phase
   const fid = cmd.faction, type = cmd.type;
   if (!ENEMIES[fid] || !THREAT_TYPES[type]) return;
-  if (!MP.unlocked[fid]) return;
+  if (!MP.ffa && !MP.unlocked[fid]) return;   // v2.27.0 FIX — 1v1 OPFOR is front-switch-gated by escalation; in FFA each player OWNS their faction (ownership already verified by the caller), so the unlock gate must NOT block them
   const now = Date.now();
   if (now < (MP.reload[fid] || 0)) return;
   const stockObj = MP.arsenal[fid] || (MP.arsenal[fid] = {});
