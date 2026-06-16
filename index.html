@@ -2125,6 +2125,13 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.25.3  — MP freeze hardening + diagnostics (user: "карта отображается но просто зависает"). The
+//            ENTIRE per-frame update tick (host sim AND guest) is now wrapped in try/catch, so NO
+//            exception on either side can ever stop the requestAnimationFrame loop. Host snapshot
+//            sending is DECOUPLED from the sim block — even a swallowed sim error keeps the OPFOR fed,
+//            so its battlefield can't freeze from a host hiccup. Added a live HUD heartbeat
+//            (spinner = loop alive; "no data Ns" = the feed stalled) to tell a true freeze apart from
+//            a connection stall.
 //   2.25.2  — FIX MP guest FREEZE after a launch (user: "после запуска ракеты всё зависает"). Root
 //            cause: updateUI()'s threat-list read `t.targetCity.name`, but synced guest threats had
 //            no targetCity → it threw EVERY frame, and since render()/updateUI() run before the
@@ -3141,7 +3148,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.25.2';
+const GAME_VERSION = '2.25.3';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -13644,6 +13651,7 @@ function gameLoop(time) {
   const dt = rawDt * state.speed;
 
   if (!state.paused && !state.ended) {
+   try {   // v2.25.3 — bulletproof update tick (host sim OR guest); see catch below
     if (MP && MP.enabled && MP.role === 'guest') {
       // v2.25.0 — OPFOR client: NO local simulation. Threats/interceptors/cities come from the
       // host's snapshots; here we only advance the local clock, smoothly extrapolate positions and
@@ -13689,8 +13697,14 @@ function gameLoop(time) {
       updateTSTs(dt);
       updateSalvoAlerts(dt);
       checkEndConditions();
-      if (MP && MP.enabled && MP.role === 'host') mpHostMaybeSnapshot(dt);   // v2.25.0 — broadcast state to OPFOR
     }
+    } catch (e) { if (!window.__shieldTickErr) { console.error('[loop] update tick error', e); window.__shieldTickErr = true; } }   // v2.25.3 — no per-frame throw can kill the loop
+  }
+
+  // v2.25.3 — host snapshot send is DECOUPLED from the sim block: even if a sim function throws (and
+  // is swallowed above), the OPFOR keeps receiving state, so its battlefield never freezes.
+  if (!state.paused && !state.ended && MP && MP.enabled && MP.role === 'host') {
+    try { mpHostMaybeSnapshot(dt); } catch (e) { if (!window.__shieldSnapErr) { console.error('[MP] snapshot error', e); window.__shieldSnapErr = true; } }
   }
 
   // v2.25.2 — render/UI wrapped so a single draw/UI exception (e.g. an incomplete synced object in
@@ -23089,6 +23103,16 @@ function mpHostMaybeSnapshot(dt) {
   const now = Date.now();
   if (now - MP.lastRecvAt > 9000 && !MP._lostNotified) mpOnPeerLost('timeout');   // notify once, keep simulating (no auto-pause)
   if (MP.escalation > 0) { MP.escalation = Math.max(0, MP.escalation - dt * 0.0015); mpRecomputeUnlocks(); }
+  // v2.25.3 — host heartbeat in the HUD (loop-alive spinner / opponent-silent warning)
+  if (!MP._hudAt || now - MP._hudAt > 250) {
+    MP._hudAt = now;
+    const dot = el('mp-hud-conn');
+    if (dot) {
+      const age = now - MP.lastRecvAt;
+      if (age > 9000) { dot.style.color = '#ff5544'; dot.textContent = '○ opponent silent'; }
+      else { dot.style.color = '#7fffb0'; dot.textContent = ['◐', '◓', '◑', '◒'][Math.floor(now / 250) % 4] + ' live'; }
+    }
+  }
   MP.snapAccum += dt;
   if (MP.snapAccum < MP.snapIntervalMs) return;
   MP.snapAccum = 0;
@@ -23146,6 +23170,7 @@ function mpGuestOnMessage(msg) {
 function mpGuestApplySnapshot(s) {
   if (!MP.enabled) return;
   const now = Date.now();
+  MP.lastSnapAt = now;                 // v2.25.3 — heartbeat: last time real state arrived from the host
   state.gameTime = s.gt; state.dayNight = s.dn;
   MP.escalation = s.esc; MP.unlocked = s.unl || MP.unlocked; MP.guestFaction = s.gf || MP.guestFaction;
   MP.arsenal = s.ars || MP.arsenal; MP.reloadRemaining = s.rel || {}; MP.guestStats = s.st || null;
@@ -23206,6 +23231,17 @@ function mpGuestTick(dt) {
   MP._pingAccum = (MP._pingAccum || 0) + dt;
   if (MP._pingAccum > 2000) { MP._pingAccum = 0; mpSend({ t: 'ping' }); }
   if (MP.connected && now - MP.lastRecvAt > 9000 && !MP._lostNotified) mpOnPeerLost('timeout');
+  // v2.25.3 — visible heartbeat in the HUD: if the spinner keeps moving the loop is ALIVE; if it shows
+  // "no data Ns" the host's feed has stalled (a connection issue, not a freeze) — tells us which bug it is.
+  if (!MP._hudAt || now - MP._hudAt > 250) {
+    MP._hudAt = now;
+    const dot = el('mp-hud-conn');
+    if (dot) {
+      const age = now - (MP.lastSnapAt || now);
+      if (age > 3000) { dot.style.color = '#ff5544'; dot.textContent = '○ no data ' + Math.floor(age / 1000) + 's'; }
+      else { dot.style.color = '#7fffb0'; dot.textContent = ['◐', '◓', '◑', '◒'][Math.floor(now / 250) % 4] + ' live'; }
+    }
+  }
 }
 function mpGuestLaunchAt(lat, lon) {
   const am = state.attackMode; if (!am || !am.faction || !am.type) return false;
