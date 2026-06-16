@@ -1636,39 +1636,6 @@ body.targeting-cursor #map-canvas {
             </button>
             <button class="bb-buy" onclick="window.__buyBattery('arrow3')">+1 BUY · $8M</button>
           </div>
-          <div class="build-row patriot">
-            <button class="build-btn patriot" data-type="patriot">
-              <span class="bb-icon">▲</span>
-              <div class="bb-info">
-                <div class="bb-name">PATRIOT</div>
-                <div class="bb-desc">160 km · ballistic, cruise, drones</div>
-              </div>
-              <span class="bb-stock">×<span id="stock-patriot">0</span></span>
-            </button>
-            <button class="bb-buy" onclick="window.__buyBattery('patriot')">+1 BUY · $3.5M</button>
-          </div>
-          <div class="build-row cram">
-            <button class="build-btn cram" data-type="cram">
-              <span class="bb-icon">▲</span>
-              <div class="bb-info">
-                <div class="bb-name">C-RAM</div>
-                <div class="bb-desc">8 km · last-ditch point defense</div>
-              </div>
-              <span class="bb-stock">×<span id="stock-cram">0</span></span>
-            </button>
-            <button class="bb-buy" onclick="window.__buyBattery('cram')">+1 BUY · $500K</button>
-          </div>
-          <div class="build-row thaad">
-            <button class="build-btn thaad" data-type="thaad">
-              <span class="bb-icon">▲</span>
-              <div class="bb-info">
-                <div class="bb-name">THAAD</div>
-                <div class="bb-desc">200 km · high-altitude ballistic</div>
-              </div>
-              <span class="bb-stock">×<span id="stock-thaad">0</span></span>
-            </button>
-            <button class="bb-buy" onclick="window.__buyBattery('thaad')">+1 BUY · $6.5M</button>
-          </div>
         </div>
       </div>
 
@@ -2215,6 +2182,15 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.28.5  — US AD PLACEMENT PANEL (like Israel) + pre-deployed batteries; Patriot/C-RAM/THAAD REMOVED from
+//            Israel's build panel. (1) US bases start WITH air defense: usDeployInitialAD() puts THAAD+Patriot
+//            on carriers/ships, Patriot+C-RAM on airbases/bases, Patriot elsewhere (called from usTargetsEnsure).
+//            (2) state.usAdLevel is now DERIVED from the batteries (base 18 + per-type weight, cap 96) via
+//            usRecomputeAd(). (3) The US panel's single "reinforce AD" button is replaced by 🛡 Deploy
+//            Patriot / THAAD / C-RAM buttons → usPlaceAD(type) drops a battery on the least-defended US base
+//            and recomputes intercept %. (4) drawUsBatteries() renders US batteries on the map (visible once
+//            US involvement ≥25). (5) Batteries SYNC to all players (snapshot usb). (6) Israel's deploy panel
+//            now only offers Iron Dome / David's Sling / Arrow-3 (THAAD/Patriot still arrive via events).
 //   2.28.4  — US = FULL MILITARY PLAYER IN MULTIPLAYER. (1) US assets + air-defense level now SYNC to all
 //            players (snapshot ust/usad) — deployed carriers & damage show everywhere. (2) A guest's strike
 //            on a US asset routes to the host (usStrike), and the US player's map strike routes too
@@ -3502,7 +3478,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.28.4';
+const GAME_VERSION = '2.28.5';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -7187,7 +7163,7 @@ function render() {
   if (state.playAs === 'attacker') { if (typeof mpDrawReachZone === 'function') mpDrawReachZone(); drawAttackerBases(); }
   if (Date.now() < (state.intelRevealUntil || 0)) drawIntelReveal();
   if (state.tsts && state.tsts.length > 0) drawTSTMarkers();
-  if (L.enemyTargets !== false) { drawEnemyTargets(); if (typeof drawHitMarkers === 'function') drawHitMarkers(); if (typeof drawUSTargets === 'function') drawUSTargets(); if (typeof drawMobileLaunchers === 'function') drawMobileLaunchers(); if (typeof drawTomahawks === 'function') drawTomahawks(); }
+  if (L.enemyTargets !== false) { drawEnemyTargets(); if (typeof drawHitMarkers === 'function') drawHitMarkers(); if (typeof drawUSTargets === 'function') drawUSTargets(); if (typeof drawUsBatteries === 'function') drawUsBatteries(); if (typeof drawMobileLaunchers === 'function') drawMobileLaunchers(); if (typeof drawTomahawks === 'function') drawTomahawks(); }
   if (L.airbases !== false) drawAirbases();
   if (L.factories !== false) drawFactories();
   if (L.coverage !== false) drawCoverage();
@@ -22808,6 +22784,7 @@ function startScenario(name) {
   state.iranSupplyDelayUntil = 0; state.iranHoldUntil = 0; state.iranLastResponse = ''; state.iranTask = null; state.iranGateUntil = 0;
   state.usInvolvement = 12; state.usTargets = null; state.usHasCasusBelli = false;   // v2.26.6 #9/#10 — US military reset
   state.usAdLevel = 40; state.usFightersBanned = false; state.usIntelCutUntil = 0;   // v2.28.3 — US air-defense level + pressure flags reset
+  state.usBatteries = [];   // v2.28.5 — US AD batteries reset (re-deployed to bases on first usTargetsEnsure)
   state.usStrikeMode = false; state.usStrikeWeapon = 'air';   // v2.28.4 — US pick-target strike mode reset
   state.iranDelayUntil = 0;
   state.sandstormUntil = 0;
@@ -24081,6 +24058,7 @@ function mpBuildSnapshot() {
     ml: (function () { const a = []; (state.mobileLaunchers || []).forEach(function (m) { if (m.alive) a.push({ id: m.id, f: m.faction, la: r5(m.lat), lo: r5(m.lon), b: m.bornAt, tl: m.ttl }); }); return a; })(),   // v2.27.7 — mobile launchers (exposed) synced to the OPFOR
     ust: (function () { if (typeof usTargetsEnsure === 'function') usTargetsEnsure(); const a = []; (state.usTargets || []).forEach(function (t) { a.push({ id: t.id, ty: t.type, la: r5(t.lat), lo: r5(t.lon), im: t.importance, nm: t.name, d: (t.alive === false ? 100 : Math.round(t.damage || 0)), al: t.alive === false ? 0 : 1 }); }); return a; })(),   // v2.28.4 — US assets (incl. deployed carriers) + damage synced to ALL players
     usad: Math.round(state.usAdLevel != null ? state.usAdLevel : 40),   // v2.28.4 — US air-defense level
+    usb: (state.usBatteries || []).map(function (b) { return { i: b.id, t: b.type, la: r5(b.lat), lo: r5(b.lon) }; }),   // v2.28.5 — US AD batteries synced (render on all clients)
     st: { intc: st.intercepted || 0, miss: st.missed || 0, tot: st.threatsTotal || 0, saf: st.civilianSafety != null ? Math.round(st.civilianSafety) : 100 }
   };
 }
@@ -24190,6 +24168,7 @@ function mpGuestApplySnapshot(s) {
   if (s.ml) { state.mobileLaunchers = s.ml.map(function (m) { return { id: m.id, faction: m.f, lat: m.la, lon: m.lo, bornAt: m.b, ttl: m.tl, alive: true }; }); }   // v2.27.7 — exposed mobile launchers (render-only on guest)
   if (s.ust && s.ust.length) { state.usTargets = s.ust.map(function (t) { return { id: t.id, type: t.ty, lat: t.la, lon: t.lo, importance: t.im, name: t.nm, faction: 'usa', damage: t.d, alive: t.al !== 0, hardness: 0.5 }; }); }   // v2.28.4 — synced US assets (deployed carriers + damage)
   if (s.usad != null) state.usAdLevel = s.usad;   // v2.28.4 — US air-defense level synced
+  if (s.usb) state.usBatteries = s.usb.map(function (b) { return { id: b.i, type: b.t, lat: b.la, lon: b.lo }; });   // v2.28.5 — US AD batteries synced
   // FX events → spawn local particles
   if (s.fx) s.fx.forEach(mpGuestPlayFx);
 }
@@ -24761,7 +24740,10 @@ function mpFfaApplyUsaGrant(kind) {
   else if (kind === 'tomaHez') usTomahawk('hezbollah');
   else if (kind === 'tomaHouthi') usTomahawk('houthi');
   else if (kind === 'conusFighters') usConusFighters();           // v2.28.0 — fighters from the US mainland
-  else if (kind === 'usAd') { state.usAdLevel = Math.min(95, (state.usAdLevel || 40) + 18); if (typeof usInvSet === 'function') usInvSet((typeof usInvVal === 'function' ? usInvVal() : 12) + 4); if (typeof showNotification === 'function') showNotification('🛡 US AIR DEFENSE REINFORCED', 'Patriot/THAAD batteries deployed to US bases — intercept chance now ' + state.usAdLevel + '%.', 'success'); if (typeof logEvent === 'function') logEvent('🛡 US air defense reinforced → ' + state.usAdLevel + '%', 'success'); }   // v2.28.3 — US own ПВО
+  else if (kind === 'usAdPatriot') { if (typeof usPlaceAD === 'function') usPlaceAD('patriot'); }   // v2.28.5 — deploy Patriot to a US base
+  else if (kind === 'usAdThaad') { if (typeof usPlaceAD === 'function') usPlaceAD('thaad'); }       // v2.28.5 — deploy THAAD to a US base
+  else if (kind === 'usAdCram') { if (typeof usPlaceAD === 'function') usPlaceAD('cram'); }         // v2.28.5 — deploy C-RAM to a US base
+  else if (kind === 'usAd') { if (typeof usPlaceAD === 'function') usPlaceAD('patriot'); }          // v2.28.5 — legacy alias → Patriot
   else if (kind === 'usMass') usMassStrike();             // v2.28.4 — US mass strike (like Israel's)
   else if (kind === 'usIntercept') usAssistIntercept();   // v2.28.4 — US helps intercept threats over Israel
 }
@@ -25001,7 +24983,10 @@ function mpFfaInstallUsaPanel() {
       '<button class="mp-usa-btn" data-kind="tomaHez" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(150,60,40,.3);border:1px solid #cf5b3a;color:#ffb3a0;border-radius:4px;cursor:pointer;">🚀 Tomahawk → Hezbollah</button>' +
       '<button class="mp-usa-btn" data-kind="tomaHouthi" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(150,60,40,.3);border:1px solid #cf5b3a;color:#ffb3a0;border-radius:4px;cursor:pointer;">🚀 Tomahawk → Houthis</button>' +
       '<button class="mp-usa-btn" data-kind="conusFighters" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(40,90,150,.3);border:1px solid #5b8def;color:#bfe0ff;border-radius:4px;cursor:pointer;">✈ Fighters from CONUS (mainland)</button>' +
-      '<button class="mp-usa-btn" data-kind="usAd" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(40,110,90,.3);border:1px solid #7fffb0;color:#bfffd8;border-radius:4px;cursor:pointer;">🛡 Reinforce US air defense (Patriot/THAAD)</button>' +
+      '<div style="margin:9px 0 4px;color:#9fbada;font-size:10px;letter-spacing:1px;border-top:1px solid rgba(91,141,239,.3);padding-top:7px;">AIR DEFENSE (deploys to US bases)</div>' +
+      '<button class="mp-usa-btn" data-kind="usAdPatriot" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(40,110,90,.3);border:1px solid #7fffb0;color:#bfffd8;border-radius:4px;cursor:pointer;">🛡 Deploy Patriot battery</button>' +
+      '<button class="mp-usa-btn" data-kind="usAdThaad" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(40,110,90,.3);border:1px solid #7fffb0;color:#bfffd8;border-radius:4px;cursor:pointer;">🛡 Deploy THAAD battery</button>' +
+      '<button class="mp-usa-btn" data-kind="usAdCram" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(40,110,90,.3);border:1px solid #7fffb0;color:#bfffd8;border-radius:4px;cursor:pointer;">🛡 Deploy C-RAM</button>' +
       '<div style="margin:9px 0 4px;color:#9fbada;font-size:10px;letter-spacing:1px;border-top:1px solid rgba(91,141,239,.3);padding-top:7px;">PICK-TARGET STRIKE (click a target on the map)</div>' +
       '<button id="us-strike-air" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(150,60,40,.3);border:1px solid #cf5b3a;color:#ffb3a0;border-radius:4px;cursor:pointer;">🎯 Air-strike mode</button>' +
       '<button id="us-strike-toma" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(150,60,40,.3);border:1px solid #cf5b3a;color:#ffb3a0;border-radius:4px;cursor:pointer;">🚀 Tomahawk mode (needs a ship)</button>' +
@@ -25409,7 +25394,46 @@ const US_TARGETS = [
   { id: 'us_radar',   name: 'AN/TPY-2 radar (Negev)',        lat: 30.780, lon: 35.030, type: 'radar',    importance: 8,  hardness: 0.4,  region: 'Israel' },
   { id: 'us_ad',      name: 'US THAAD detachment (Negev)',   lat: 30.600, lon: 34.800, type: 'ad',       importance: 8,  hardness: 0.5,  region: 'Israel' }
 ];
-function usTargetsEnsure() { if (!state.usTargets) state.usTargets = US_TARGETS.map(function (t) { return Object.assign({}, t, { faction: 'usa', alive: true, damage: 0 }); }); }
+function usTargetsEnsure() { if (!state.usTargets) state.usTargets = US_TARGETS.map(function (t) { return Object.assign({}, t, { faction: 'usa', alive: true, damage: 0 }); }); if ((!state.usBatteries || !state.usBatteries.length) && typeof usDeployInitialAD === 'function') usDeployInitialAD(); }
+// v2.28.5 — US AIR DEFENSE as REAL batteries on US bases (like Israel): pre-deployed on start, the US player
+// places more from its panel, they render on the map and drive the US intercept chance (usAdLevel).
+const US_AD_WEIGHT = { patriot: 12, thaad: 14, cram: 6 };
+function usAddBattery(type, lat, lon, baseId) { state.usBatteries = state.usBatteries || []; state.usBatteries.push({ id: 'usb_' + (nextId++), type: type, lat: lat + (Math.random() - 0.5) * 0.3, lon: lon + (Math.random() - 0.5) * 0.3, baseId: baseId }); }
+function usRecomputeAd() { let lvl = 18; (state.usBatteries || []).forEach(function (b) { lvl += (US_AD_WEIGHT[b.type] || 10); }); state.usAdLevel = Math.min(96, lvl); }
+function usDeployInitialAD() {
+  if (state.usBatteries && state.usBatteries.length) return;
+  state.usBatteries = [];
+  (state.usTargets || []).forEach(function (t) {
+    if (t.alive === false) return;
+    if (t.type === 'carrier' || t.type === 'naval' || t.type === 'destroyer') { usAddBattery('thaad', t.lat, t.lon, t.id); usAddBattery('patriot', t.lat, t.lon, t.id); }
+    else if (t.type === 'airbase' || t.type === 'base') { usAddBattery('patriot', t.lat, t.lon, t.id); usAddBattery('cram', t.lat, t.lon, t.id); }
+    else usAddBattery('patriot', t.lat, t.lon, t.id);
+  });
+  usRecomputeAd();
+}
+function usPlaceAD(type) {
+  usTargetsEnsure();
+  const targets = (state.usTargets || []).filter(function (t) { return t.alive !== false; });
+  if (!targets.length) { if (typeof showNotification === 'function') showNotification('NO BASE', 'No US base to defend — deploy a carrier or base first.', 'warn'); return; }
+  let best = targets[0], bestN = Infinity;
+  targets.forEach(function (t) { const n = (state.usBatteries || []).filter(function (b) { return b.baseId === t.id; }).length; if (n < bestN) { bestN = n; best = t; } });
+  usAddBattery(type, best.lat, best.lon, best.id); usRecomputeAd();
+  const sn = (BATTERY_TYPES[type] && BATTERY_TYPES[type].shortName) || type;
+  if (typeof usInvSet === 'function') usInvSet((typeof usInvVal === 'function' ? usInvVal() : 12) + 2);
+  if (typeof showNotification === 'function') showNotification('🛡 US AD DEPLOYED', sn + ' deployed to ' + best.name + ' — US intercept now ' + state.usAdLevel + '%.', 'success');
+  if (typeof logEvent === 'function') logEvent('🛡 US AD: ' + sn + ' → ' + best.name + ' (intercept ' + state.usAdLevel + '%)', 'success');
+}
+function drawUsBatteries() {
+  if (typeof ctx === 'undefined' || !ctx || !state.usBatteries || !state.usBatteries.length) return;
+  if (typeof usInvVal === 'function' && usInvVal() < 25) return;
+  state.usBatteries.forEach(function (b) {
+    const p = geoToScreen(b.lat, b.lon); if (!isFinite(p[0]) || !isFinite(p[1])) return;
+    if (p[0] < -20 || p[0] > canvasW + 20 || p[1] < -20 || p[1] > canvasH + 20) return;
+    const col = (BATTERY_TYPES[b.type] && BATTERY_TYPES[b.type].color) || '#7fb0ff';
+    ctx.fillStyle = col; ctx.strokeStyle = '#02101f'; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(p[0], p[1] - 5); ctx.lineTo(p[0] + 5, p[1] + 4); ctx.lineTo(p[0] - 5, p[1] + 4); ctx.closePath(); ctx.fill(); ctx.stroke();
+  });
+}
 function strikeUSTarget(target) {
   if (!target) return;
   if (typeof MP !== 'undefined' && MP.enabled && MP.role === 'guest') { if (typeof mpSend === 'function') mpSend({ t: 'usStrike', id: target.id }); if (typeof spawnHitMarker === 'function') spawnHitMarker(target.lat, target.lon, 'INCOMING', '#ffd479'); return; }   // v2.28.4 — a guest's strike on a US asset is applied by the host (authoritative + synced)
