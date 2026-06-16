@@ -2182,6 +2182,12 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.27.5  — SOUND. Fixed "no sound in multiplayer": the AudioContext starts SUSPENDED (browser autoplay
+//            policy) and the MP lobby flow never un-suspended it — added audio.resume() + a global gesture
+//            listener (pointerdown/keydown/touchstart) that resumes it in every mode, and the render-only
+//            guest now plays intercept/impact audio in mpGuestPlayFx. NEW alert sounds (defender): a fresh
+//            wave plays an early-warning "пип пип пип" (audio.warning) then a rising/falling air-raid SIREN
+//            (audio.siren — a synth wail, ~4 cycles); ongoing alerts replay the siren (throttled 5s).
 //   2.27.4  — (player requests) AIRCRAFT: ×3 fighters per airbase AND jets RETURN to base + rearm ~40s
 //            after a sortie (renewable, no more "ran out of planes"). IRAN OVERSTEPS → US WAR: the Iran
 //            red line (escalation>=85) now also pulls the US into the war directly (usInvolvement->90,
@@ -3398,7 +3404,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.27.4';
+const GAME_VERSION = '2.27.5';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -6971,8 +6977,26 @@ const audio = {
   intercept() { this.beep(180, 0.12, 'sawtooth', 0.07); setTimeout(() => this.beep(80, 0.18, 'sawtooth', 0.05), 40); },
   alarm()     { this.beep(440, 0.1, 'square', 0.04); setTimeout(() => this.beep(660, 0.1, 'square', 0.04), 100); },
   impact()    { this.beep(60, 0.35, 'sawtooth', 0.10); },
-  click()     { this.beep(1200, 0.02, 'sine', 0.025); }
+  click()     { this.beep(1200, 0.02, 'sine', 0.025); },
+  // v2.27.5 — resume the AudioContext (browsers start it SUSPENDED until a user gesture; this was the
+  // "no sound in multiplayer" cause — the MP lobby flow never un-suspended it).
+  resume()    { try { if (!this.ctx) this.init(); if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume(); } catch (e) {} },
+  // early-warning "пип пип пип" — incoming detected
+  warning()   { if (!this.enabled || !this.ctx) return; for (let i = 0; i < 3; i++) setTimeout(() => this.beep(1000, 0.09, 'square', 0.06), i * 170); },
+  // air-raid SIREN — a synth wail that rises then falls, ~4 cycles (like a real Tzeva Adom / WWII siren)
+  siren()     {
+    if (!this.enabled || !this.ctx) return;
+    const c = this.ctx, t0 = c.currentTime, lo = 392, hi = 880, cyc = 1.05, n = 4;
+    const o = c.createOscillator(), g = c.createGain(); o.type = 'sawtooth';
+    o.frequency.setValueAtTime(lo, t0);
+    for (let i = 0; i < n; i++) { o.frequency.linearRampToValueAtTime(hi, t0 + cyc * i + cyc * 0.5); o.frequency.linearRampToValueAtTime(lo, t0 + cyc * (i + 1)); }
+    g.gain.setValueAtTime(0.0001, t0); g.gain.linearRampToValueAtTime(0.06, t0 + 0.25);
+    g.gain.setValueAtTime(0.06, t0 + cyc * n - 0.35); g.gain.linearRampToValueAtTime(0.0001, t0 + cyc * n);
+    o.connect(g).connect(c.destination); o.start(t0); o.stop(t0 + cyc * n + 0.05);
+  }
 };
+// v2.27.5 — un-suspend the AudioContext on ANY user gesture (robust autoplay-policy fix for all modes)
+['pointerdown', 'keydown', 'touchstart'].forEach(function (ev) { try { window.addEventListener(ev, function () { try { audio.resume(); } catch (e) {} }, { passive: true }); } catch (e) {} });
 
 /* =========================================================
    КАНВАС
@@ -12032,6 +12056,16 @@ function triggerEarlyWarning(orefCity) {
 }
 
 function triggerAlert(city) {
+  // v2.27.5 — air-raid SOUND (defender only): a fresh wave gets the early-warning "пип пип пип" then the
+  // rising/falling siren; ongoing alerts get the siren (throttled so they don't overlap).
+  try {
+    if (typeof audio !== 'undefined' && audio.enabled && state.playAs !== 'attacker') {
+      const had = state.shelterAlerts && Object.keys(state.shelterAlerts).some(function (k) { return state.shelterAlerts[k] && state.shelterAlerts[k].timer > 0; });
+      const now = Date.now();
+      if (!had) { if (audio.warning) audio.warning(); if (audio.siren) setTimeout(function () { try { audio.siren(); } catch (e) {} }, 700); state._sirenAt = now + 5000; }
+      else if (now > (state._sirenAt || 0)) { state._sirenAt = now + 5000; if (audio.siren) audio.siren(); }
+    }
+  } catch (e) {}
   state.alerts[city.id] = { cityId: city.id, startTime: state.gameTime, duration: 30000 };
   if (city.population <= 0) return;
   // === Real Pikud HaOref shelter time per region ===
@@ -23934,8 +23968,8 @@ function mpGuestApplySnapshot(s) {
 }
 function mpGuestPlayFx(fx) {
   try {
-    if (fx.k === 'i' && MP._origFlash) MP._origFlash(fx.la, fx.lo, 0, !!fx.exo, fx.lift || null, fx.gp || 0);
-    else if (fx.k === 'e' && MP._origExpl) MP._origExpl(fx.la, fx.lo, fx.mr, fx.du, !!fx.big, !!fx.exo, 0);
+    if (fx.k === 'i' && MP._origFlash) { MP._origFlash(fx.la, fx.lo, 0, !!fx.exo, fx.lift || null, fx.gp || 0); if (typeof audio !== 'undefined' && audio.intercept) audio.intercept(); }   // v2.27.5 — guest now HEARS intercepts
+    else if (fx.k === 'e' && MP._origExpl) { MP._origExpl(fx.la, fx.lo, fx.mr, fx.du, !!fx.big, !!fx.exo, 0); if (typeof audio !== 'undefined' && audio.impact) audio.impact(); }   // ...and impacts
   } catch (e) {}
 }
 function mpGuestTick(rawDt) {
