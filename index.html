@@ -1213,6 +1213,7 @@ body.targeting-cursor #map-canvas {
   <div class="menu-hint">New here? Pick a scenario — defence runs itself, just watch and step in when you want. There's a how-to-play guide on your first game.</div>
   <button class="menu-button" id="btn-scenarios">▶ PLAY · SCENARIOS</button>
   <button class="menu-button" id="btn-sandbox" style="background:rgba(192,57,43,0.15);border-color:#c0392b;color:#ff8a76;">⚡ SANDBOX · FREE PLAY</button>
+  <button class="menu-button" id="btn-multiplayer" style="background:rgba(40,90,150,0.18);border-color:#2e6da4;color:#7fd1ff;">🌐 MULTIPLAYER · 1v1 DEFENDER vs OPFOR <small style="color:#ffaa00;font-size:10px;">BETA</small></button>
   <button class="menu-button" id="btn-info">ⓘ ABOUT THE DEFENCE SYSTEMS</button>
 
   <div class="systems-info" id="systems-info-block" style="display:none;">
@@ -1277,6 +1278,55 @@ body.targeting-cursor #map-canvas {
   </div>
 
   <button class="menu-button" id="btn-sandbox-back" style="margin-top:30px; min-width:200px; padding:10px 24px; font-size:13px;">◀ BACK</button>
+</div>
+
+<!-- ===== MULTIPLAYER LOBBY (v2.25.0) ===== -->
+<div id="mp-menu" class="fullscreen hidden">
+  <div class="menu-title" style="font-size:46px; letter-spacing:8px; color:#7fd1ff;">MULTIPLAYER</div>
+  <div class="menu-subtitle">1v1 · DEFENDER vs OPFOR · PEER-TO-PEER (ROOM CODE)</div>
+
+  <!-- role choice -->
+  <div class="scenarios" id="mp-role-row" style="grid-template-columns:repeat(2,1fr); max-width:820px;">
+    <div class="scenario-card" id="mp-host-card" style="border-left-color:#00d4ff; cursor:pointer;">
+      <h3 style="color:#00d4ff;">🛡 HOST · DEFENDER</h3>
+      <p>You run the battle and defend Israel with Iron Dome, David's Sling, Arrow-3 &amp; THAAD. You get a room code — share it with your opponent, then start the battle.</p>
+      <div class="scenario-difficulty"><span style="color:#00d4ff;">You defend</span><span style="color:var(--green);">Host</span></div>
+    </div>
+    <div class="scenario-card" id="mp-join-card" style="border-left-color:#c0392b; cursor:pointer;">
+      <h3 style="color:#ff6b5e;">⚔ JOIN · OPFOR</h3>
+      <p>Enter the host's room code. Command Hamas / Hezbollah / Iran / Houthis — pick a faction, base and weapon, then click on Israel to strike. Raise escalation to open new fronts.</p>
+      <div class="scenario-difficulty"><span style="color:var(--red);">You attack</span><span style="color:var(--amber);">Join</span></div>
+    </div>
+  </div>
+
+  <!-- host panel -->
+  <div id="mp-host-panel" class="hidden" style="margin-top:26px; text-align:center; max-width:560px;">
+    <div id="mp-host-status" style="font-size:14px; color:#9fe0ff; letter-spacing:1px; margin-bottom:14px;">Creating room…</div>
+    <div style="font-size:12px; letter-spacing:3px; color:var(--text-dim); margin-bottom:6px;">ROOM CODE</div>
+    <div style="display:flex; align-items:center; justify-content:center; gap:12px;">
+      <span id="mp-room-code" style="font-size:42px; font-weight:bold; letter-spacing:10px; color:#7fd1ff; font-family:monospace;">····</span>
+      <button id="mp-copy-code" class="menu-button" style="min-width:0; padding:8px 14px; font-size:11px;">COPY</button>
+    </div>
+    <div id="mp-host-guest" style="margin-top:18px; font-size:13px; color:var(--amber);">Waiting for OPFOR to join…</div>
+    <button id="mp-start-btn" class="menu-button" style="margin-top:18px; display:none; background:rgba(39,174,96,0.18); border-color:#27ae60; color:#7fffb0;">▶ START BATTLE</button>
+  </div>
+
+  <!-- join panel -->
+  <div id="mp-join-panel" class="hidden" style="margin-top:26px; text-align:center; max-width:560px;">
+    <div id="mp-join-status" style="font-size:14px; color:#ffc0b0; letter-spacing:1px; margin-bottom:14px;">Enter the host's room code:</div>
+    <div style="display:flex; align-items:center; justify-content:center; gap:10px;">
+      <input id="mp-code-input" maxlength="4" placeholder="ABCD" autocomplete="off" spellcheck="false"
+             style="width:200px; text-transform:uppercase; text-align:center; font-size:30px; letter-spacing:10px; font-family:monospace; background:rgba(20,10,10,0.9); border:1px solid #c0392b; color:#ff8a76; padding:8px 6px; border-radius:5px;">
+      <button id="mp-connect-btn" class="menu-button" style="min-width:0; padding:10px 18px; font-size:12px;">CONNECT</button>
+    </div>
+    <div id="mp-join-faction" class="hidden" style="margin-top:20px;">
+      <div style="font-size:12px; letter-spacing:3px; color:var(--text-dim); margin-bottom:8px;">CHOOSE YOUR STARTING FACTION</div>
+      <div id="mp-faction-pick" style="display:flex; gap:8px; justify-content:center; flex-wrap:wrap;"></div>
+      <div id="mp-join-wait" style="margin-top:16px; font-size:13px; color:var(--amber);">Waiting for host to start the battle…</div>
+    </div>
+  </div>
+
+  <button class="menu-button" id="mp-back" style="margin-top:28px; min-width:160px; padding:9px 20px; font-size:12px;">◀ BACK</button>
 </div>
 
 <!-- ===== ОСНОВНОЙ ИГРОВОЙ ИНТЕРФЕЙС ===== -->
@@ -2075,6 +2125,14 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.25.0  — MULTIPLAYER (user): 1v1 Defender (host) vs OPFOR (guest) over WebRTC P2P (PeerJS,
+//            room code, no backend — works on GitHub Pages). Host is authoritative: runs the full
+//            sim, applies the guest's launch/faction-switch commands, broadcasts a lightweight
+//            positional snapshot (~12 Hz) + discrete FX events. Guest renders snapshots (no local
+//            sim), rebuilds trails locally, and reuses the existing attacker panel for launches.
+//            OPFOR economy: per-faction arsenal + reload (Hamas/Hezbollah/Iran/Houthi). Escalation
+//            meter rises with launches; switching to other factions unlocks only once escalation is
+//            "intense" (≥40). All MP code lives in the SHIELD MULTIPLAYER module near end of script.
 //   2.24.27 — Night embers ACTUALLY fall (user: "осколки летят в небо а не на землю"). Root cause:
 //            in this north-up Mercator projection a POSITIVE vLat moves a particle UP on screen, so
 //            (a) the gravity term was the wrong sign (old `vLat +=` pushed embers UP) — flipped to
@@ -3071,7 +3129,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.24.27';
+const GAME_VERSION = '2.25.0';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -12402,8 +12460,16 @@ function renderAttackerFactions() {
     btn.dataset.faction = fid;
     if (state.attackMode && state.attackMode.faction === fid) btn.classList.add('active');
     btn.innerHTML = `<span class="faction-name">${f.name.toUpperCase()}</span><span class="faction-region">${f.region}</span>`;
+    // v2.25.0 — MP OPFOR: factions other than your active one are LOCKED until escalation is intense.
+    if (MP && MP.enabled && MP.role === 'guest' && !(MP.unlocked && MP.unlocked[fid])) {
+      btn.classList.add('mp-locked');
+      btn.style.opacity = '0.4';
+      btn.title = '🔒 Locked — raise escalation to open this front';
+      btn.innerHTML = `<span class="faction-name">🔒 ${f.name.toUpperCase()}</span><span class="faction-region">${f.region}</span>`;
+    }
     btn.onclick = () => {
       audio.click();
+      if (MP && MP.enabled && MP.role === 'guest') { mpGuestPickFaction(fid); return; }
       const cur = state.attackMode && state.attackMode.faction;
       if (cur === fid) {
         // Clicking active faction does nothing (keep weapon armed)
@@ -12562,6 +12628,9 @@ function updateAttackerStatus() {
 // Called from the canvas mouseup handler when the player has armed a weapon
 function attackerLaunchAt(lat, lon) {
   if (!state.attackMode || !state.attackMode.faction || !state.attackMode.type) return false;
+  // v2.25.0 — MULTIPLAYER OPFOR (guest): don't spawn locally. Validate geometry, then send the launch
+  // command to the host, which is authoritative over arsenal/reload/spawning.
+  if (MP && MP.enabled && MP.role === 'guest') return mpGuestLaunchAt(lat, lon);
   // Strict Israeli-territory bounding box — excludes Jordan (east of ~35.55),
   // Lebanon (north of ~33.3) and Syria. Targets must fall inside this box AND
   // within 25 km of a real city (no firing into open Sinai / Egyptian sea).
@@ -13563,7 +13632,16 @@ function gameLoop(time) {
   const dt = rawDt * state.speed;
 
   if (!state.paused && !state.ended) {
-    if (state.buildPhase) {
+    if (MP && MP.enabled && MP.role === 'guest') {
+      // v2.25.0 — OPFOR client: NO local simulation. Threats/interceptors/cities come from the
+      // host's snapshots; here we only advance the local clock, smoothly extrapolate positions and
+      // rebuild trails between snapshots, and tick local FX particles (flashes/embers/smoke).
+      state.gameTime += dt;
+      mpGuestTick(dt);
+      updateExplosions(dt);
+      if (typeof updateAlerts === 'function') updateAlerts(dt);
+      if (typeof mpUpdateGuestPanel === 'function') mpUpdateGuestPanel();
+    } else if (state.buildPhase) {
       state.buildTimer -= rawDt / 1000;
       document.getElementById('build-timer').textContent = Math.max(0, Math.ceil(state.buildTimer));
       if (state.buildTimer <= 0) endBuildPhase();
@@ -13596,6 +13674,7 @@ function gameLoop(time) {
       updateTSTs(dt);
       updateSalvoAlerts(dt);
       checkEndConditions();
+      if (MP && MP.enabled && MP.role === 'host') mpHostMaybeSnapshot(dt);   // v2.25.0 — broadcast state to OPFOR
     }
   }
 
@@ -15010,6 +15089,10 @@ function updateShelter(rawDt) {
 
 function updateScenario(dt) {
   if (!state.scenario) return;
+
+  // v2.25.0 — MULTIPLAYER host: every threat comes from the human OPFOR over the network. Skip all
+  // AI / campaign / sandbox spawners so the board is pure PvP (no auto-generated waves).
+  if (MP && MP.enabled && MP.role === 'host') return;
 
   // === Resistance Axis (player-as-attacker) — runs its own campaign tick (arsenal, retal, missions) ===
   if (state.playAs === 'attacker') {
@@ -22763,6 +22846,451 @@ document.addEventListener('DOMContentLoaded', () => {
 // FIX v2.12.3: removed a duplicate second keydown listener that double-fired Space (pause
 // toggled twice → net no-op) and S (strike + speed at once), and conflicted on 1/2/Escape.
 // All its keys are now handled by the single primary keydown listener above.
+
+/* ============================================================================
+   SHIELD MULTIPLAYER (v2.25.0) — 1v1 Defender (host) vs OPFOR (guest)
+   Transport: WebRTC P2P via PeerJS (room code, public broker, no backend).
+   Host is authoritative: runs the full sim, applies the guest's launch /
+   faction-switch commands, and broadcasts a lightweight positional snapshot
+   (~12 Hz) + discrete FX events. Guest renders snapshots (no local sim),
+   rebuilds trails locally, and reuses the existing attacker panel to launch.
+   NOTE: `var MP` (hoisted) — every hook elsewhere guards with `MP && MP.enabled`,
+   so it is safe to reference before this assignment runs.
+   ============================================================================ */
+var MP = (window.MP = {
+  enabled: false, role: null, started: false,
+  peer: null, conn: null, connected: false, roomCode: null,
+  snapAccum: 0, snapIntervalMs: 80, lastRecvAt: 0,
+  escalation: 0, guestFaction: 'hamas',
+  unlocked: { hamas: true, hezbollah: false, iran: false, houthi: false },
+  arsenal: {}, reload: {}, reloadRemaining: {}, fxQueue: [],
+  guestStats: null, onStatus: null,
+  _peerLoading: false, _peerWaiters: [], _origFlash: null, _origExpl: null
+});
+
+const FACTION_ORDER = ['hamas', 'hezbollah', 'iran', 'houthi'];
+const el = (id) => document.getElementById(id);
+function r5(x) { return x == null ? x : Math.round(x * 100000) / 100000; }
+function r3(x) { return x == null ? x : Math.round(x * 1000) / 1000; }
+
+// MP scenarios — reuse the existing sandbox (defender) / resistanceAxis (attacker) setup.
+try {
+  SCENARIOS.mpHost = Object.assign({}, SCENARIOS.sandbox, {
+    name: 'Multiplayer · Defender', description: 'PvP — defend Israel against a human OPFOR commander.',
+    waves: [{ delay: 999999, threats: [] }], dynamic: false, sandbox: true, mp: true
+  });
+  SCENARIOS.mpGuest = Object.assign({}, SCENARIOS.resistanceAxis, {
+    name: 'Multiplayer · OPFOR', description: 'PvP — command the Resistance Axis against a human defender.',
+    waves: [{ delay: 999999, threats: [] }], dynamic: false, playAs: 'attacker', sandbox: true, mp: true
+  });
+} catch (e) { console.warn('[MP] scenario setup failed', e); }
+
+/* ---------------- PeerJS loader (lazy, from CDN) ---------------- */
+function mpEnsurePeer(cb) {
+  if (typeof Peer !== 'undefined') { cb && cb(true); return; }
+  if (MP._peerLoading) { if (cb) MP._peerWaiters.push(cb); return; }
+  MP._peerLoading = true; MP._peerWaiters = cb ? [cb] : [];
+  const s = document.createElement('script');
+  s.src = 'https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js';
+  s.onload = () => { MP._peerLoading = false; MP._peerWaiters.forEach(f => f(true)); MP._peerWaiters = []; };
+  s.onerror = () => { MP._peerLoading = false; MP._peerWaiters.forEach(f => f(false)); MP._peerWaiters = []; };
+  document.head.appendChild(s);
+}
+
+/* ---------------- room code + ids ---------------- */
+const MP_CODE_ALPH = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';   // no confusable chars (0/O, 1/I)
+function mpGenCode() { let s = ''; for (let i = 0; i < 4; i++) s += MP_CODE_ALPH[Math.floor(Math.random() * MP_CODE_ALPH.length)]; return s; }
+function mpPeerId(code) { return 'shield-mp-' + String(code).toLowerCase().replace(/[^a-z0-9]/g, ''); }
+function mpStatus(s, extra) { if (MP.onStatus) MP.onStatus(s, extra); }
+function mpToast(msg, type) { if (typeof showNotification === 'function') showNotification('MULTIPLAYER', msg, type || 'info'); else if (typeof logEvent === 'function') logEvent('🌐 ' + msg, type || 'info'); }
+
+/* ---------------- connection ---------------- */
+function mpHostCreate() {
+  MP.role = 'host';
+  mpEnsurePeer((ok) => {
+    if (!ok) { mpStatus('error', 'could not load PeerJS (network?)'); return; }
+    let attempt = 0;
+    (function tryHost() {
+      const code = mpGenCode(); MP.roomCode = code;
+      let peer; try { peer = new Peer(mpPeerId(code), { debug: 1 }); } catch (e) { mpStatus('error', String(e)); return; }
+      MP.peer = peer;
+      peer.on('open', () => mpStatus('waiting', code));
+      peer.on('connection', (conn) => {
+        if (MP.conn && MP.connected) { try { conn.close(); } catch (e) {} return; }  // single guest only
+        MP.conn = conn; mpWireConn(conn);
+      });
+      peer.on('error', (err) => {
+        const t = (err && err.type) || String(err);
+        if (t === 'unavailable-id' && attempt < 6) { attempt++; try { peer.destroy(); } catch (e) {} tryHost(); return; }
+        mpStatus('error', t);
+      });
+      peer.on('disconnected', () => { try { peer.reconnect(); } catch (e) {} });
+    })();
+  });
+}
+function mpGuestJoin(code) {
+  MP.role = 'guest';
+  mpEnsurePeer((ok) => {
+    if (!ok) { mpStatus('error', 'could not load PeerJS (network?)'); return; }
+    let peer; try { peer = new Peer({ debug: 1 }); } catch (e) { mpStatus('error', String(e)); return; }
+    MP.peer = peer;
+    peer.on('open', () => {
+      mpStatus('connecting', code);
+      const conn = peer.connect(mpPeerId(code), { reliable: true });
+      MP.conn = conn; mpWireConn(conn);
+    });
+    peer.on('error', (err) => mpStatus('error', (err && err.type) || String(err)));
+    peer.on('disconnected', () => { try { peer.reconnect(); } catch (e) {} });
+  });
+}
+function mpWireConn(conn) {
+  conn.on('open', () => {
+    MP.connected = true; MP.lastRecvAt = Date.now();
+    mpStatus('connected');
+    if (MP.role === 'host') mpSend({ t: 'hello', ver: GAME_VERSION });
+  });
+  conn.on('data', (msg) => mpOnMessage(msg));
+  conn.on('close', () => { MP.connected = false; mpOnPeerLost('closed'); });
+  conn.on('error', (err) => { mpStatus('error', (err && err.type) || String(err)); });
+}
+function mpSend(msg) { try { if (MP.conn && MP.connected) MP.conn.send(msg); } catch (e) {} }
+function mpOnMessage(msg) {
+  if (!msg || !msg.t) return;
+  MP.lastRecvAt = Date.now();
+  if (MP.role === 'host') mpHostOnMessage(msg); else mpGuestOnMessage(msg);
+}
+function mpOnPeerLost(reason) {
+  if (!MP.enabled) { mpStatus(reason); return; }
+  MP.connected = false;
+  if (!state.paused) { state.paused = true; const pb = el('btn-pause'); if (pb) pb.textContent = '▶ RESUME'; }
+  const dot = el('mp-hud-conn'); if (dot) { dot.style.color = '#ff5544'; dot.textContent = '○'; }
+  mpToast('Opponent ' + (reason === 'timeout' ? 'timed out' : 'disconnected') + ' — game paused', 'danger');
+}
+function mpReset() {
+  try { if (MP.conn) MP.conn.close(); } catch (e) {}
+  try { if (MP.peer) MP.peer.destroy(); } catch (e) {}
+  MP.peer = null; MP.conn = null; MP.connected = false; MP.enabled = false; MP.role = null; MP.roomCode = null;
+}
+
+/* ============================ HOST ============================ */
+function mpInitHostEconomy() {
+  MP.escalation = 0;
+  MP.unlocked = { hamas: false, hezbollah: false, iran: false, houthi: false };
+  MP.arsenal = {}; MP.reload = {};
+  FACTION_ORDER.forEach((fid) => {
+    const f = (typeof ATTACKER_FACTIONS !== 'undefined' && ATTACKER_FACTIONS[fid]) || {};
+    MP.arsenal[fid] = Object.assign({}, f.arsenalStart || {});
+    MP.reload[fid] = 0;
+  });
+}
+function mpHostStart() {
+  if (!MP.connected) { mpToast('No OPFOR connected yet', 'warn'); return; }
+  MP.enabled = true; MP.started = true; MP.role = 'host';
+  mpInitHostEconomy();
+  MP.unlocked[MP.guestFaction] = true;
+  mpSend({ t: 'start', faction: MP.guestFaction });
+  const m = el('mp-menu'); if (m) m.classList.add('hidden');
+  startScenario('mpHost');
+  mpHudShow('DEFENDER');
+}
+function mpHostOnMessage(msg) {
+  switch (msg.t) {
+    case 'setFaction':
+      if (FACTION_ORDER.includes(msg.faction)) { MP.guestFaction = msg.faction; const g = el('mp-host-guest'); if (g) g.textContent = 'OPFOR connected — faction: ' + msg.faction.toUpperCase(); }
+      break;
+    case 'switchFaction':
+      if (MP.unlocked[msg.faction]) MP.guestFaction = msg.faction;
+      break;
+    case 'launch': mpHostApplyLaunch(msg); break;
+    case 'ping': break;
+  }
+}
+function mpHostApplyLaunch(cmd) {
+  if (!MP.enabled || !state.active) return;
+  const fid = cmd.faction, type = cmd.type;
+  if (!ENEMIES[fid] || !THREAT_TYPES[type]) return;
+  if (!MP.unlocked[fid]) return;
+  const now = Date.now();
+  if (now < (MP.reload[fid] || 0)) return;
+  const stockObj = MP.arsenal[fid] || (MP.arsenal[fid] = {});
+  if (Math.floor(stockObj[type] || 0) <= 0) return;
+  let salvo = Math.max(1, Math.min(cmd.salvo || 1, 500));
+  const e = ENEMIES[fid];
+  let siteIdx = (cmd.siteIndex == null) ? Math.floor(Math.random() * e.launchSites.length)
+                                        : Math.max(0, Math.min(cmd.siteIndex | 0, e.launchSites.length - 1));
+  const spreadDeg = cmd.spread || 0.005;
+  const lat = cmd.targetLat, lon = cmd.targetLon;
+  const useCluster = (type === 'ballistic' && cmd.clusterWarhead);
+  const droneRoute = (type === 'drone' && cmd.droneRoute && cmd.droneRoute.length) ? cmd.droneRoute.map(w => ({ lat: w.lat, lon: w.lon })) : null;
+  const gen = state.scenarioGen;
+  const applyRoute = (th) => { if (!th) return; if (droneRoute) { th.waypoints = droneRoute.map(w => ({ lat: w.lat, lon: w.lon })); th.routed = true; } if (useCluster) th.clusterWarhead = true; };
+  let fired = 0;
+  for (let i = 0; i < salvo; i++) {
+    if (Math.floor(stockObj[type] || 0) <= 0) break;
+    stockObj[type] = Math.max(0, (stockObj[type] || 0) - 1); fired++;
+    const tLat = lat + (Math.random() - 0.5) * spreadDeg * 2;
+    const tLon = lon + (Math.random() - 0.5) * spreadDeg * 2;
+    if (i === 0) applyRoute(spawnThreat(type, fid, null, tLat, tLon, siteIdx));
+    else { const delay = i * (120 + Math.random() * 180); setTimeout(() => { if (state.scenarioGen !== gen || !state.active) return; applyRoute(spawnThreat(type, fid, null, tLat, tLon, siteIdx)); }, delay); }
+  }
+  if (!fired) return;
+  const RELOAD_BASE = { mortar: 1500, rocket: 3000, heavyRocket: 6000, drone: 4500, cruise: 8000, tacBallistic: 12000, ballistic: 20000, cluster: 22000, submunition: 3000 };
+  const baseMs = RELOAD_BASE[type] || 4000;
+  MP.reload[fid] = now + baseMs + (fired - 1) * (baseMs * 0.15);
+  mpBumpEscalation(type, fired);
+}
+function mpBumpEscalation(type, salvo) {
+  const W = { mortar: 0.3, rocket: 0.5, heavyRocket: 1.2, drone: 0.8, cruise: 1.5, tacBallistic: 2.5, ballistic: 4, cluster: 5, submunition: 0.2 };
+  MP.escalation = Math.min(100, MP.escalation + (W[type] || 1) * Math.min(salvo, 20) * 0.6);
+  mpRecomputeUnlocks();
+}
+function mpRecomputeUnlocks() {
+  const intense = MP.escalation >= 40;
+  FACTION_ORDER.forEach((fid) => { MP.unlocked[fid] = (fid === MP.guestFaction) || intense; });
+}
+function mpReloadRemaining() { const now = Date.now(), o = {}; FACTION_ORDER.forEach((f) => { o[f] = Math.max(0, (MP.reload[f] || 0) - now); }); return o; }
+function mpHostMaybeSnapshot(dt) {
+  if (!MP.connected) return;
+  const now = Date.now();
+  if (now - MP.lastRecvAt > 9000) { mpOnPeerLost('timeout'); return; }
+  if (MP.escalation > 0) { MP.escalation = Math.max(0, MP.escalation - dt * 0.0015); mpRecomputeUnlocks(); }
+  MP.snapAccum += dt;
+  if (MP.snapAccum < MP.snapIntervalMs) return;
+  MP.snapAccum = 0;
+  mpSend(mpBuildSnapshot());
+}
+function mpBuildSnapshot() {
+  const th = state.threats.map((t) => ({
+    id: t.id, ty: t.type, en: t.enemy,
+    cla: r5(t.curLat), clo: r5(t.curLon), sla: r5(t.startLat), slo: r5(t.startLon),
+    tla: r5(t.targetLat), tlo: r5(t.targetLon), p: r3(t.progress), ar: t.arcRatio,
+    ic: t.intercepted ? 1 : 0, im: t.impacted ? 1 : 0
+  }));
+  const ic = state.interceptors.map((i) => ({
+    id: i.id, bt: i.batteryType, sla: r5(i.startLat), slo: r5(i.startLon),
+    cla: r5(i.curLat), clo: r5(i.curLon), tla: r5(i.targetLat), tlo: r5(i.targetLon),
+    ex: i.exo ? 1 : 0, ar: i.arcRatio, al: i.alive ? 1 : 0
+  }));
+  const ct = state.cities.filter((c) => c.damage > 0 || !c.alive).map((c) => ({ id: c.id, d: Math.round(c.damage), a: c.alive ? 1 : 0 }));
+  let fx = MP.fxQueue; if (fx.length > 250) fx = fx.slice(fx.length - 250); MP.fxQueue = [];
+  const st = state.stats || {};
+  return {
+    t: 'snap', gt: Math.round(state.gameTime), dn: state.dayNight,
+    esc: Math.round(MP.escalation), unl: Object.assign({}, MP.unlocked), gf: MP.guestFaction,
+    ars: MP.arsenal, rel: mpReloadRemaining(),
+    th: th, ic: ic, ct: ct, fx: fx,
+    st: { intc: st.intercepted || 0, miss: st.missed || 0, tot: st.threatsTotal || 0, saf: st.civilianSafety != null ? Math.round(st.civilianSafety) : 100 }
+  };
+}
+
+/* ============================ GUEST ============================ */
+function mpGuestStart(faction) {
+  MP.enabled = true; MP.started = true; MP.role = 'guest';
+  if (FACTION_ORDER.includes(faction)) MP.guestFaction = faction;
+  MP.unlocked = { hamas: false, hezbollah: false, iran: false, houthi: false };
+  MP.unlocked[MP.guestFaction] = true;
+  const m = el('mp-menu'); if (m) m.classList.add('hidden');
+  startScenario('mpGuest');
+  const am = state.attackMode || (state.attackMode = {});
+  am.faction = MP.guestFaction; am.type = null; am.siteIndex = null;
+  if (typeof renderAttackerFactions === 'function') renderAttackerFactions();
+  if (typeof renderAttackerBases === 'function') renderAttackerBases();
+  if (typeof renderAttackerWeapons === 'function') renderAttackerWeapons();
+  document.querySelectorAll('.attacker-cheats, .attacker-cheats-header').forEach((e) => { e.style.display = 'none'; });  // host is authoritative
+  mpHudShow('OPFOR');
+}
+function mpGuestOnMessage(msg) {
+  switch (msg.t) {
+    case 'hello': break;
+    case 'start': mpGuestStart(msg.faction || MP.guestFaction); break;
+    case 'snap': mpGuestApplySnapshot(msg); break;
+  }
+}
+function mpGuestApplySnapshot(s) {
+  if (!MP.enabled) return;
+  const now = Date.now();
+  state.gameTime = s.gt; state.dayNight = s.dn;
+  MP.escalation = s.esc; MP.unlocked = s.unl || MP.unlocked; MP.guestFaction = s.gf || MP.guestFaction;
+  MP.arsenal = s.ars || MP.arsenal; MP.reloadRemaining = s.rel || {}; MP.guestStats = s.st || null;
+  // THREATS — merge by id, preserve local trail, store velocity for extrapolation
+  const oldT = {}; state.threats.forEach((t) => { oldT[t.id] = t; });
+  state.threats = (s.th || []).map((n) => {
+    const o = oldT[n.id] || { trail: [] };
+    o.id = n.id; o.type = n.ty; o.enemy = n.en;
+    o.startLat = n.sla; o.startLon = n.slo; o.targetLat = n.tla; o.targetLon = n.tlo;
+    o.arcRatio = n.ar; o.progress = n.p; o.intercepted = !!n.ic; o.impacted = !!n.im;
+    if (o.curLat != null) { const el2 = Math.max(16, now - (o._t || now)); o._vLat = (n.cla - o.curLat) / el2; o._vLon = (n.clo - o.curLon) / el2; }
+    o.curLat = n.cla; o.curLon = n.clo; o._t = now; if (!o.trail) o.trail = [];
+    return o;
+  });
+  // INTERCEPTORS — keep trail + local bornAt/deadAt (host wall-clock differs)
+  const oldI = {}; state.interceptors.forEach((i) => { oldI[i.id] = i; });
+  const seen = {}, list = (s.ic || []).map((n) => {
+    const o = oldI[n.id] || { trail: [], bornAt: now, bornAtGameTime: state.gameTime };
+    o.id = n.id; o.batteryType = n.bt; o.startLat = n.sla; o.startLon = n.slo;
+    o.targetLat = n.tla; o.targetLon = n.tlo; o.exo = !!n.ex; o.arcRatio = n.ar; o.alive = !!n.al;
+    if (o.curLat != null) { const el2 = Math.max(16, now - (o._t || now)); o._vLat = (n.cla - o.curLat) / el2; o._vLon = (n.clo - o.curLon) / el2; }
+    o.curLat = n.cla; o.curLon = n.clo; o._t = now; if (!o.trail) o.trail = []; seen[n.id] = 1;
+    return o;
+  });
+  Object.keys(oldI).forEach((id) => { if (!seen[id]) { const o = oldI[id]; if (!o.deadAt) { o.deadAt = now; o.alive = false; } if (now - o.deadAt < 7300) list.push(o); } });
+  state.interceptors = list;
+  // CITIES damage
+  if (s.ct && state.cities) { const cm = {}; state.cities.forEach((c) => { cm[c.id] = c; }); s.ct.forEach((n) => { const c = cm[n.id]; if (c) { c.damage = n.d; c.alive = !!n.a; } }); }
+  // FX events → spawn local particles
+  if (s.fx) s.fx.forEach(mpGuestPlayFx);
+}
+function mpGuestPlayFx(fx) {
+  try {
+    if (fx.k === 'i' && MP._origFlash) MP._origFlash(fx.la, fx.lo, 0, !!fx.exo, fx.lift || null, fx.gp || 0);
+    else if (fx.k === 'e' && MP._origExpl) MP._origExpl(fx.la, fx.lo, fx.mr, fx.du, !!fx.big, !!fx.exo, 0);
+  } catch (e) {}
+}
+function mpGuestTick(dt) {
+  const now = Date.now();
+  for (const t of state.threats) {
+    if (t._vLat != null && !t.impacted && !t.intercepted) { t.curLat += t._vLat * dt; t.curLon += t._vLon * dt; }
+    if (!t.trail) t.trail = [];
+    t.trail.push({ lat: t.curLat, lon: t.curLon, progress: t.progress });
+    if (t.trail.length > 28) t.trail.shift();
+  }
+  for (const i of state.interceptors) {
+    if (!i.alive) continue;
+    if (i._vLat != null) { i.curLat += i._vLat * dt; i.curLon += i._vLon * dt; }
+    if (!i.trail) i.trail = [];
+    let prog = 0; const dTot = Math.hypot(i.targetLat - i.startLat, i.targetLon - i.startLon);
+    if (dTot > 1e-9) prog = Math.min(1, Math.hypot(i.curLat - i.startLat, i.curLon - i.startLon) / dTot);
+    i.trail.push({ lat: i.curLat, lon: i.curLon, prog: prog, altFrac: null, t: now });
+    if (i.trail.length > 300) i.trail.shift();
+  }
+  MP._pingAccum = (MP._pingAccum || 0) + dt;
+  if (MP._pingAccum > 2000) { MP._pingAccum = 0; mpSend({ t: 'ping' }); }
+  if (MP.connected && now - MP.lastRecvAt > 9000) mpOnPeerLost('timeout');
+}
+function mpGuestLaunchAt(lat, lon) {
+  const am = state.attackMode; if (!am || !am.faction || !am.type) return false;
+  const inBox = (lat >= 29.45 && lat <= 33.30 && lon >= 34.20 && lon <= 35.60);
+  const inGolan = (lat >= 32.65 && lat <= 33.34 && lon >= 35.55 && lon <= 35.83);
+  if (!inBox && !inGolan) { showNotification('OUT OF RANGE', 'Target must be inside Israeli territory', 'warn'); return false; }
+  let nearestKm = Infinity;
+  for (const c of state.cities) { if (!c.alive) continue; const d = haversineKm(lat, lon, c.lat, c.lon); if (d < nearestKm) nearestKm = d; }
+  if (nearestKm > 25) { showNotification('NO TARGET', 'No Israeli population/site within 25 km of that point', 'warn'); return false; }
+  const e = ENEMIES[am.faction];
+  let siteIdx = (am.siteIndex == null) ? Math.floor(Math.random() * e.launchSites.length) : am.siteIndex;
+  const site = e.launchSites[siteIdx];
+  const distKm = haversineKm(site.lat, site.lon, lat, lon);
+  const maxKm = (typeof WEAPON_MAX_RANGE !== 'undefined' && WEAPON_MAX_RANGE[am.type]) || 99999;
+  if (distKm > maxKm) { showNotification('OUT OF RANGE', `${(WEAPON_DISPLAY[am.type] || {}).label || am.type} max ${maxKm} km — target is ${distKm.toFixed(0)} km from ${site.name}`, 'warn'); return false; }
+  const rem = (MP.reloadRemaining && MP.reloadRemaining[am.faction]) || 0;
+  if (rem > 0) { showNotification('RELOADING', `Wait ${Math.ceil(rem / 1000)}s before next launch`, 'warn'); return false; }
+  const stock = Math.floor((MP.arsenal && MP.arsenal[am.faction] && MP.arsenal[am.faction][am.type]) || 0);
+  if (stock <= 0) { showNotification('OUT OF AMMO', `No ${(WEAPON_DISPLAY[am.type] || {}).label || am.type} remaining — wait for resupply`, 'warn'); return false; }
+  const now = Date.now(); if (now < (MP._lastSendAt || 0) + 180) return false; MP._lastSendAt = now;
+  const droneRoute = (am.type === 'drone' && am.droneRoute && am.droneRoute.length) ? am.droneRoute.map(w => ({ lat: w.lat, lon: w.lon })) : null;
+  mpSend({ t: 'launch', faction: am.faction, type: am.type, siteIndex: siteIdx, targetLat: lat, targetLon: lon, salvo: Math.max(1, am.salvo || 1), spread: am.spread || 0.005, clusterWarhead: (am.type === 'ballistic' && !!am.clusterWarhead), droneRoute: droneRoute });
+  if (droneRoute) am.droneRoute = [];
+  if (typeof audio !== 'undefined' && audio.alarm) audio.alarm();
+  return true;
+}
+function mpGuestPickFaction(fid) {
+  if (!(MP.unlocked && MP.unlocked[fid])) { mpToast((ENEMIES[fid] ? ENEMIES[fid].name : fid) + ' is locked — raise escalation to open new fronts', 'warn'); return; }
+  const am = state.attackMode || (state.attackMode = {});
+  if (am.faction === fid) return;
+  state.attackMode = { faction: fid, type: null, siteIndex: null, salvo: am.salvo || 1, spread: am.spread || 0.005 };
+  MP.guestFaction = fid; mpSend({ t: 'switchFaction', faction: fid });
+  if (typeof renderAttackerFactions === 'function') renderAttackerFactions();
+  if (typeof renderAttackerBases === 'function') renderAttackerBases();
+  if (typeof renderAttackerWeapons === 'function') renderAttackerWeapons();
+  if (typeof updateAttackerStatus === 'function') updateAttackerStatus();
+}
+function mpUpdateGuestPanel() {
+  let box = el('mp-opfor-info');
+  if (!box) { const panel = el('attacker-panel'); if (!panel) return; box = document.createElement('div'); box.id = 'mp-opfor-info'; box.style.cssText = 'margin-top:8px;padding-top:8px;border-top:1px dashed rgba(127,209,255,0.4);font-size:11px;color:#bfe6ff;line-height:1.6;'; panel.appendChild(box); }
+  const now = Date.now(); if (now < (MP._panelAt || 0) + 200) return; MP._panelAt = now;
+  const am = state.attackMode || {}; const fid = am.faction || MP.guestFaction;
+  const ars = (MP.arsenal && MP.arsenal[fid]) || {}; const rem = (MP.reloadRemaining && MP.reloadRemaining[fid]) || 0;
+  const esc = Math.round(MP.escalation || 0);
+  const escColor = esc >= 40 ? '#ff6b5e' : (esc >= 20 ? '#ffaa00' : '#7fffb0');
+  let armLine = '';
+  if (am.type) { const left = Math.floor(ars[am.type] || 0); armLine = `<div>${(WEAPON_DISPLAY[am.type] || {}).label || am.type}: <b style="color:${left > 0 ? '#7fffb0' : '#ff6b5e'}">${left}</b> in stock${rem > 0 ? ` · <span style="color:#ffaa00">reload ${Math.ceil(rem / 1000)}s</span>` : ''}</div>`; }
+  box.innerHTML =
+    `<div style="letter-spacing:2px;color:#7fd1ff;font-weight:bold;">🌐 OPFOR · ${(ENEMIES[fid] ? ENEMIES[fid].name : fid).toUpperCase()}</div>` +
+    armLine +
+    `<div>Escalation: <b style="color:${escColor}">${esc}</b>/100 <span style="color:var(--text-dim)">(${esc >= 40 ? 'INTENSE — all fronts open' : 'build up to open new fronts'})</span></div>` +
+    `<div style="height:5px;background:rgba(255,255,255,0.1);border-radius:3px;margin-top:2px;overflow:hidden;"><div style="height:100%;width:${esc}%;background:${escColor};transition:width .3s;"></div></div>`;
+}
+
+/* ---------------- shared HUD chip ---------------- */
+function mpHudShow(roleLabel) {
+  let hud = el('mp-hud');
+  if (!hud) { hud = document.createElement('div'); hud.id = 'mp-hud'; hud.style.cssText = 'position:fixed;top:6px;left:50%;transform:translateX(-50%);z-index:9000;background:rgba(10,20,35,0.92);border:1px solid #2e6da4;color:#7fd1ff;padding:4px 14px;font-size:11px;letter-spacing:2px;border-radius:4px;font-family:monospace;pointer-events:none;'; document.body.appendChild(hud); }
+  hud.innerHTML = `🌐 MULTIPLAYER · YOU: <b>${roleLabel}</b> · <span id="mp-hud-conn" style="color:#7fffb0;">●</span>`;
+}
+
+/* ---------------- FX capture (host) — wrap the two FX entry points ---------------- */
+(function () {
+  if (typeof createInterceptFlash === 'function') {
+    MP._origFlash = createInterceptFlash;
+    createInterceptFlash = function (lat, lon, screenYOffset, exo, lift, groundProg) {
+      if (MP.enabled && MP.role === 'host' && MP.connected) {
+        MP.fxQueue.push({ k: 'i', la: r5(lat), lo: r5(lon), exo: exo ? 1 : 0, gp: groundProg || 0, lift: lift ? { frac: lift.frac, aLat: lift.aLat, aLon: lift.aLon, bLat: lift.bLat, bLon: lift.bLon, arcR: lift.arcR } : null });
+      }
+      return MP._origFlash.apply(this, arguments);
+    };
+  }
+  if (typeof createExplosion === 'function') {
+    MP._origExpl = createExplosion;
+    createExplosion = function (lat, lon, maxRadius, duration, big, exo, screenYOffset) {
+      if (MP.enabled && MP.role === 'host' && MP.connected) {
+        MP.fxQueue.push({ k: 'e', la: r5(lat), lo: r5(lon), mr: maxRadius, du: duration, big: big ? 1 : 0, exo: exo ? 1 : 0 });
+      }
+      return MP._origExpl.apply(this, arguments);
+    };
+  }
+})();
+
+/* ---------------- lobby wiring ---------------- */
+function mpLobbyStatus(s, extra) {
+  if (MP.role === 'host') {
+    const st = el('mp-host-status');
+    if (s === 'waiting') { const c = el('mp-room-code'); if (c) c.textContent = extra || MP.roomCode || '····'; if (st) st.textContent = 'Room ready — share the code. Waiting for OPFOR…'; }
+    else if (s === 'connected') { if (st) st.textContent = 'OPFOR connected ✓'; const g = el('mp-host-guest'); if (g) g.textContent = 'OPFOR connected — faction: ' + (MP.guestFaction || 'hamas').toUpperCase(); const b = el('mp-start-btn'); if (b) b.style.display = 'inline-block'; }
+    else if (s === 'closed' || s === 'timeout') { if (st) st.textContent = 'OPFOR disconnected — waiting again…'; const b = el('mp-start-btn'); if (b) b.style.display = 'none'; const g = el('mp-host-guest'); if (g) g.textContent = 'Waiting for OPFOR to join…'; }
+    else if (s === 'error') { if (st) st.textContent = 'Error: ' + extra + ' — go BACK and retry.'; }
+  } else if (MP.role === 'guest') {
+    const st = el('mp-join-status');
+    if (s === 'connecting') { if (st) st.textContent = 'Connecting to ' + (extra || '') + '…'; }
+    else if (s === 'connected') { if (st) st.textContent = 'Connected to host ✓ — pick your faction'; const f = el('mp-join-faction'); if (f) f.classList.remove('hidden'); if (MP._buildLobbyFactionPicker) MP._buildLobbyFactionPicker(); }
+    else if (s === 'closed' || s === 'timeout') { if (st) st.textContent = 'Disconnected from host.'; }
+    else if (s === 'error') { if (st) st.textContent = 'Error: ' + extra + ' — check the code and retry.'; }
+  }
+}
+(function mpWireLobby() {
+  MP.onStatus = mpLobbyStatus;
+  const show = (id) => { const e = el(id); if (e) e.classList.remove('hidden'); };
+  const hide = (id) => { const e = el(id); if (e) e.classList.add('hidden'); };
+  function resetPanels() { show('mp-role-row'); hide('mp-host-panel'); hide('mp-join-panel'); hide('mp-join-faction'); const sb = el('mp-start-btn'); if (sb) sb.style.display = 'none'; }
+  function buildPicker() {
+    const wrap = el('mp-faction-pick'); if (!wrap) return; wrap.innerHTML = '';
+    FACTION_ORDER.forEach((fid) => {
+      const b = document.createElement('button'); b.className = 'menu-button'; b.style.cssText = 'min-width:0;padding:8px 12px;font-size:11px;';
+      b.textContent = (ENEMIES[fid] ? ENEMIES[fid].name : fid).toUpperCase();
+      if (MP.guestFaction === fid) { b.style.borderColor = '#7fffb0'; b.style.color = '#7fffb0'; }
+      b.onclick = () => { MP.guestFaction = fid; mpSend({ t: 'setFaction', faction: fid }); buildPicker(); };
+      wrap.appendChild(b);
+    });
+  }
+  MP._buildLobbyFactionPicker = buildPicker;
+  const btnMP = el('btn-multiplayer'); if (btnMP) btnMP.onclick = () => { hide('start-menu'); show('mp-menu'); resetPanels(); mpEnsurePeer(() => {}); };
+  const back = el('mp-back'); if (back) back.onclick = () => { mpReset(); hide('mp-menu'); show('start-menu'); resetPanels(); };
+  const hostCard = el('mp-host-card'); if (hostCard) hostCard.onclick = () => { hide('mp-role-row'); hide('mp-join-panel'); show('mp-host-panel'); mpHostCreate(); };
+  const joinCard = el('mp-join-card'); if (joinCard) joinCard.onclick = () => { hide('mp-role-row'); hide('mp-host-panel'); show('mp-join-panel'); const inp = el('mp-code-input'); if (inp) inp.focus(); };
+  const connectBtn = el('mp-connect-btn'); if (connectBtn) connectBtn.onclick = () => { const inp = el('mp-code-input'); const code = ((inp && inp.value) || '').trim().toUpperCase(); if (code.length < 4) { MP.role = 'guest'; mpLobbyStatus('error', 'enter the 4-letter code'); return; } mpGuestJoin(code); buildPicker(); };
+  const startBtn = el('mp-start-btn'); if (startBtn) startBtn.onclick = () => mpHostStart();
+  const copyBtn = el('mp-copy-code'); if (copyBtn) copyBtn.onclick = () => { try { navigator.clipboard.writeText(MP.roomCode || ''); copyBtn.textContent = 'COPIED'; setTimeout(() => { copyBtn.textContent = 'COPY'; }, 1200); } catch (e) {} };
+  const codeInput = el('mp-code-input'); if (codeInput) codeInput.addEventListener('keydown', (e) => { if (e.key === 'Enter' && connectBtn) connectBtn.click(); });
+})();
+console.log('[MP] SHIELD multiplayer module loaded (v' + (typeof GAME_VERSION !== 'undefined' ? GAME_VERSION : '?') + ')');
 </script>
 </body>
 </html>
