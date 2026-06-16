@@ -2215,6 +2215,12 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.28.2  — AI EXECUTES IRAN'S ORDERS (#7). An UNOWNED axis faction (no human player) now acts on Iran's
+//            current directive by logic, not randomly: iranDirectiveBehavior maps the order (intensify N/S,
+//            launch drones, attack US, mass salvo, hold/conserve/de-escalate) to a region/target/intensity,
+//            then the AI picks a real reachable target and fires via mpHostApplyLaunch — so it respects
+//            reach, per-faction cooldown, arsenal, suppression/destruction and ceasefire. ~1 AI faction acts
+//            per 6s; human-owned & capitulated factions are skipped. Host authority (FFA).
 //   2.28.1  — HARD RULE: the US NEVER bombs Israel. Removed the kinetic "Punish Israel (strike)" added in
 //            2.27.9 — replaced with usPressureIsrael (NON-KINETIC): freeze arms, cut intel sharing, ban
 //            fighter transfers, withdraw support, demand a halt. The defy-with-collapsed-support trigger now
@@ -3483,7 +3489,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.28.1';
+const GAME_VERSION = '2.28.2';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -14311,6 +14317,7 @@ function gameLoop(time) {
       if (typeof usInvolvementTick === 'function') usInvolvementTick(dt);   // v2.26.6 — US drawn in by escalation (#9)
       if (typeof tickWarDailyStrikes === 'function') tickWarDailyStrikes(dt);   // v2.27.4 — daily strategic strikes once war is on
       if (typeof tickTrumpEvents === 'function') tickTrumpEvents(dt);           // v2.27.8 — unpredictable Trump events
+      if (typeof tickIranAiExecution === 'function') tickIranAiExecution(dt);   // v2.28.2 #7 — AI axis factions carry out Iran's orders
       if (typeof mpAiIsraelMaybeRequestAid === 'function') mpAiIsraelMaybeRequestAid();   // v2.26.8 — AI Israel asks the USA player for help
       updateCivilian(dt);
       updateIntel(dt);
@@ -22775,6 +22782,7 @@ function startScenario(name) {
   state.redLines = {};                                     // v2.26.4 — red-line crisis flags reset each game
   state._warStrikeAt = 0;                                  // v2.27.4 — daily war-strike timer reset
   state._trumpAt = 0;                                      // v2.27.8 — Trump-event timer reset
+  state._iranAiAt = 0;                                     // v2.28.2 — Iran AI-execution timer reset
   state.destroyedLaunchSites = {}; state.capitulated = {}; state.ceasefire = false;   // v2.27.6 — base destruction / capitulation / ceasefire reset
   state.mobileLaunchers = [];                              // v2.27.7 — mobile launchers reset
   state.tomahawks = [];                                    // v2.28.0 — Tomahawks in flight reset
@@ -24822,6 +24830,58 @@ function tickTrumpEvents(dt) {
     if (state.ceasefire) { state.ceasefire = false; trumpEvent('💥 TRUMP — DEAL’S OFF', 'They blew it. No more ceasefire. Sad!', 'danger'); if (typeof mpUpdateCeasefireBtn === 'function') mpUpdateCeasefireBtn(); }
     else { state.money = (state.money || 0) + 1500000; trumpEvent('🤝 TRUMP — A DEAL', 'Made a great deal. Tremendous. Money is coming.', 'success'); }
   }
+}
+// v2.28.2 #7 — AI executes Iran's orders. An UNOWNED axis faction (no human player) acts on Iran's current
+// directive by logic (region/target/intensity), respecting reach, cooldown, arsenal & ceasefire. Host (MP).
+function iranDirectiveBehavior(task) {
+  task = (task || '').toLowerCase();
+  if (task.indexOf('reduce') >= 0 || task.indexOf('hold') >= 0 || task.indexOf('conserve') >= 0 || task.indexOf('await') >= 0 || task.indexOf('do not cross') >= 0 || task.indexOf('do not attack') >= 0) return { fire: false };
+  const b = { fire: true, region: 'any', type: 'rocket', salvo: 3, targetUS: false, targetType: null };
+  if (task.indexOf('north') >= 0) b.region = 'north';
+  if (task.indexOf('south') >= 0) b.region = 'south';
+  if (task.indexOf('drone') >= 0) b.type = 'drone';
+  if (task.indexOf('mass salvo') >= 0 || task.indexOf('synchron') >= 0 || task.indexOf('pressure') >= 0 || task.indexOf('new front') >= 0) b.salvo = 8;
+  if (task.indexOf('attack us') >= 0) b.targetUS = true;
+  if (task.indexOf('air defense') >= 0) b.targetType = 'ad';
+  if (task.indexOf('a port') >= 0) b.targetType = 'port';
+  if (task.indexOf('airfield') >= 0) b.targetType = 'airfield';
+  if (task.indexOf('military base') >= 0) b.targetType = 'base';
+  return b;
+}
+function tickIranAiExecution(dt) {
+  if (!state.active) return;
+  if (typeof MP === 'undefined' || !MP.enabled || MP.role !== 'host' || !MP.ffa) return;   // host authority, FFA (axis with AI factions)
+  if (state.ceasefire || !state.iranTask) return;
+  const beh = iranDirectiveBehavior(state.iranTask); if (!beh.fire) return;
+  const now = Date.now();
+  if (now < (state._iranAiAt || 0)) return;
+  state._iranAiAt = now + 6000;   // one AI faction acts ~every 6s (per-faction reload still applies)
+  const cand = ['hamas', 'hezbollah', 'houthi'].filter(function (fid) {
+    if (MP.factionOwners && MP.factionOwners[fid]) return false;        // a human plays it
+    if (MP.myFaction === fid) return false;
+    if (state.capitulated && state.capitulated[fid]) return false;
+    if (now < (MP.reload[fid] || 0)) return false;                     // reloading
+    return !!(MP.arsenal && MP.arsenal[fid]);
+  });
+  if (!cand.length) return;
+  const fid = cand[Math.floor(Math.random() * cand.length)], e = ENEMIES[fid];
+  let tLat = null, tLon = null;
+  if (beh.targetUS && typeof usTargetsHot === 'function' && usTargetsHot()) { if (typeof usTargetsEnsure === 'function') usTargetsEnsure(); const ut = (state.usTargets || []).filter(function (t) { return t.alive !== false; }); if (ut.length) { const u = ut[Math.floor(Math.random() * ut.length)]; tLat = u.lat; tLon = u.lon; } }
+  if (tLat == null) {
+    const reach = (typeof mpReachKm === 'function') ? mpReachKm(fid) : 200, sites = e.launchSites || [];
+    const cities = (state.cities || []).filter(function (c) {
+      if (c.alive === false || (c.population || 0) <= 0) return false;
+      if (beh.region === 'north' && c.lat < 32.4) return false;
+      if (beh.region === 'south' && c.lat > 31.7) return false;
+      return sites.some(function (s) { return haversineKm(s.lat, s.lon, c.lat, c.lon) <= reach; });
+    });
+    if (!cities.length) return;
+    const c = cities[Math.floor(Math.random() * cities.length)]; tLat = c.lat; tLon = c.lon;
+  }
+  const avail = e.threats || ['rocket']; let type = beh.type;
+  if (avail.indexOf(type) < 0) type = (avail.indexOf('rocket') >= 0) ? 'rocket' : avail[0];
+  mpHostApplyLaunch({ faction: fid, type: type, targetLat: tLat, targetLon: tLon, salvo: Math.max(1, beh.salvo || 3), spread: 0.012, siteIndex: null });
+  if (typeof logEvent === 'function') logEvent('☪→ ' + (e.name || fid) + ' (AI) carries out Iran’s order: ' + state.iranTask, 'warn');
 }
 function mpFfaInstallUsaPanel() {
   let p = el('mp-usa-panel');
