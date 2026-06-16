@@ -2130,6 +2130,13 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.25.10 — MP sync gaps (user): (1) remaining JERK — lat/lon were smoothed but the threat ARC (and
+//            interceptor lift) read `progress`, which steps every snapshot → the dot jumped vertically.
+//            Now progress is derived from the SMOOTHED position each frame, so the arc eases too.
+//            (2) OPFOR couldn't SEE the defender's attacks — synced state.airstrikes (incoming F-35s,
+//            smooth-followed + local trail; impact booms already arrive via fx). (3) No DAMAGE shown on
+//            OPFOR's sites — synced disabledLaunchSites (counter-battery), and drawAttackerBases now
+//            marks struck/suppressed sites offline (orange).
 //   2.25.9  — MP teardown on leaving to menu (user: HUD/status/chat lingered on the menu after
 //            quitting, and the match kept running). The body-level MP UI (mp-hud, mp-status, mp-chat,
 //            mp-opfor-info) is appended to <body>, so hiding game-container didn't remove it. New
@@ -3198,7 +3205,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.25.9';
+const GAME_VERSION = '2.25.10';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -7121,10 +7128,12 @@ function drawAttackerBases() {
       ctx.fillStyle = glow;
       ctx.beginPath(); ctx.arc(sx, sy, 22, 0, Math.PI * 2); ctx.fill();
     }
-    // Damaged site state (attacker campaign)
+    // Damaged site state (attacker campaign) + MP counter-battery suppression (struck by the defender)
     const dmg = (state.attacker && state.attacker.damagedSites) ? (state.attacker.damagedSites[i] || 0) : 0;
+    const _dkey = state.attackMode.faction + '_' + i;
+    const isSuppressed = !!(state.disabledLaunchSites && state.disabledLaunchSites[_dkey] > now);   // v2.25.10
     const isDestroyed = dmg >= 100;
-    const isDamaged = dmg > 0 && !isDestroyed;
+    const isDamaged = (dmg > 0 && !isDestroyed) || isSuppressed;
     // Base marker — small triangle (rocket launcher symbol)
     const r = isActive ? 7 : 5;
     if (isDestroyed) {
@@ -23361,6 +23370,8 @@ function mpBuildSnapshot() {
     op: Math.round(MP.scoreOpf || 0), dfd: Math.round((st.intercepted || 0) * 10), cas: MP.casualties || 0,
     war: Math.round(MP.warRisk || 0), wd: MP.warDeclared ? 1 : 0, smug: Math.max(0, (MP.smuggleReady || 0) - Date.now()),
     th: th, ic: ic, ct: ct, fx: fx,
+    as: (state.airstrikes || []).filter(function (a) { return !a.done; }).map(function (a) { return { id: a.id, cla: r5(a.curLat), clo: r5(a.curLon), tla: r5(a.targetLat), tlo: r5(a.targetLon) }; }),
+    ds: (function () { const o = {}, dm = state.disabledLaunchSites || {}, nw = Date.now(); for (const k in dm) { const rem = dm[k] - nw; if (rem > 0) o[k] = Math.round(rem); } return o; })(),
     st: { intc: st.intercepted || 0, miss: st.missed || 0, tot: st.threatsTotal || 0, saf: st.civilianSafety != null ? Math.round(st.civilianSafety) : 100 }
   };
 }
@@ -23441,6 +23452,20 @@ function mpGuestApplySnapshot(s) {
   state.interceptors = list;
   // CITIES damage
   if (s.ct && state.cities) { const cm = {}; state.cities.forEach((c) => { cm[c.id] = c; }); s.ct.forEach((n) => { const c = cm[n.id]; if (c) { c.damage = n.d; c.alive = !!n.a; } }); }
+  // v2.25.10 — AIR STRIKES (defender's F-35 strikes) so OPFOR SEES the incoming attacks (impacts arrive via fx)
+  const oldA = {}; (state.airstrikes || []).forEach((a) => { oldA[a.id] = a; });
+  state.airstrikes = (s.as || []).map((n) => {
+    const o = oldA[n.id] || { trail: [], done: false, speed: 0.18 };
+    o.id = n.id; o.targetLat = n.tla; o.targetLon = n.tlo; o.done = false;
+    if (o.startLat == null) { o.startLat = n.cla; o.startLon = n.clo; }
+    if (o._aLat != null) { const el2 = Math.max(16, now - (o._aT || now)); o._vLat = clampv((n.cla - o._aLat) / el2); o._vLon = clampv((n.clo - o._aLon) / el2); } else { o._vLat = 0; o._vLon = 0; }
+    o._aLat = n.cla; o._aLon = n.clo; o._aT = now;
+    if (o.curLat == null) { o.curLat = n.cla; o.curLon = n.clo; }
+    if (!o.trail) o.trail = [];
+    return o;
+  });
+  // v2.25.10 — disabled/struck launch sites (defender counter-battery) → OPFOR sees its sites go offline
+  if (s.ds) { state.disabledLaunchSites = {}; for (const k in s.ds) state.disabledLaunchSites[k] = now + s.ds[k]; }
   // FX events → spawn local particles
   if (s.fx) s.fx.forEach(mpGuestPlayFx);
 }
@@ -23460,6 +23485,10 @@ function mpGuestTick(rawDt) {
       const ahead = Math.min(400, now - (t._aT || now));
       t.curLat += ((t._aLat + t._vLat * ahead) - t.curLat) * f;
       t.curLon += ((t._aLon + t._vLon * ahead) - t.curLon) * f;
+      // v2.25.10 — derive progress from the SMOOTHED position so the ARC HEIGHT eases too. The snapshot's
+      // progress steps every ~80ms, which made the dot jump vertically each snapshot (the remaining jerk).
+      const dTot = Math.hypot(t.targetLat - t.startLat, t.targetLon - t.startLon);
+      if (dTot > 1e-9) t.progress = Math.max(0, Math.min(1, Math.hypot(t.curLat - t.startLat, t.curLon - t.startLon) / dTot));
     }
     if (!t.trail) t.trail = [];
     t.trail.push({ lat: t.curLat, lon: t.curLon, progress: t.progress });
@@ -23475,8 +23504,21 @@ function mpGuestTick(rawDt) {
     if (!i.trail) i.trail = [];
     let prog = 0; const dTot = Math.hypot(i.targetLat - i.startLat, i.targetLon - i.startLon);
     if (dTot > 1e-9) prog = Math.min(1, Math.hypot(i.curLat - i.startLat, i.curLon - i.startLon) / dTot);
+    i.progress = prog;   // v2.25.10 — smooth progress so the interceptor lift/arc eases too
     i.trail.push({ lat: i.curLat, lon: i.curLon, prog: prog, altFrac: null, t: now });
     if (i.trail.length > 300) i.trail.shift();
+  }
+  // v2.25.10 — defender AIR STRIKES (incoming F-35s) so the OPFOR can SEE the attacks
+  if (state.airstrikes) for (const a of state.airstrikes) {
+    if (a.done) continue;
+    if (a._aLat != null) {
+      const ahead = Math.min(400, now - (a._aT || now));
+      a.curLat += ((a._aLat + a._vLat * ahead) - a.curLat) * f;
+      a.curLon += ((a._aLon + a._vLon * ahead) - a.curLon) * f;
+    }
+    if (!a.trail) a.trail = [];
+    a.trail.push({ lat: a.curLat, lon: a.curLon });
+    if (a.trail.length > 14) a.trail.shift();
   }
   MP._pingAccum = (MP._pingAccum || 0) + rawDt;
   if (MP._pingAccum > 2000) { MP._pingAccum = 0; mpSend({ t: 'ping', ts: now }); }   // v2.25.6 — timestamped ping for RTT
