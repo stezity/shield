@@ -2130,6 +2130,12 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.25.7  — MP: no AI faction RETALIATION (user: "Hamas striking back" after a defender strike).
+//            When the human defender air-struck an enemy target/launch site, scheduleFactionRetaliation
+//            (+ TST / doctrinal / major variants) fired an AI counter-barrage ("RETALIATION INCOMING").
+//            Guarded ALL retaliation entry+fire points (schedule/fire FactionRetaliation, TST, major,
+//            doctrinal, triggerRetaliation) with `if (MP && MP.enabled) return;` → pure PvP, the AI
+//            never strikes back; only the human OPFOR attacks.
 //   2.25.6  — MP QoL (user): (1) NO auto-pause on window blur/minimize in multiplayer (alt-tabbing
 //            must not pause/desync a live PvP match) — the blur auto-pause now early-returns when
 //            MP is active. (2) PING display: both sides send timestamped pings, reply pongs, and
@@ -3177,7 +3183,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.25.6';
+const GAME_VERSION = '2.25.7';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -5778,6 +5784,7 @@ function executeMassStrike() {
 //   Iran      — often DELAYED 3–5 minutes, sometimes never
 //   Houthis   — sometimes immediate, often delayed 2–5 min, often never
 function scheduleFactionRetaliation(target) {
+  if (MP && MP.enabled) return;   // v2.25.7 — pure PvP: no AI faction retaliation in multiplayer
   const enemyId = target.faction;
   if (!enemyId || !ENEMIES[enemyId]) return;
   if (state.playAs === 'attacker') return;          // player IS the attacker — IDF strikes shouldn't trigger
@@ -5828,6 +5835,7 @@ function scheduleFactionRetaliation(target) {
 // === MAJOR retaliation specifically for high-priority TST kills ===
 // 30% immediate berserker salvo, 30% delayed 3-5 min, 30% very delayed (8-15 min), 10% nothing
 function scheduleTSTRetaliation(tst) {
+  if (MP && MP.enabled) return;   // v2.25.7 — pure PvP: no AI retaliation in multiplayer
   const fid = tst.faction;
   if (!fid || !ENEMIES[fid]) return;
   const roll = Math.random();
@@ -6023,6 +6031,7 @@ function fireRevengePromiseSalvo(fid, sourceLabel) {
 }
 
 function fireMajorTSTRetaliation(fid, tst) {
+  if (MP && MP.enabled) return;   // v2.25.7 — pure PvP
   const e = ENEMIES[fid];
   if (!e || !e.threats || e.threats.length === 0) return;
   // Major retaliation: 12-25 threats, mixed types, escalation-amplified
@@ -6050,6 +6059,7 @@ function fireMajorTSTRetaliation(fid, tst) {
 }
 
 function scheduleRetaliationFire(target, delay) {
+  if (MP && MP.enabled) return;   // v2.25.7 — pure PvP
   const gen = state.scenarioGen;
   setTimeout(() => {
     if (state.scenarioGen !== gen || !state.active || state.playAs === 'attacker') return;
@@ -6066,6 +6076,7 @@ function getRetaliationWeapons(enemyId) {
 }
 
 function fireFactionRetaliation(target) {
+  if (MP && MP.enabled) return;   // v2.25.7 — pure PvP
   const enemyId = target.faction;
   if (!enemyId || !ENEMIES[enemyId]) return;
   // Skip if target's faction has been wiped out (no launch sites left)
@@ -6098,6 +6109,7 @@ function fireFactionRetaliation(target) {
 
 // Универсальная функция ответного удара (масштаб = важность × множитель)
 function triggerRetaliation(target, multiplier) {
+  if (MP && MP.enabled) return;   // v2.25.7 — pure PvP
   multiplier = multiplier || 1;
   // Don't retaliate against the player when they ARE the attacker (Resistance Axis)
   if (state.playAs === 'attacker') return;
@@ -15923,6 +15935,7 @@ function pickDoctrinalTarget(factionId, candidates) {
 // Doctrine-shaped retaliation when a leader-class enemy is killed by player.
 // Replaces generic salvo with faction personality (delay, size, spread, proxy activation).
 function fireDoctrinalLeaderRetaliation(target) {
+  if (MP && MP.enabled) return;   // v2.25.7 — pure PvP
   const fid = target.faction;
   const e = ENEMIES[fid];
   if (!e) return;
