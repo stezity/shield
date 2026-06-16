@@ -2182,6 +2182,14 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.26.7  — COMPLETES the second mega-spec (#8 rest + #9 rest). US PLAYER MILITARY ACTIONS: the USA panel
+//            gains Deploy carrier / Fighters+AD / Strike Iran / Enter the war — each raises usInvolvement
+//            with real effect + political cost (host applies; guest sends usaGrant). usInvolvement is now
+//            synced in the snapshot so US targets become attackable on the attacker's client. IRAN PLAYER
+//            CONTROLS: an axis-command panel (Issue directive ▸ cycling 9 directives, Reinforce axis
+//            +control/-chaos/faster allied resupply); directives broadcast to the axis (axistask msg, host
+//            relays) and show in every faction's axis panel. This finishes #8 & #9 — US and Iran are now
+//            mirror influence centers, each able to restrain, reinforce, permit, task and fight directly.
 //   2.26.6  — US MILITARY INVOLVEMENT + US TARGETS (#9 core / #10 / #11). state.usInvolvement 0-100 with
 //            tiers Low/Medium/High/DIRECT WAR; rises as escalation stays high (eases when calm), Iran
 //            entering or a casus belli pulls it toward direct war. 11 US regional assets (carrier group,
@@ -3340,7 +3348,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.26.6';
+const GAME_VERSION = '2.26.7';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -14067,6 +14075,8 @@ function gameLoop(time) {
     else { const _u = document.getElementById('us-panel'); if (_u) _u.style.display = 'none'; if (!state.active) { const _m = document.getElementById('us-perm-modal'); if (_m) _m.style.display = 'none'; } }
     if (typeof iranPanel === 'function' && state.active && state.playAs === 'attacker') iranPanel();   // v2.26.5 #8 — axis panel for attacker players
     else { const _i = document.getElementById('iran-panel'); if (_i) _i.style.display = 'none'; if (!state.active) { const _im = document.getElementById('iran-perm-modal'); if (_im) _im.style.display = 'none'; } }
+    if (typeof mpInstallIranPanel === 'function' && state.active && state.playAs === 'attacker' && state.attackMode && state.attackMode.faction === 'iran') mpInstallIranPanel();   // v2.26.7 #8 — Iran command panel for the Iran player
+    else { const _ic = document.getElementById('iran-cmd-panel'); if (_ic) _ic.style.display = 'none'; }
   } catch (e) {}
   requestAnimationFrame(gameLoop);
 }
@@ -23432,7 +23442,7 @@ function mpReset() {
 function mpTeardownUI() {
   try { mpReset(); } catch (e) {}
   MP.started = false; MP.peerNick = ''; MP.ping = 0; MP.phase = 'battle'; MP.siteDamage = {};
-  ['mp-hud', 'mp-status', 'mp-chat', 'mp-opfor-info', 'mp-deploy-overlay', 'mp-usa-panel', 'mp-aid-btn'].forEach(function (id) {
+  ['mp-hud', 'mp-status', 'mp-chat', 'mp-opfor-info', 'mp-deploy-overlay', 'mp-usa-panel', 'mp-aid-btn', 'us-panel', 'iran-panel', 'iran-cmd-panel', 'us-perm-modal', 'iran-perm-modal'].forEach(function (id) {
     const e = el(id); if (e && e.parentNode) e.parentNode.removeChild(e);
   });
 }
@@ -23718,7 +23728,7 @@ function mpBuildSnapshot() {
     esc: Math.round(MP.escalation), unl: Object.assign({}, MP.unlocked), gf: MP.guestFaction,
     ars: MP.arsenal, rel: mpReloadRemaining(),
     op: Math.round(MP.scoreOpf || 0), dfd: Math.round((st.intercepted || 0) * 10), cas: MP.casualties || 0,
-    war: Math.round(MP.warRisk || 0), wd: MP.warDeclared ? 1 : 0,
+    war: Math.round(MP.warRisk || 0), wd: MP.warDeclared ? 1 : 0, ui: Math.round(state.usInvolvement || 0),   // v2.26.7 — sync US involvement so US targets become attackable on the attacker's client
     smug: (function () { const o = {}, nw = Date.now(); FACTION_ORDER.forEach(function (f) { o[f] = Math.max(0, ((MP.smuggleReadyBy && MP.smuggleReadyBy[f]) || 0) - nw); }); return o; })(),
     th: th, ic: ic, ct: ct, fx: fx,
     as: (state.airstrikes || []).filter(function (a) { return !a.done; }).map(function (a) { return { id: a.id, cla: r5(a.curLat), clo: r5(a.curLon), tla: r5(a.targetLat), tlo: r5(a.targetLon) }; }),
@@ -23757,6 +23767,7 @@ function mpGuestOnMessage(msg) {
     case 'phase': MP.phase = msg.phase || 'battle'; if (MP.phase === 'battle') mpHideDeployOverlay(); else mpShowDeployOverlay(); break;   // v2.25.11
     case 'pause': mpApplyRemotePause(!!msg.paused); break;
     case 'redline': if (typeof showNotification === 'function') showNotification(msg.title || '🔴 RED LINE', msg.body || '', 'danger'); if (typeof logEvent === 'function') logEvent('🔴 ' + (msg.title || 'RED LINE'), 'danger'); break;   // v2.26.4 — OPFOR sees red-line crises
+    case 'axistask': state.iranTask = msg.task; if (typeof showNotification === 'function') showNotification('☪ TEHRAN DIRECTIVE', msg.task, 'info'); break;   // v2.26.7 #8 — axis factions see Iran's directive
   }
 }
 function mpGuestApplySnapshot(s) {
@@ -23765,6 +23776,7 @@ function mpGuestApplySnapshot(s) {
   MP.lastSnapAt = now;                 // v2.25.3 — heartbeat: last time real state arrived from the host
   state.gameTime = s.gt; state.dayNight = s.dn;
   MP.escalation = s.esc;
+  if (s.ui != null) state.usInvolvement = s.ui;   // v2.26.7 — US involvement (drives usAtWar / attackable US targets)
   if (!MP.ffa) { MP.unlocked = s.unl || MP.unlocked; MP.guestFaction = s.gf || MP.guestFaction; }   // FFA: keep my own faction lock
   MP.arsenal = s.ars || MP.arsenal; MP.reloadRemaining = s.rel || {}; MP.guestStats = s.st || null;
   MP.scoreOpf = s.op || 0; MP.scoreDef = s.dfd || 0; MP.casualties = s.cas || 0;
@@ -24096,6 +24108,7 @@ function mpFfaHostOnMessage(msg, cRec) {
   if (msg.t === 'launch') { if (cRec.faction && cRec.faction === msg.faction) mpHostApplyLaunch(msg); return; }
   if (msg.t === 'smuggle') { if (cRec.faction && cRec.faction !== 'usa') mpHostSmuggle(cRec.faction); return; }
   if (msg.t === 'usaGrant') { if (cRec.faction === 'usa') mpFfaApplyUsaGrant(msg.kind); return; }
+  if (msg.t === 'axistask') { if (cRec.faction === 'iran') { state.iranTask = msg.task; if (typeof showNotification === 'function') showNotification('☪ TEHRAN DIRECTIVE', msg.task, 'info'); mpSend({ t: 'axistask', task: msg.task }); } return; }   // v2.26.7 #8 — Iran (guest) directive → host applies + rebroadcasts to the axis
 }
 function mpFfaBroadcastRoster() { if (MP.role === 'host') mpSend({ t: 'roster', owners: MP.factionOwners, usa: MP.usaPresent }); }
 function mpFfaHostStart() {
@@ -24210,11 +24223,21 @@ function mpFfaGuestStart() {
 /* ---- USA support ---- */
 function mpFfaApplyUsaGrant(kind) {
   if (MP.role !== 'host' || !state.active) return;
-  if (kind === 'money' || kind === 'package') state.money = (state.money || 0) + 5000000;
-  if (kind === 'interceptors' || kind === 'package') state.batteries.forEach(function (b) { b.ammo = Math.min(b.capacity || 999, (b.ammo || 0) + 10); });
-  if (kind === 'strikes' || kind === 'package') { state.strikesLeft = (state.strikesLeft || 0) + 3; const sc = el('strike-count'); if (sc) sc.textContent = state.strikesLeft; }
-  if (typeof showNotification === 'function') showNotification('🇺🇸 US SUPPORT', kind === 'package' ? 'Aid package: $5M + interceptors + strike tokens' : ('US delivered: ' + kind), 'success');
-  if (typeof logEvent === 'function') logEvent('🇺🇸 US support delivered: ' + kind, 'success');
+  if (typeof usInvEnsure === 'function') usInvEnsure();
+  // --- political AID (existing) ---
+  if (kind === 'money' || kind === 'interceptors' || kind === 'strikes' || kind === 'package') {
+    if (kind === 'money' || kind === 'package') state.money = (state.money || 0) + 5000000;
+    if (kind === 'interceptors' || kind === 'package') state.batteries.forEach(function (b) { b.ammo = Math.min(b.capacity || 999, (b.ammo || 0) + 10); });
+    if (kind === 'strikes' || kind === 'package') { state.strikesLeft = (state.strikesLeft || 0) + 3; const sc = el('strike-count'); if (sc) sc.textContent = state.strikesLeft; }
+    if (typeof showNotification === 'function') showNotification('🇺🇸 US SUPPORT', kind === 'package' ? 'Aid package: $5M + interceptors + strike tokens' : ('US delivered: ' + kind), 'success');
+    if (typeof logEvent === 'function') logEvent('🇺🇸 US support delivered: ' + kind, 'success');
+    return;
+  }
+  // --- MILITARY actions (v2.26.7 #9): raise involvement, real effect, political cost ---
+  if (kind === 'carrier') { usInvSet(usInvVal() + 15); state.batteries.forEach(function (b) { b.ammo = Math.min(b.capacity || 999, (b.ammo || 0) + 6); }); showNotification('🇺🇸 CARRIER DEPLOYED', 'A US carrier strike group moved into the region — involvement rising.', 'info'); logEvent('🇺🇸 US carrier strike group deployed', 'info'); }
+  else if (kind === 'fighters') { usInvSet(usInvVal() + 12); state.batteries.forEach(function (b) { b.ammo = Math.min(b.capacity || 999, (b.ammo || 0) + 8); }); showNotification('🇺🇸 US AIR SUPPORT', 'US fighters & air-defense reinforce Israeli skies — active intercepts.', 'success'); logEvent('🇺🇸 US fighters + AD committed', 'success'); }
+  else if (kind === 'strikeIran') { usInvSet(usInvVal() + 20); if (typeof MP !== 'undefined' && MP.enabled) { MP.escalation = Math.min(100, (MP.escalation || 0) + 12); if (typeof mpEscHoldMajor === 'function') mpEscHoldMajor(2); } const it = (state.enemyTargets || []).find(function (t) { return t.faction === 'iran' && t.alive !== false && (t.importance || 0) >= 8; }); if (it) { it.damage = Math.min(100, (it.damage || 0) + 60); if (it.damage >= 100) { it.alive = false; it.damage = 100; } if (typeof enemyTargetHitFx === 'function') enemyTargetHitFx(it, it.alive === false); } showNotification('🇺🇸 US STRIKE ON IRAN', 'US forces struck an Iranian strategic target — major escalation.', 'danger'); logEvent('🇺🇸 US strike on Iran', 'danger'); }
+  else if (kind === 'enterWar') { usInvSet(Math.max(usInvVal(), 90)); state.usHasCasusBelli = true; if (typeof MP !== 'undefined' && MP.enabled) { MP.escalation = Math.min(100, (MP.escalation || 0) + 15); if (typeof mpEscHoldMajor === 'function') mpEscHoldMajor(3); } showNotification('🇺🇸 US ENTERS THE WAR', 'The United States enters the war directly — its assets are now in the fight, and become targets.', 'danger'); logEvent('🔴 US ENTERS THE WAR DIRECTLY', 'danger'); }
 }
 function mpFfaRequestUsAid() {
   const now = Date.now();
@@ -24240,9 +24263,14 @@ function mpFfaInstallUsaPanel() {
       '<button class="mp-usa-btn" data-kind="money" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(40,90,150,.3);border:1px solid #5b8def;color:#bfe0ff;border-radius:4px;cursor:pointer;">💵 Send $5M</button>' +
       '<button class="mp-usa-btn" data-kind="interceptors" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(40,90,150,.3);border:1px solid #5b8def;color:#bfe0ff;border-radius:4px;cursor:pointer;">🚀 Refill interceptors</button>' +
       '<button class="mp-usa-btn" data-kind="strikes" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(40,90,150,.3);border:1px solid #5b8def;color:#bfe0ff;border-radius:4px;cursor:pointer;">✈ +3 strike tokens</button>' +
-      '<button class="mp-usa-btn" data-kind="package" style="width:100%;padding:7px;background:rgba(39,174,96,.25);border:1px solid #27ae60;color:#9fffc0;border-radius:4px;cursor:pointer;">📦 Full aid package</button>';
+      '<button class="mp-usa-btn" data-kind="package" style="width:100%;padding:7px;background:rgba(39,174,96,.25);border:1px solid #27ae60;color:#9fffc0;border-radius:4px;cursor:pointer;">📦 Full aid package</button>' +
+      '<div style="margin:9px 0 4px;color:#9fbada;font-size:10px;letter-spacing:1px;border-top:1px solid rgba(91,141,239,.3);padding-top:7px;">MILITARY — raises US involvement</div>' +
+      '<button class="mp-usa-btn" data-kind="carrier" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(70,70,120,.3);border:1px solid #8a8adf;color:#cfcfff;border-radius:4px;cursor:pointer;">⚓ Deploy carrier group</button>' +
+      '<button class="mp-usa-btn" data-kind="fighters" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(70,70,120,.3);border:1px solid #8a8adf;color:#cfcfff;border-radius:4px;cursor:pointer;">✈ Fighters + AD (intercept)</button>' +
+      '<button class="mp-usa-btn" data-kind="strikeIran" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(150,60,40,.3);border:1px solid #cf5b3a;color:#ffb3a0;border-radius:4px;cursor:pointer;">💥 Strike Iran</button>' +
+      '<button class="mp-usa-btn" data-kind="enterWar" style="width:100%;padding:7px;background:rgba(180,30,30,.35);border:1px solid #ff3b30;color:#ff8a76;border-radius:4px;cursor:pointer;">⚔ Enter the war</button>';
     document.body.appendChild(p);
-    p.querySelectorAll('.mp-usa-btn').forEach(function (b) { b.onclick = function () { mpSend({ t: 'usaGrant', kind: b.dataset.kind }); mpToast('Sent ' + b.dataset.kind + ' to Israel', 'success'); const r = el('mp-usa-req'); if (r) r.style.display = 'none'; }; });
+    p.querySelectorAll('.mp-usa-btn').forEach(function (b) { b.onclick = function () { const k = b.dataset.kind; if (MP.role === 'host') mpFfaApplyUsaGrant(k); else mpSend({ t: 'usaGrant', kind: k }); mpToast('US action: ' + k, 'success'); const r = el('mp-usa-req'); if (r) r.style.display = 'none'; }; });
   }
   p.style.display = 'block';
 }
@@ -24654,6 +24682,41 @@ function drawUSTargets() {
     ctx.fillText(letter, p[0], p[1] + sz * 0.38); ctx.textAlign = 'left';
     if (camera.zoom >= 6) { ctx.font = '9px Consolas'; ctx.fillStyle = col; ctx.textAlign = 'center'; ctx.fillText('US ' + t.name, p[0], p[1] - sz - 4); ctx.textAlign = 'left'; }
   });
+}
+
+// v2.26.7 #8 — IRAN PLAYER CONTROLS: issue directives to the axis + reinforce it. (Iran also strikes
+// directly via the normal attacker launch — it is exempt from its own coordination gate.)
+const IRAN_TASKS = ['Intensify the northern front', 'Open pressure from the south', 'Launch drone swarms', 'Strike a military base', 'Distract Israeli air defense', 'Do NOT touch the US', 'Do NOT hit Israel’s center', 'Conserve for the next wave', 'Synchronized attack — all fronts'];
+function iranIssueDirective(task) {
+  state.iranTask = task;
+  if (typeof showNotification === 'function') showNotification('☪ TEHRAN DIRECTIVE', task, 'info');
+  if (typeof logEvent === 'function') logEvent('☪ Iran directive: ' + task, 'info');
+  if (typeof MP !== 'undefined' && MP.enabled && typeof mpSend === 'function') { try { mpSend({ t: 'axistask', task: task }); } catch (e) {} }
+}
+function iranReinforce() {
+  iranEnsure();
+  iranSetControl(iranControlVal() + 10);
+  state.iranChaos = Math.max(0, (state.iranChaos || 0) - 12);
+  if (typeof MP !== 'undefined' && MP.enabled && MP.role === 'host' && MP.smuggleReadyBy) { Object.keys(MP.smuggleReadyBy).forEach(function (f) { MP.smuggleReadyBy[f] = Math.max(0, (MP.smuggleReadyBy[f] || 0) - 15000); }); }   // speed allied resupply
+  if (typeof showNotification === 'function') showNotification('☪ AXIS REINFORCED', 'Tehran tightens coordination — axis control +10, chaos down, allied resupply sped up.', 'success');
+  if (typeof logEvent === 'function') logEvent('☪ Iran reinforced the axis (control ' + Math.round(iranControlVal()) + ')', 'success');
+}
+function mpInstallIranPanel() {
+  let p = el('iran-cmd-panel');
+  if (!p) {
+    p = document.createElement('div'); p.id = 'iran-cmd-panel';
+    p.style.cssText = 'position:fixed;top:70px;left:8px;z-index:9001;background:rgba(24,12,12,0.95);border:1px solid #cf5b3a;border-radius:8px;padding:12px;color:#edd;font:12px/1.5 sans-serif;width:230px;';
+    p.innerHTML = '<div style="color:#ff9b6b;font-weight:bold;letter-spacing:1px;margin-bottom:8px;">☪ IRAN · AXIS COMMAND</div>' +
+      '<div id="iran-cmd-task" style="background:rgba(207,91,58,.15);border:1px solid #cf5b3a;color:#ffd9c8;padding:5px 8px;border-radius:4px;margin-bottom:8px;font-size:11px;">No active directive</div>' +
+      '<button id="iran-cmd-issue" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(150,60,40,.3);border:1px solid #cf5b3a;color:#ffb3a0;border-radius:4px;cursor:pointer;">☪ Issue directive ▸</button>' +
+      '<button id="iran-cmd-reinforce" style="width:100%;padding:7px;background:rgba(39,174,96,.22);border:1px solid #27ae60;color:#9fffc0;border-radius:4px;cursor:pointer;">⬆ Reinforce axis (+control)</button>' +
+      '<div style="color:#9fbada;font-size:10px;margin-top:6px;">You can also strike directly — Iran is exempt from coordination.</div>';
+    document.body.appendChild(p);
+    el('iran-cmd-issue').onclick = function () { state._iranTaskIdx = ((state._iranTaskIdx == null ? -1 : state._iranTaskIdx) + 1) % IRAN_TASKS.length; iranIssueDirective(IRAN_TASKS[state._iranTaskIdx]); };
+    el('iran-cmd-reinforce').onclick = function () { iranReinforce(); };
+  }
+  const t = el('iran-cmd-task'); if (t) t.textContent = state.iranTask ? ('Directive: ' + state.iranTask) : 'No active directive';
+  p.style.display = 'block';
 }
 
 /* ---------------- FX capture (host) — wrap the two FX entry points ---------------- */
