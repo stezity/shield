@@ -2182,6 +2182,12 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.26.8  — FIX: USA player never saw Israel's aid requests. (1) mpFfaRequestUsAid now ALWAYS broadcasts
+//            usaReq (was gated by MP.usaPresent, which silently routed to the AI auto-grant if the flag was
+//            stale) + shows locally when the host IS the USA player. (2) AI Israel (host plays an attacker/
+//            USA → Israel is AI and can't click the button) auto-requests aid from the USA player once the
+//            war heats up (escalation>=35, throttled). (3) The USA-side alert is now a prominent center
+//            notification (+ banner + toast + alarm), not just a small panel banner.
 //   2.26.7  — COMPLETES the second mega-spec (#8 rest + #9 rest). US PLAYER MILITARY ACTIONS: the USA panel
 //            gains Deploy carrier / Fighters+AD / Strike Iran / Enter the war — each raises usInvolvement
 //            with real effect + political cost (host applies; guest sends usaGrant). usInvolvement is now
@@ -3348,7 +3354,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.26.7';
+const GAME_VERSION = '2.26.8';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -14047,6 +14053,7 @@ function gameLoop(time) {
       if (typeof tickStrikeOnSight === 'function') tickStrikeOnSight(dt);   // v2.25.11 — Strike-on-Sight doctrine
       if (typeof tickRedLines === 'function') tickRedLines(dt);             // v2.26.4 — red-line crisis triggers (#7)
       if (typeof usInvolvementTick === 'function') usInvolvementTick(dt);   // v2.26.6 — US drawn in by escalation (#9)
+      if (typeof mpAiIsraelMaybeRequestAid === 'function') mpAiIsraelMaybeRequestAid();   // v2.26.8 — AI Israel asks the USA player for help
       updateCivilian(dt);
       updateIntel(dt);
       updateCyberStatus(dt);
@@ -24243,8 +24250,25 @@ function mpFfaRequestUsAid() {
   const now = Date.now();
   if (now < (MP.usaReqAt || 0)) { mpToast('US aid on cooldown (' + Math.ceil((MP.usaReqAt - now) / 1000) + 's)', 'warn'); return; }
   MP.usaReqAt = now + 30000;
-  if (MP.usaPresent) { mpSend({ t: 'usaReq' }); mpToast('Requested US aid — awaiting the US player', 'info'); }
-  else { mpToast('Requesting US aid…', 'info'); setTimeout(function () { if (MP.enabled && MP.role === 'host') { mpFfaApplyUsaGrant('package'); } }, 4000); }
+  mpSend({ t: 'usaReq' });   // v2.26.8 — ALWAYS broadcast so a USA player sees it even if the usaPresent flag is stale
+  if (MP.myFaction === 'usa') mpFfaUsaShowRequest();   // host IS the USA player → show locally
+  if (MP.usaPresent || MP.myFaction === 'usa') { mpToast('Requested US aid — awaiting the US player', 'info'); }
+  else { mpToast('Requesting US aid…', 'info'); setTimeout(function () { if (MP.enabled && MP.role === 'host' && !MP.usaPresent) { mpFfaApplyUsaGrant('package'); } }, 4000); }
+}
+// v2.26.8 — when Israel is AI-defended (the host plays an attacker/USA) it can't click the button, so the
+// AI asks the USA player for help on its own once the war heats up. Runs on the host; reaches a USA guest
+// via usaReq and the USA host locally.
+function mpAiIsraelMaybeRequestAid() {
+  if (MP.role !== 'host' || !MP.ffa) return;
+  if (!MP.myFaction || MP.myFaction === 'israel') return;     // human Israel host uses the button
+  if (!(MP.usaPresent || MP.myFaction === 'usa')) return;     // nobody to ask
+  if ((MP.escalation || 0) < 35) return;                      // only under real pressure
+  const now = Date.now();
+  if (now < (MP._aiAidAt || 0)) return;
+  MP._aiAidAt = now + 50000;
+  mpSend({ t: 'usaReq' });
+  if (MP.myFaction === 'usa') mpFfaUsaShowRequest();
+  if (typeof mpChatAppend === 'function') mpChatAppend('—', 'Israel (AI) requests US assistance — under heavy fire.', true);
 }
 function mpFfaInstallIsraelAidButton() {
   if (el('mp-aid-btn')) return;
@@ -24274,7 +24298,7 @@ function mpFfaInstallUsaPanel() {
   }
   p.style.display = 'block';
 }
-function mpFfaUsaShowRequest() { const r = el('mp-usa-req'); if (r) r.style.display = 'block'; mpToast('Israel is requesting US aid', 'warn'); try { audio.alarm(); } catch (e) {} }
+function mpFfaUsaShowRequest() { const r = el('mp-usa-req'); if (r) { r.style.display = 'block'; r.textContent = '⚠ ISRAEL REQUESTS AID — respond below'; } if (typeof showNotification === 'function') showNotification('🇺🇸 ISRAEL REQUESTS AID', 'Israel is asking for US assistance — send money / interceptors / strikes, or act militarily.', 'warn'); mpToast('Israel is requesting US aid', 'warn'); try { audio.alarm(); } catch (e) {} }
 
 /* ---- FFA lobby UI ---- */
 function mpFfaLobbyStatus(s, extra) {
