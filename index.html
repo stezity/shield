@@ -2182,6 +2182,15 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.26.2  — Escalation/radius overhaul, stage 1 of 3 (user mega-spec). (4) ESCALATION HOLD/INERTIA:
+//            after a major event the meter HOLDS (no decay) for a window LONGER than any reload, then
+//            decays SLOWLY — slower the higher it is (≥85 ≈ stays hot). Tunable ESC_HOLD_* params; ×1.6
+//            in multiplayer. Fixes the stated pain (it used to fall in seconds, before the next salvo).
+//            (2) RADIUS scope: the escalation→reach gate is Hamas/Hezbollah-only; Iran/Houthi are
+//            unlimited (state arsenals). (3) VISUAL RADIUS: translucent reach circles for Hamas (orange,
+//            Gaza) / Hezbollah (yellow, S.Lebanon) around launch sites, growing with escalation.
+//            NEXT STAGES: (1) US relations/permissions, (5) MP faction queues/UI, (6/7) more targets +
+//            hit FX + red-lines.
 //   2.26.1  — FFA lobby fix + host can pick a side (user: "игра считает меня израилем"). BUG: `.hidden`
 //            only hides `.fullscreen` elements, so the FFA sub-panels never hid → host+join panels showed
 //            at once and you got stuck as Israel. Fixed: lobby show/hide toggles class AND inline display;
@@ -3290,7 +3299,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.26.1';
+const GAME_VERSION = '2.26.2';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -6894,7 +6903,7 @@ function render() {
   if (L.territories !== false) drawTerritories();
   if (L.orefZones !== false) { try { drawOrefAlertZones(); } catch (e) { console.error('[OREF] render error:', e); } }
   if (L.hostileRegions !== false) drawHostileRegions();
-  if (state.playAs === 'attacker') drawAttackerBases();
+  if (state.playAs === 'attacker') { if (typeof mpDrawReachZone === 'function') mpDrawReachZone(); drawAttackerBases(); }
   if (Date.now() < (state.intelRevealUntil || 0)) drawIntelReveal();
   if (state.tsts && state.tsts.length > 0) drawTSTMarkers();
   if (L.enemyTargets !== false) drawEnemyTargets();
@@ -12317,6 +12326,7 @@ function handleImpact(threat, smallBlast) {
       esc += Math.min(20, (threat.distanceKm || 0) * 0.06);
       if (cas > 0) esc += Math.min(18, cas * 0.5);
       MP.escalation = Math.min(100, (MP.escalation || 0) + esc);
+      mpEscHoldMajor(strategic ? 1.4 : 1);   // v2.26.2 — a real impact holds escalation high for a while
       if (cas > 0 || strategic) {
         MP.warRisk = Math.min(100, (MP.warRisk || 0) + (cas > 0 ? Math.min(22, 4 + cas * 0.5) : 0) + (strategic ? 6 : 0));
         // "chance of war": each casualty-causing strike rolls against the rising war-risk meter
@@ -23122,7 +23132,7 @@ var MP = (window.MP = {
   scoreOpf: 0, scoreDef: 0, casualties: 0, warRisk: 0, warDeclared: false,
   smuggleReady: 0, smuggleRemaining: 0, _regenAt: 0, _orefSig: '', _orefAt: 0,
   nick: 'Player', peerNick: '', ping: 0, phase: 'battle', siteDamage: {},
-  ffa: false, conns: [], myFaction: null, factionOwners: {}, usaPresent: false, usaReqAt: 0,
+  ffa: false, conns: [], myFaction: null, factionOwners: {}, usaPresent: false, usaReqAt: 0, escHoldUntil: 0,
   _peerLoading: false, _peerWaiters: [], _origFlash: null, _origExpl: null
 });
 const MP_REGEN_MULT = 1.0;   // passive resupply rate multiplier (smuggling gives the bursts)
@@ -23279,7 +23289,7 @@ function mpTeardownUI() {
 
 /* ============================ HOST ============================ */
 function mpInitHostEconomy() {
-  MP.escalation = 0; MP.warRisk = 0; MP.warDeclared = false;
+  MP.escalation = 0; MP.warRisk = 0; MP.warDeclared = false; MP.escHoldUntil = 0;
   MP.scoreOpf = 0; MP.casualties = 0; MP.smuggleReady = 0; MP.smuggleReadyBy = {}; MP._regenAt = 0; MP._orefSig = ''; MP._orefAt = 0;
   MP.unlocked = { hamas: false, hezbollah: false, iran: false, houthi: false };
   MP.arsenal = {}; MP.reload = {};
@@ -23365,13 +23375,24 @@ function mpHostApplyLaunch(cmd) {
 }
 function mpBumpEscalation(type, salvo) {
   const W = { mortar: 0.3, rocket: 0.5, heavyRocket: 1.2, drone: 0.8, cruise: 1.5, tacBallistic: 2.5, ballistic: 4, cluster: 5, submunition: 0.2 };
-  MP.escalation = Math.min(100, MP.escalation + (W[type] || 1) * Math.min(salvo, 20) * 0.6);
+  const gain = (W[type] || 1) * Math.min(salvo, 20) * 0.6;
+  MP.escalation = Math.min(100, MP.escalation + gain);
+  mpEscHold(Math.max(30000, gain * 9000));   // v2.26.2 — even a small launch holds ≥30s (> reload); big salvos hold much longer
   mpRecomputeUnlocks();
 }
 function mpRecomputeUnlocks() {
   const intense = MP.warDeclared || MP.escalation >= 40;
   FACTION_ORDER.forEach((fid) => { MP.unlocked[fid] = (fid === MP.guestFaction) || intense; });
 }
+// v2.26.2 — ESCALATION HOLD/INERTIA params (tunable). After a major event the meter "holds" (no
+// decay) for a window LONGER than any reload, so the level + radius persist between salvos; then it
+// decays slowly — slower the higher it is. Multiplayer holds even longer (several factions react).
+const ESC_HOLD_BASE_MS = 90000;     // base hold after a major event (impact / deep strike)
+const ESC_HOLD_MP_MULT = 1.6;       // multiplayer hold multiplier
+const ESC_HOLD_DEFY_MULT = 1.8;     // (used by the US system) defying the US holds escalation longer
+function mpEscLevelHoldMult(e) { return e >= 85 ? 3.0 : e >= 60 ? 2.2 : e >= 30 ? 1.5 : 1.0; }
+function mpEscHold(ms) { MP.escHoldUntil = Math.max(MP.escHoldUntil || 0, Date.now() + ms * (MP.ffa ? ESC_HOLD_MP_MULT : 1)); }
+function mpEscHoldMajor(mult) { mpEscHold(ESC_HOLD_BASE_MS * mpEscLevelHoldMult(MP.escalation) * (mult || 1)); }
 // v2.25.5 — ESCALATION → REACH. Low escalation = short, border-only strikes; high escalation opens
 // deep, long-range strikes. Reach is the max km a faction may strike from its launch site, ramping
 // with escalation. Hamas/Hezbollah graduate border→deep; Iran/Houthi are deep by nature (their floor
@@ -23383,9 +23404,38 @@ const MP_REACH = {
   houthi:    { floor: 1700, span: 520 }
 };
 function mpReachKm(fid) {
+  if (fid === 'iran' || fid === 'houthi') return 99999;   // v2.26.2 — states have long-range arsenals: no escalation radius gate (only weapon range)
   const r = MP_REACH[fid] || { floor: 45, span: 220 };
   const e = Math.max(0, Math.min(100, MP.escalation || 0));
   return r.floor + Math.pow(e / 100, 1.4) * r.span;
+}
+// v2.26.2 — VISUAL shooting radius: translucent reach circles for Hamas/Hezbollah around their launch
+// sites, scaling with escalation. States (Iran/Houthi) are unlimited → no circle. Drawn for the local
+// attacker so the player sees which cities are in range and how the zone grows as the war escalates.
+function mpDrawReachZone() {
+  if (!MP.enabled || typeof ctx === 'undefined' || !ctx) return;
+  const fid = (state.attackMode && state.attackMode.faction) || MP.myFaction || MP.guestFaction;
+  if (fid !== 'hamas' && fid !== 'hezbollah') return;
+  const e = ENEMIES[fid]; if (!e || !e.launchSites) return;
+  const reachKm = mpReachKm(fid);
+  if (!isFinite(reachKm) || reachKm > 4000) return;
+  const col = fid === 'hamas' ? '255,120,40' : '255,210,60';
+  ctx.save();
+  ctx.lineWidth = 1.5;
+  e.launchSites.forEach(function (s) {
+    const cosLat = Math.cos(s.lat * Math.PI / 180) || 1;
+    ctx.beginPath();
+    for (let a = 0; a <= 360; a += 12) {
+      const rad = a * Math.PI / 180;
+      const p = geoToScreen(s.lat + (reachKm / 111) * Math.cos(rad), s.lon + (reachKm / (111 * cosLat)) * Math.sin(rad));
+      if (!isFinite(p[0]) || !isFinite(p[1])) continue;
+      if (a === 0) ctx.moveTo(p[0], p[1]); else ctx.lineTo(p[0], p[1]);
+    }
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(' + col + ',0.045)'; ctx.fill();
+    ctx.strokeStyle = 'rgba(' + col + ',0.32)'; ctx.stroke();
+  });
+  ctx.restore();
 }
 // Symbolic enemy capitals — striking these (or near them) escalates hard.
 const MP_SYMBOLIC = [
@@ -23408,6 +23458,7 @@ function mpEscalateDefenderStrike(lat, lon, target) {
   esc += ((target && target.importance) || 0) * 0.8;
   MP.escalation = Math.min(100, (MP.escalation || 0) + esc);
   MP.warRisk = Math.min(100, (MP.warRisk || 0) + (sym ? 8 : 2));
+  mpEscHoldMajor(sym ? 1.6 : 1);   // v2.26.2 — a deep/symbolic strike holds escalation high
   mpRecomputeUnlocks();
   if (sym && typeof logEvent === 'function') logEvent('⚠ Deep strike on ' + sym + ' — escalation spikes', 'danger');
 }
@@ -23447,8 +23498,15 @@ function mpHostMaybeSnapshot(dt) {
   if (!MP.connected) return;
   const now = Date.now();
   if (now - MP.lastRecvAt > 9000 && !MP._lostNotified) mpOnPeerLost('timeout');   // notify once, keep simulating (no auto-pause)
-  if (MP.escalation > 0) { MP.escalation = Math.max(0, MP.escalation - dt * 0.0015); mpRecomputeUnlocks(); }
-  if (MP.warRisk > 0 && !MP.warDeclared) MP.warRisk = Math.max(0, MP.warRisk - dt * 0.0008);   // war risk cools without fresh casualties
+  // v2.26.2 — ESCALATION HOLD/INERTIA: hold (no decay) until escHoldUntil, then decay SLOWLY — slower
+  // the higher it is (critical ≈ stays hot). Hold > reload, so the level/radius persists between salvos.
+  if (MP.escalation > 0 && Date.now() > (MP.escHoldUntil || 0)) {
+    const e = MP.escalation;
+    const rate = e >= 85 ? 0.05 : e >= 60 ? 0.15 : e >= 30 ? 0.30 : 0.60;   // per second
+    MP.escalation = Math.max(0, e - rate * (dt / 1000));
+    mpRecomputeUnlocks();
+  }
+  if (MP.warRisk > 0 && !MP.warDeclared && Date.now() > (MP.escHoldUntil || 0)) MP.warRisk = Math.max(0, MP.warRisk - 0.05 * (dt / 1000));
   // v2.25.4 — passive arsenal resupply trickle (smuggling gives the bursts)
   if (!MP._regenAt) MP._regenAt = now;
   if (now - MP._regenAt >= 1000) {
