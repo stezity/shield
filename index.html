@@ -1285,6 +1285,11 @@ body.targeting-cursor #map-canvas {
   <div class="menu-title" style="font-size:46px; letter-spacing:8px; color:#7fd1ff;">MULTIPLAYER</div>
   <div class="menu-subtitle">1v1 · DEFENDER vs OPFOR · PEER-TO-PEER (ROOM CODE)</div>
 
+  <div style="margin:14px 0 4px;">
+    <input id="mp-nick" maxlength="16" placeholder="Your nickname" autocomplete="off" spellcheck="false"
+           style="width:260px; text-align:center; font-size:15px; background:rgba(20,30,45,0.9); border:1px solid #2e6da4; color:#cfe8ff; padding:8px 10px; border-radius:5px;">
+  </div>
+
   <!-- role choice -->
   <div class="scenarios" id="mp-role-row" style="grid-template-columns:repeat(2,1fr); max-width:820px;">
     <div class="scenario-card" id="mp-host-card" style="border-left-color:#00d4ff; cursor:pointer;">
@@ -2125,6 +2130,13 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.25.6  — MP QoL (user): (1) NO auto-pause on window blur/minimize in multiplayer (alt-tabbing
+//            must not pause/desync a live PvP match) — the blur auto-pause now early-returns when
+//            MP is active. (2) PING display: both sides send timestamped pings, reply pongs, and
+//            show live RTT in the HUD heartbeat ("◑ live · 45ms"). (3) CHAT + nicknames: pick a
+//            nickname in the lobby (saved to localStorage, exchanged on connect, shown in the HUD);
+//            an in-game chat panel (bottom-right, minimizable) sends/receives over the datachannel.
+//            Chat input stops key propagation so typing never triggers game hotkeys.
 //   2.25.5  — MP escalation→reach mechanic (user). (1) Escalation now scales with strike DEPTH +
 //            seriousness: an OPFOR hit deeper into Israel escalates harder (distanceKm term); a
 //            DEFENDER air strike deeper into enemy land escalates more, and the symbolic capitals
@@ -3165,7 +3177,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.25.5';
+const GAME_VERSION = '2.25.6';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -22567,6 +22579,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // === QoL: auto-pause when window loses focus (alt-tab / minimize), only if game is active ===
   // Restores prior state on refocus (does NOT auto-resume — player presses ▶).
   window.addEventListener('blur', () => {
+    if (typeof MP !== 'undefined' && MP.enabled) return;   // v2.25.6 — no auto-pause in multiplayer (alt-tab/minimize must not pause a live PvP match)
     if (state.active && !state.ended && !state.paused) {
       state.paused = true;
       const btn = document.getElementById('btn-pause');
@@ -22952,6 +22965,7 @@ var MP = (window.MP = {
   guestStats: null, onStatus: null,
   scoreOpf: 0, scoreDef: 0, casualties: 0, warRisk: 0, warDeclared: false,
   smuggleReady: 0, smuggleRemaining: 0, _regenAt: 0, _orefSig: '', _orefAt: 0,
+  nick: 'Player', peerNick: '', ping: 0,
   _peerLoading: false, _peerWaiters: [], _origFlash: null, _origExpl: null
 });
 const MP_REGEN_MULT = 1.0;   // passive resupply rate multiplier (smuggling gives the bursts)
@@ -22995,6 +23009,7 @@ function mpToast(msg, type) { if (typeof showNotification === 'function') showNo
 /* ---------------- connection ---------------- */
 function mpHostCreate() {
   MP.role = 'host';
+  mpReadNick();
   mpEnsurePeer((ok) => {
     if (!ok) { mpStatus('error', 'could not load PeerJS (network?)'); return; }
     let attempt = 0;
@@ -23018,6 +23033,7 @@ function mpHostCreate() {
 }
 function mpGuestJoin(code) {
   MP.role = 'guest';
+  mpReadNick();
   mpEnsurePeer((ok) => {
     if (!ok) { mpStatus('error', 'could not load PeerJS (network?)'); return; }
     let peer; try { peer = new Peer({ debug: 1 }); } catch (e) { mpStatus('error', String(e)); return; }
@@ -23035,6 +23051,7 @@ function mpWireConn(conn) {
   conn.on('open', () => {
     MP.connected = true; MP.lastRecvAt = Date.now();
     mpStatus('connected');
+    mpSend({ t: 'nick', nick: MP.nick });   // v2.25.6 — exchange nicknames
     if (MP.role === 'host') mpSend({ t: 'hello', ver: GAME_VERSION });
   });
   conn.on('data', (msg) => mpOnMessage(msg));
@@ -23050,6 +23067,11 @@ function mpOnMessage(msg) {
     const dot = el('mp-hud-conn'); if (dot) { dot.style.color = '#7fffb0'; dot.textContent = '●'; }
     if (MP.enabled) mpToast('Opponent reconnected', 'info');
   }
+  // v2.25.6 — ping/pong (RTT), chat + nickname — handled for BOTH roles here
+  if (msg.t === 'ping') { mpSend({ t: 'pong', ts: msg.ts }); return; }
+  if (msg.t === 'pong') { if (msg.ts) MP.ping = Math.max(0, Math.min(9999, Date.now() - msg.ts)); return; }
+  if (msg.t === 'nick') { MP.peerNick = String(msg.nick || '').slice(0, 24) || 'OPPONENT'; return; }
+  if (msg.t === 'chat') { mpChatAppend(MP.peerNick || 'OPPONENT', msg.text, false); return; }
   if (MP.role === 'host') mpHostOnMessage(msg); else mpGuestOnMessage(msg);
 }
 function mpOnPeerLost(reason) {
@@ -23098,6 +23120,8 @@ function mpHostStart() {
   startScenario('mpHost');
   state.strikesLeft = Math.max(state.strikesLeft || 0, 99);   // v2.25.5 — defender can strike enemy territory (drives escalation)
   mpHudShow('DEFENDER');
+  mpEnsureChat();
+  mpChatAppend('—', 'You are DEFENDER. Good luck.', true);
 }
 function mpHostOnMessage(msg) {
   switch (msg.t) {
@@ -23255,14 +23279,16 @@ function mpHostMaybeSnapshot(dt) {
     }
   }
   mpRenderHostStatus();   // v2.25.4 — both sides see the conflict state (escalation/scores/war)
-  // v2.25.3 — host heartbeat in the HUD (loop-alive spinner / opponent-silent warning)
+  // v2.25.6 — host ping (RTT measurement)
+  if (!MP._hostPingAt || now - MP._hostPingAt > 2000) { MP._hostPingAt = now; mpSend({ t: 'ping', ts: now }); }
+  // v2.25.3 — host heartbeat in the HUD; v2.25.6 — with live ping
   if (!MP._hudAt || now - MP._hudAt > 250) {
     MP._hudAt = now;
     const dot = el('mp-hud-conn');
     if (dot) {
       const age = now - MP.lastRecvAt;
       if (age > 9000) { dot.style.color = '#ff5544'; dot.textContent = '○ opponent silent'; }
-      else { dot.style.color = '#7fffb0'; dot.textContent = ['◐', '◓', '◑', '◒'][Math.floor(now / 250) % 4] + ' live'; }
+      else { dot.style.color = '#7fffb0'; dot.textContent = ['◐', '◓', '◑', '◒'][Math.floor(now / 250) % 4] + ' live · ' + (MP.ping || '?') + 'ms'; }
     }
   }
   MP.snapAccum += dt;
@@ -23312,6 +23338,8 @@ function mpGuestStart(faction) {
   if (typeof renderAttackerWeapons === 'function') renderAttackerWeapons();
   document.querySelectorAll('.attacker-cheats, .attacker-cheats-header').forEach((e) => { e.style.display = 'none'; });  // host is authoritative
   mpHudShow('OPFOR');
+  mpEnsureChat();
+  mpChatAppend('—', 'You are OPFOR · ' + (MP.guestFaction || 'hamas').toUpperCase() + '. Good luck.', true);
 }
 function mpGuestOnMessage(msg) {
   switch (msg.t) {
@@ -23386,17 +23414,16 @@ function mpGuestTick(dt) {
     if (i.trail.length > 300) i.trail.shift();
   }
   MP._pingAccum = (MP._pingAccum || 0) + dt;
-  if (MP._pingAccum > 2000) { MP._pingAccum = 0; mpSend({ t: 'ping' }); }
+  if (MP._pingAccum > 2000) { MP._pingAccum = 0; mpSend({ t: 'ping', ts: now }); }   // v2.25.6 — timestamped ping for RTT
   if (MP.connected && now - MP.lastRecvAt > 9000 && !MP._lostNotified) mpOnPeerLost('timeout');
-  // v2.25.3 — visible heartbeat in the HUD: if the spinner keeps moving the loop is ALIVE; if it shows
-  // "no data Ns" the host's feed has stalled (a connection issue, not a freeze) — tells us which bug it is.
+  // v2.25.3 — visible heartbeat in the HUD; v2.25.6 — with live ping (RTT)
   if (!MP._hudAt || now - MP._hudAt > 250) {
     MP._hudAt = now;
     const dot = el('mp-hud-conn');
     if (dot) {
       const age = now - (MP.lastSnapAt || now);
       if (age > 3000) { dot.style.color = '#ff5544'; dot.textContent = '○ no data ' + Math.floor(age / 1000) + 's'; }
-      else { dot.style.color = '#7fffb0'; dot.textContent = ['◐', '◓', '◑', '◒'][Math.floor(now / 250) % 4] + ' live'; }
+      else { dot.style.color = '#7fffb0'; dot.textContent = ['◐', '◓', '◑', '◒'][Math.floor(now / 250) % 4] + ' live · ' + (MP.ping || '?') + 'ms'; }
     }
   }
 }
@@ -23472,7 +23499,47 @@ window.__mpSmuggle = function () { if (MP.enabled && MP.role === 'guest' && MP.c
 function mpHudShow(roleLabel) {
   let hud = el('mp-hud');
   if (!hud) { hud = document.createElement('div'); hud.id = 'mp-hud'; hud.style.cssText = 'position:fixed;top:6px;left:50%;transform:translateX(-50%);z-index:9000;background:rgba(10,20,35,0.92);border:1px solid #2e6da4;color:#7fd1ff;padding:4px 14px;font-size:11px;letter-spacing:2px;border-radius:4px;font-family:monospace;pointer-events:none;'; document.body.appendChild(hud); }
-  hud.innerHTML = `🌐 MULTIPLAYER · YOU: <b>${roleLabel}</b> · <span id="mp-hud-conn" style="color:#7fffb0;">●</span>`;
+  hud.innerHTML = `🌐 ${mpEscapeHtml(MP.nick || 'You')} (<b>${roleLabel}</b>) vs ${mpEscapeHtml(MP.peerNick || 'opponent')} · <span id="mp-hud-conn" style="color:#7fffb0;">●</span>`;
+}
+function mpEscapeHtml(s) { return String(s == null ? '' : s).replace(/[<>&]/g, function (c) { return { '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]; }); }
+function mpReadNick() {
+  const inp = el('mp-nick');
+  let n = ((inp && inp.value) || '').trim().slice(0, 16);
+  if (!n) n = 'Player' + Math.floor(Math.random() * 900 + 100);
+  MP.nick = n;
+  try { localStorage.setItem('shieldNick', n); } catch (e) {}
+}
+// v2.25.6 — in-game chat (over the same datachannel)
+function mpEnsureChat() {
+  if (el('mp-chat')) return;
+  const box = document.createElement('div');
+  box.id = 'mp-chat';
+  box.style.cssText = 'position:fixed;bottom:8px;right:8px;width:280px;z-index:9001;background:rgba(8,14,24,0.93);border:1px solid #2e6da4;border-radius:6px;font:12px/1.4 sans-serif;color:#cfe8ff;display:flex;flex-direction:column;box-shadow:0 4px 16px rgba(0,0,0,.5);';
+  box.innerHTML =
+    '<div style="padding:4px 8px;border-bottom:1px solid rgba(46,109,164,.5);color:#7fd1ff;font-weight:bold;letter-spacing:1px;font-size:11px;display:flex;justify-content:space-between;align-items:center;">💬 CHAT <span id="mp-chat-min" style="cursor:pointer;color:#9fbada;padding:0 6px;">—</span></div>' +
+    '<div id="mp-chat-body">' +
+    '<div id="mp-chat-log" style="height:118px;overflow-y:auto;padding:6px 8px;display:flex;flex-direction:column;gap:2px;"></div>' +
+    '<div style="display:flex;border-top:1px solid rgba(46,109,164,.5);">' +
+    '<input id="mp-chat-input" maxlength="200" placeholder="message…  (Enter)" autocomplete="off" spellcheck="false" style="flex:1;min-width:0;background:transparent;border:none;color:#fff;padding:6px 8px;outline:none;font-size:12px;">' +
+    '<button id="mp-chat-send" style="background:rgba(40,90,150,.4);border:none;color:#7fd1ff;padding:0 12px;cursor:pointer;">▶</button>' +
+    '</div></div>';
+  document.body.appendChild(box);
+  const input = el('mp-chat-input'), sendBtn = el('mp-chat-send');
+  const doSend = function () { const t = (input.value || '').trim(); if (!t) return; mpSend({ t: 'chat', text: t.slice(0, 200) }); mpChatAppend(MP.nick || 'YOU', t, true); input.value = ''; };
+  sendBtn.onclick = doSend;
+  // stopPropagation so typing doesn't fire game hotkeys (space=pause, 1/2, etc.)
+  input.addEventListener('keydown', function (e) { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); doSend(); } });
+  input.addEventListener('keyup', function (e) { e.stopPropagation(); });
+  el('mp-chat-min').onclick = function () { const b = el('mp-chat-body'); const hidden = b.style.display === 'none'; b.style.display = hidden ? 'block' : 'none'; el('mp-chat-min').textContent = hidden ? '—' : '+'; };
+}
+function mpChatAppend(who, text, self) {
+  mpEnsureChat();
+  const log2 = el('mp-chat-log'); if (!log2) return;
+  const div = document.createElement('div');
+  div.innerHTML = '<b style="color:' + (self ? '#7fffb0' : '#ff8a76') + '">' + mpEscapeHtml(who) + ':</b> ' + mpEscapeHtml(text);
+  log2.appendChild(div);
+  while (log2.children.length > 60) log2.removeChild(log2.firstChild);
+  log2.scrollTop = log2.scrollHeight;
 }
 
 /* ---------------- FX capture (host) — wrap the two FX entry points ---------------- */
@@ -23515,6 +23582,7 @@ function mpLobbyStatus(s, extra) {
 }
 (function mpWireLobby() {
   MP.onStatus = mpLobbyStatus;
+  try { const ni = el('mp-nick'); if (ni) ni.value = localStorage.getItem('shieldNick') || ''; } catch (e) {}
   const show = (id) => { const e = el(id); if (e) e.classList.remove('hidden'); };
   const hide = (id) => { const e = el(id); if (e) e.classList.add('hidden'); };
   function resetPanels() { show('mp-role-row'); hide('mp-host-panel'); hide('mp-join-panel'); hide('mp-join-faction'); const sb = el('mp-start-btn'); if (sb) sb.style.display = 'none'; }
