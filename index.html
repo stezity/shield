@@ -2130,6 +2130,12 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.25.9  — MP teardown on leaving to menu (user: HUD/status/chat lingered on the menu after
+//            quitting, and the match kept running). The body-level MP UI (mp-hud, mp-status, mp-chat,
+//            mp-opfor-info) is appended to <body>, so hiding game-container didn't remove it. New
+//            mpTeardownUI() drops the P2P connection (mpReset) AND removes those elements; called from
+//            btn-restart (MAIN MENU), btn-menu-end (SELECT SCENARIO) and btn-quit. (The endgame
+//            RETURN TO MENU already full-reloads.)
 //   2.25.8  — MP sync overhaul (user: guest threats/interceptors jerk; speed desync x5 vs x1). Root
 //            causes + fixes: (1) the guest extrapolated with speed-scaled `dt` while the velocity is
 //            WALL-CLOCK → at the guest's own x5 it raced ahead then snapped back each snapshot (the
@@ -3192,7 +3198,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.25.8';
+const GAME_VERSION = '2.25.9';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -22827,6 +22833,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('start-menu').classList.remove('hidden');
     state.active = false; state.ended = false;
     hideAttackerPanel();
+    if (typeof mpTeardownUI === 'function') mpTeardownUI();
   };
   document.getElementById('btn-menu-end').onclick = () => {
     audio.click();
@@ -22835,6 +22842,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('scenario-menu').classList.remove('hidden');
     state.active = false; state.ended = false;
     hideAttackerPanel();
+    if (typeof mpTeardownUI === 'function') mpTeardownUI();
   };
   document.getElementById('btn-quit').onclick = () => {
     if (confirm('Quit to main menu? Progress will be lost.')) {
@@ -22843,6 +22851,7 @@ document.addEventListener('DOMContentLoaded', () => {
       document.getElementById('game-container').style.display = 'none';
       document.getElementById('start-menu').classList.remove('hidden');
       hideAttackerPanel();
+      if (typeof mpTeardownUI === 'function') mpTeardownUI();
     }
   };
 
@@ -23119,6 +23128,15 @@ function mpReset() {
   try { if (MP.conn) MP.conn.close(); } catch (e) {}
   try { if (MP.peer) MP.peer.destroy(); } catch (e) {}
   MP.peer = null; MP.conn = null; MP.connected = false; MP.enabled = false; MP.role = null; MP.roomCode = null;
+}
+// v2.25.9 — full teardown when leaving an MP game: drop the connection AND remove the body-level MP
+// UI (HUD chip, status panel, chat, OPFOR panel) so nothing lingers on the menu.
+function mpTeardownUI() {
+  try { mpReset(); } catch (e) {}
+  MP.started = false; MP.peerNick = ''; MP.ping = 0;
+  ['mp-hud', 'mp-status', 'mp-chat', 'mp-opfor-info'].forEach(function (id) {
+    const e = el(id); if (e && e.parentNode) e.parentNode.removeChild(e);
+  });
 }
 
 /* ============================ HOST ============================ */
