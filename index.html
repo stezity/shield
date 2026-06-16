@@ -2130,6 +2130,12 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.25.12 — MP polish (user): (1) the WORLD MODIFIERS panel (#world-hud) overlapped the chat and is
+//            unrelated to MP — now hidden whenever MP is active. (2) Defender's DAMAGE to OPFOR launch
+//            sites is synced (snapshot `lsd`): drawAttackerBases shows the damage bar / destroyed marker
+//            on the OPFOR's sites (was: defender saw 50 dmg, OPFOR saw 0). (3) Each counter-battery
+//            strike now suppresses the launch site 30-60s (was flat 30s); a suppressed site CANNOT fire
+//            — enforced on the guest (skips/​warns) AND on the host (authority rejects).
 //   2.25.11 — Doctrines + MP deploy phase (user). (1) Two doctrines did NOTHING (defined + shown but
 //            never read): strikeOnSight now auto counter-batteries the firing launch sites (tickStrikeOnSight,
 //            ~7s cooldown); strictROE now conserves interceptors (ignore pop<5 non-strategic — open
@@ -3213,7 +3219,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.25.11';
+const GAME_VERSION = '2.25.12';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -6226,11 +6232,13 @@ function suppressNearestLaunchSite(lat, lon) {
   state.disabledLaunchSites = state.disabledLaunchSites || {};
   const key = bestFid + '_' + bestIdx;
   const wasActive = (state.disabledLaunchSites[key] || 0) > Date.now();
-  state.disabledLaunchSites[key] = Date.now() + 30000;
+  const dur = 30000 + Math.floor(Math.random() * 30000);   // v2.25.12 — 30-60s per strike
+  state.disabledLaunchSites[key] = Date.now() + dur;
   if (!wasActive) {
     const sName = ENEMIES[bestFid].launchSites[bestIdx].name;
-    logEvent(`◉ Launch site SUPPRESSED: ${sName} (30s) — no fire from this position`, 'success');
-    showNotification('LAUNCHER SUPPRESSED', `${sName} suppressed for 30 s — no fire from this position.`, 'success');
+    const secs = Math.round(dur / 1000);
+    logEvent(`◉ Launch site SUPPRESSED: ${sName} (${secs}s) — no fire from this position`, 'success');
+    showNotification('LAUNCHER SUPPRESSED', `${sName} suppressed for ${secs}s — no fire from this position.`, 'success');
   }
   return true;
 }
@@ -7137,8 +7145,9 @@ function drawAttackerBases() {
       ctx.beginPath(); ctx.arc(sx, sy, 22, 0, Math.PI * 2); ctx.fill();
     }
     // Damaged site state (attacker campaign) + MP counter-battery suppression (struck by the defender)
-    const dmg = (state.attacker && state.attacker.damagedSites) ? (state.attacker.damagedSites[i] || 0) : 0;
+    let dmg = (state.attacker && state.attacker.damagedSites) ? (state.attacker.damagedSites[i] || 0) : 0;
     const _dkey = state.attackMode.faction + '_' + i;
+    if (typeof MP !== 'undefined' && MP.enabled && MP.role === 'guest' && MP.siteDamage && MP.siteDamage[_dkey] != null) dmg = MP.siteDamage[_dkey];   // v2.25.12 — synced defender damage on OPFOR sites
     const isSuppressed = !!(state.disabledLaunchSites && state.disabledLaunchSites[_dkey] > now);   // v2.25.10
     const isDestroyed = dmg >= 100;
     const isDamaged = (dmg > 0 && !isDestroyed) || isSuppressed;
@@ -16265,7 +16274,7 @@ let _worldHudLastUpdate = 0;
 function updateWorldHud() {
   ensureWorldState();
   let el = document.getElementById('world-hud');
-  if (!state.active) {
+  if (!state.active || (typeof MP !== 'undefined' && MP.enabled)) {   // v2.25.12 — hide in multiplayer (overlaps chat, not MP-related)
     if (el) el.style.display = 'none';
     return;
   }
@@ -23037,7 +23046,7 @@ var MP = (window.MP = {
   guestStats: null, onStatus: null,
   scoreOpf: 0, scoreDef: 0, casualties: 0, warRisk: 0, warDeclared: false,
   smuggleReady: 0, smuggleRemaining: 0, _regenAt: 0, _orefSig: '', _orefAt: 0,
-  nick: 'Player', peerNick: '', ping: 0, phase: 'battle',
+  nick: 'Player', peerNick: '', ping: 0, phase: 'battle', siteDamage: {},
   _peerLoading: false, _peerWaiters: [], _origFlash: null, _origExpl: null
 });
 const MP_REGEN_MULT = 1.0;   // passive resupply rate multiplier (smuggling gives the bursts)
@@ -23174,7 +23183,7 @@ function mpReset() {
 // UI (HUD chip, status panel, chat, OPFOR panel) so nothing lingers on the menu.
 function mpTeardownUI() {
   try { mpReset(); } catch (e) {}
-  MP.started = false; MP.peerNick = ''; MP.ping = 0; MP.phase = 'battle';
+  MP.started = false; MP.peerNick = ''; MP.ping = 0; MP.phase = 'battle'; MP.siteDamage = {};
   ['mp-hud', 'mp-status', 'mp-chat', 'mp-opfor-info', 'mp-deploy-overlay'].forEach(function (id) {
     const e = el(id); if (e && e.parentNode) e.parentNode.removeChild(e);
   });
@@ -23243,6 +23252,7 @@ function mpHostApplyLaunch(cmd) {
                                         : Math.max(0, Math.min(cmd.siteIndex | 0, e.launchSites.length - 1));
   const spreadDeg = cmd.spread || 0.005;
   const lat = cmd.targetLat, lon = cmd.targetLon;
+  if (state.disabledLaunchSites && state.disabledLaunchSites[fid + '_' + siteIdx] > Date.now()) return;   // v2.25.12 — suppressed site can't fire (authority)
   const _site = e.launchSites[siteIdx];   // v2.25.5 — enforce escalation-gated reach (authority)
   if (_site && haversineKm(_site.lat, _site.lon, lat, lon) > mpReachKm(fid)) return;
   const useCluster = (type === 'ballistic' && cmd.clusterWarhead);
@@ -23413,6 +23423,7 @@ function mpBuildSnapshot() {
     th: th, ic: ic, ct: ct, fx: fx,
     as: (state.airstrikes || []).filter(function (a) { return !a.done; }).map(function (a) { return { id: a.id, cla: r5(a.curLat), clo: r5(a.curLon), tla: r5(a.targetLat), tlo: r5(a.targetLon) }; }),
     ds: (function () { const o = {}, dm = state.disabledLaunchSites || {}, nw = Date.now(); for (const k in dm) { const rem = dm[k] - nw; if (rem > 0) o[k] = Math.round(rem); } return o; })(),
+    lsd: (function () { const o = {}; (state.enemyTargets || []).forEach(function (et) { if (!et._isLaunchSite) return; const k = et._siteFaction + '_' + et._siteIdx; const d = (et.alive === false) ? 100 : Math.round(et.damage || 0); if (o[k] == null || d > o[k]) o[k] = d; }); return o; })(),   // v2.25.12 — defender's damage to OPFOR launch sites
     st: { intc: st.intercepted || 0, miss: st.missed || 0, tot: st.threatsTotal || 0, saf: st.civilianSafety != null ? Math.round(st.civilianSafety) : 100 }
   };
 }
@@ -23510,6 +23521,7 @@ function mpGuestApplySnapshot(s) {
   });
   // v2.25.10 — disabled/struck launch sites (defender counter-battery) → OPFOR sees its sites go offline
   if (s.ds) { state.disabledLaunchSites = {}; for (const k in s.ds) state.disabledLaunchSites[k] = now + s.ds[k]; }
+  MP.siteDamage = s.lsd || {};   // v2.25.12 — defender's damage on OPFOR launch sites
   // FX events → spawn local particles
   if (s.fx) s.fx.forEach(mpGuestPlayFx);
 }
@@ -23589,7 +23601,18 @@ function mpGuestLaunchAt(lat, lon) {
   for (const c of state.cities) { if (!c.alive) continue; const d = haversineKm(lat, lon, c.lat, c.lon); if (d < nearestKm) nearestKm = d; }
   if (nearestKm > 25) { showNotification('NO TARGET', 'No Israeli population/site within 25 km of that point', 'warn'); return false; }
   const e = ENEMIES[am.faction];
-  let siteIdx = (am.siteIndex == null) ? Math.floor(Math.random() * e.launchSites.length) : am.siteIndex;
+  // v2.25.12 — can't fire from a suppressed launch site (defender counter-battery stopped it 30-60s)
+  const _supNow = Date.now();
+  const _isSup = (idx) => !!(state.disabledLaunchSites && state.disabledLaunchSites[am.faction + '_' + idx] > _supNow);
+  let siteIdx;
+  if (am.siteIndex == null) {
+    const avail = e.launchSites.map((_, idx) => idx).filter((idx) => !_isSup(idx));
+    if (!avail.length) { showNotification('ALL LAUNCHERS SUPPRESSED', 'Every launch site is under counter-battery fire — wait for them to recover.', 'warn'); return false; }
+    siteIdx = avail[Math.floor(Math.random() * avail.length)];
+  } else {
+    siteIdx = am.siteIndex;
+    if (_isSup(siteIdx)) { showNotification('LAUNCHER SUPPRESSED', e.launchSites[siteIdx].name + ' is suppressed — pick another base or wait.', 'warn'); return false; }
+  }
   const site = e.launchSites[siteIdx];
   const distKm = haversineKm(site.lat, site.lon, lat, lon);
   const maxKm = (typeof WEAPON_MAX_RANGE !== 'undefined' && WEAPON_MAX_RANGE[am.type]) || 99999;
