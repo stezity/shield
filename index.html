@@ -2215,6 +2215,12 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.28.1  — HARD RULE: the US NEVER bombs Israel. Removed the kinetic "Punish Israel (strike)" added in
+//            2.27.9 — replaced with usPressureIsrael (NON-KINETIC): freeze arms, cut intel sharing, ban
+//            fighter transfers, withdraw support, demand a halt. The defy-with-collapsed-support trigger now
+//            uses this pressure (never a strike). Iran's directive list (#7) expanded to the full 20 orders
+//            the Iran player picks from manually. (Big 13-point war/diplomacy refactor — these are the
+//            critical first items; chat + launch already fixed in 2.27.3/2.27.9, re-verified.)
 //   2.28.0  — AIR DEFENSE + US NAVAL. New AD batteries (BATTERY_TYPES, buildable in the deploy panel +
 //            buyable): PATRIOT (PAC-3, 160km — ballistic/cruise/drones), C-RAM (Phalanx, 8km rapid point
 //            defense), and THAAD is now buildable too. They auto-intercept (the engine reads BATTERY_TYPES).
@@ -3477,7 +3483,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.28.0';
+const GAME_VERSION = '2.28.1';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -24605,14 +24611,17 @@ function usStrikeFaction(f) {
   if (typeof showNotification === 'function') showNotification('🇺🇸 US STRIKE', 'US forces struck a ' + nm + ' target — Washington is in the fight.', 'danger');
   if (typeof logEvent === 'function') logEvent('🇺🇸 US strike on ' + nm, 'danger');
 }
-// v2.27.9 — the US bombs ISRAEL when Israel defies Washington (a fracturing alliance) — hits an IDF airbase.
-function strikeIsraeliTarget(reason) {
-  const bases = (typeof IL_AIRBASES !== 'undefined') ? IL_AIRBASES : [];
-  if (bases.length && state.airbaseFighters) { const b = bases[Math.floor(Math.random() * bases.length)]; if (state.airbaseFighters[b.id]) state.airbaseFighters[b.id] = Math.floor((state.airbaseFighters[b.id] || 0) * 0.5); if (typeof createExplosion === 'function') try { createExplosion(b.lat, b.lon, 34, 1800, true); } catch (e) {} if (typeof spawnHitMarker === 'function') spawnHitMarker(b.lat, b.lon, 'US STRIKE', '#ff5b50'); }
-  if (typeof MP !== 'undefined' && MP.enabled) MP.escalation = Math.min(100, (MP.escalation || 0) + 8);
-  if (state.world) state.world.intlPressure = Math.min(100, (state.world.intlPressure || 30) + 8);
-  if (typeof trumpEvent === 'function') trumpEvent('💥 US STRIKES ISRAEL', (reason || 'Israel defied Washington') + ' — US aircraft hit an Israeli airbase. The alliance is fracturing.', 'danger');
-  else if (typeof showNotification === 'function') showNotification('💥 US STRIKES ISRAEL', reason || 'Israel defied Washington', 'danger');
+// v2.28.1 — the US NEVER bombs Israel (hard rule). When Israel defies Washington, the US applies escalating
+// NON-KINETIC pressure: freeze arms, cut intel sharing, ban fighter transfers, withdraw support, demand a halt.
+function usPressureIsrael(reason) {
+  state.usSupplyFrozenUntil = Date.now() + 120000;     // arms frozen 2 min
+  state.usIntelCutUntil = Date.now() + 120000;         // intel sharing cut
+  state.usFightersBanned = true;                       // no fighter transfers
+  if (typeof usSetSupport === 'function') usSetSupport((typeof usSupportVal === 'function' ? usSupportVal() : 60) - 8);
+  if (state.world) state.world.intlPressure = Math.min(100, (state.world.intlPressure || 30) + 6);
+  if (typeof trumpEvent === 'function') trumpEvent('🇺🇸 US PRESSURE ON ISRAEL', (reason || 'Washington is furious') + ' — arms FROZEN, intel sharing CUT, fighter transfers BANNED. Halt the operation.', 'danger');
+  else if (typeof showNotification === 'function') showNotification('🇺🇸 US PRESSURE ON ISRAEL', reason || 'Arms frozen, intel cut, transfers banned.', 'danger');
+  if (typeof logEvent === 'function') logEvent('🇺🇸 US pressures Israel (non-kinetic) — arms frozen, intel cut, transfers banned', 'danger');
 }
 // v2.27.9 — MASS STRIKE (defender): always needs Washington's nod; on approval, saturates several targets.
 function massStrikeRequest() {
@@ -24649,7 +24658,7 @@ function mpFfaApplyUsaGrant(kind) {
   else if (kind === 'enterWar') { usInvSet(Math.max(usInvVal(), 90)); state.usHasCasusBelli = true; if (typeof MP !== 'undefined' && MP.enabled) { MP.escalation = Math.min(100, (MP.escalation || 0) + 15); if (typeof mpEscHoldMajor === 'function') mpEscHoldMajor(3); } showNotification('🇺🇸 US ENTERS THE WAR', 'The United States enters the war directly — its assets are now in the fight, and become targets.', 'danger'); logEvent('🔴 US ENTERS THE WAR DIRECTLY', 'danger'); }
   else if (kind === 'strikeHez') usStrikeFaction('hezbollah');     // v2.27.9 — US strikes other factions
   else if (kind === 'strikeHouthi') usStrikeFaction('houthi');
-  else if (kind === 'strikeIsrael') strikeIsraeliTarget('Washington punishes a defiant Israel');   // v2.27.9 — US can bomb Israel
+  else if (kind === 'pressureIsrael') usPressureIsrael('Washington pressures a defiant Israel');   // v2.28.1 — NON-KINETIC only (US never bombs Israel)
   else if (kind === 'deployCarrier') deployUsNaval('carrier');     // v2.28.0 — naval deploy + Tomahawk platforms
   else if (kind === 'deployDestroyer') deployUsNaval('destroyer');
   else if (kind === 'tomaIran') usTomahawk('iran');               // v2.28.0 — Tomahawks from carriers/cruisers
@@ -24833,7 +24842,7 @@ function mpFfaInstallUsaPanel() {
       '<button class="mp-usa-btn" data-kind="strikeHez" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(150,60,40,.3);border:1px solid #cf5b3a;color:#ffb3a0;border-radius:4px;cursor:pointer;">💥 Strike Hezbollah</button>' +
       '<button class="mp-usa-btn" data-kind="strikeHouthi" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(150,60,40,.3);border:1px solid #cf5b3a;color:#ffb3a0;border-radius:4px;cursor:pointer;">💥 Strike Houthis</button>' +
       '<button class="mp-usa-btn" data-kind="enterWar" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(180,30,30,.35);border:1px solid #ff3b30;color:#ff8a76;border-radius:4px;cursor:pointer;">⚔ Enter the war</button>' +
-      '<button class="mp-usa-btn" data-kind="strikeIsrael" style="width:100%;padding:7px;background:rgba(120,30,30,.4);border:1px solid #ff5b50;color:#ff8a76;border-radius:4px;cursor:pointer;">⚠ Punish Israel (strike)</button>' +
+      '<button class="mp-usa-btn" data-kind="pressureIsrael" style="width:100%;padding:7px;background:rgba(120,80,30,.4);border:1px solid #ffaa44;color:#ffd479;border-radius:4px;cursor:pointer;">⚠ Pressure Israel (sanctions, no strike)</button>' +
       '<div style="margin:9px 0 4px;color:#9fbada;font-size:10px;letter-spacing:1px;border-top:1px solid rgba(91,141,239,.3);padding-top:7px;">NAVAL &amp; TOMAHAWKS</div>' +
       '<button class="mp-usa-btn" data-kind="deployCarrier" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(40,70,110,.3);border:1px solid #5b8def;color:#bfe0ff;border-radius:4px;cursor:pointer;">⚓ Deploy carrier strike group</button>' +
       '<button class="mp-usa-btn" data-kind="deployDestroyer" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(40,70,110,.3);border:1px solid #5b8def;color:#bfe0ff;border-radius:4px;cursor:pointer;">🚢 Deploy destroyer (Tomahawk)</button>' +
@@ -24949,7 +24958,7 @@ function usDefy(sev, label) {
   if (typeof MP !== 'undefined' && MP.enabled && MP.role === 'host') { MP.escalation = Math.min(100, (MP.escalation || 0) + 6 + sev * 3); if (typeof mpEscHoldMajor === 'function') mpEscHoldMajor(ESC_HOLD_DEFY_MULT); }
   if (typeof showNotification === 'function') showNotification('⚠ AGAINST THE US POSITION', 'Operation conducted against Washington. US support −' + (10 + sev * 5) + ', arms supply frozen 60s, escalation up.', 'danger');
   if (typeof logEvent === 'function') logEvent('⚠ ' + (label || 'Major op') + ' conducted AGAINST the US — support now ' + Math.round(usSupportVal()) + ', supply frozen', 'danger');
-  if (usSupportVal() < 25 && Math.random() < 0.35 && typeof strikeIsraeliTarget === 'function' && (typeof MP === 'undefined' || !MP.enabled || MP.role === 'host')) strikeIsraeliTarget('Repeated defiance — Washington has had enough');   // v2.27.9 — defy + collapsed support → the US bombs Israel
+  if (usSupportVal() < 25 && Math.random() < 0.45 && typeof usPressureIsrael === 'function' && (typeof MP === 'undefined' || !MP.enabled || MP.role === 'host')) usPressureIsrael('Repeated defiance — Washington has had enough');   // v2.28.1 — defy + collapsed support → NON-KINETIC US pressure (never a strike)
 }
 function usCloseModal() { const m = el('us-perm-modal'); if (m) m.style.display = 'none'; }
 function usExecPending() { usCloseModal(); const p = state._usPending; state._usPending = null; if (p) launchAirStrike(p.lat, p.lon, true); }
@@ -25300,7 +25309,13 @@ function drawUSTargets() {
 
 // v2.26.7 #8 — IRAN PLAYER CONTROLS: issue directives to the axis + reinforce it. (Iran also strikes
 // directly via the normal attacker launch — it is exempt from its own coordination gate.)
-const IRAN_TASKS = ['Intensify the northern front', 'Open pressure from the south', 'Launch drone swarms', 'Strike a military base', 'Distract Israeli air defense', 'Do NOT touch the US', 'Do NOT hit Israel’s center', 'Conserve for the next wave', 'Synchronized attack — all fronts'];
+const IRAN_TASKS = [   // v2.28.1 — full Iran directive list (#7) the player picks from manually
+  'Intensify the northern front', 'Intensify the southern front', 'Reduce intensity — de-escalate',
+  'Do NOT attack the US', 'ATTACK US targets', 'Prepare a mass salvo', 'Synchronized attack — all fronts',
+  'Launch drone swarms', 'Attack air defenses', 'Attack a military base', 'Attack a port', 'Attack an airfield',
+  'Hold — await orders', 'Switch targets', 'Conserve missiles for the next wave', 'Distract Israeli air defense',
+  'Support another faction', 'Open a new front', 'Do NOT cross the red line', 'Raise pressure before talks'
+];
 function iranIssueDirective(task) {
   state.iranTask = task;
   if (typeof showNotification === 'function') showNotification('☪ TEHRAN DIRECTIVE', task, 'info');
