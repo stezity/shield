@@ -2182,6 +2182,18 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.26.4  — FINAL STAGE 3 of 3 (#5/#6/#7) — completes the 7-part mega-spec.
+//            (#7) RED LINES: tickRedLines fires once-per-game irreversible crises as escalation / US
+//            defiance / intl pressure cross thresholds — US freezes ALL aid (support<=15, 3-min freeze),
+//            Hezbollah expands the war (esc>=70), Iran enters directly (esc>=85, locks escalation high),
+//            international isolation (intl>=80), a new front opens (esc>=80 & warRisk>=60). Warnings fire
+//            as you approach; host broadcasts crises to the OPFOR; active red lines show in the US panel.
+//            (#5) MP faction actions already use independent per-faction cooldowns (MP.reload[fid]); added
+//            a "targets in range" readout to the OPFOR panel (cities reachable now; unlimited for states).
+//            (#6) MORE TARGETS: +20 installations (airbase/port/radar/SAM/power/C2/comms/bridge) across
+//            all factions, each with a distinct circle+letter icon. Varied HIT FX: blast scales with
+//            importance, high-value targets throw secondary detonations, and a floating "TARGET HIT" /
+//            "★n DESTROYED" marker rises off the map.
 //   2.26.3  — US RELATIONS & PERMISSIONS, stage 2 of 3 (#1). Builds on state.world.usSupport (0-100).
 //            5 status tiers (Full / Cautious / Tension / Crisis / Open conflict). A major op — strike on
 //            a CAPITAL (≤35km of Beirut/Gaza City/Tehran/Sanaa) or a STRATEGIC target — opens a US
@@ -3309,7 +3321,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.26.3';
+const GAME_VERSION = '2.26.4';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -3972,7 +3984,33 @@ const ENEMY_TARGETS = [
   { id: 't_houthi_leader',name: 'Al-Houthi residence',      lat: 15.3500, lon: 44.2000, faction: 'houthi',    importance: 10, type: 'leader',   hardness: 0.55 },
   { id: 't_hodeida',      name: 'Hodeida port',             lat: 14.7980, lon: 42.9523, faction: 'houthi',    importance: 7,  type: 'launch',   hardness: 0.3 },
   { id: 't_saada',        name: 'Saada HQ',                 lat: 16.9419, lon: 43.7647, faction: 'houthi',    importance: 7,  type: 'HQ',       hardness: 0.45 },
-  { id: 't_marib',        name: 'Marib missile range',      lat: 15.4622, lon: 45.3253, faction: 'houthi',    importance: 6,  type: 'launch',   hardness: 0.35 }
+  { id: 't_marib',        name: 'Marib missile range',      lat: 15.4622, lon: 45.3253, faction: 'houthi',    importance: 6,  type: 'launch',   hardness: 0.35 },
+
+  // === Additional military / strategic installations (v2.26.4 #6) — varied types, icons & importance ===
+  // Hamas / Gaza
+  { id: 't_gaza_port',     name: 'Gaza fishing port',          lat: 31.5260, lon: 34.4300, faction: 'hamas',     importance: 5,  type: 'port',    hardness: 0.25 },
+  { id: 't_gaza_radar',    name: 'Coastal observation radar',  lat: 31.5550, lon: 34.4900, faction: 'hamas',     importance: 6,  type: 'radar',   hardness: 0.30 },
+  { id: 't_gaza_c2',       name: 'Tunnel command node',        lat: 31.5100, lon: 34.4550, faction: 'hamas',     importance: 7,  type: 'c2',      hardness: 0.55 },
+  { id: 't_gaza_comms',    name: 'Al-Aqsa relay tower',        lat: 31.5000, lon: 34.4700, faction: 'hamas',     importance: 5,  type: 'comms',   hardness: 0.20 },
+  // Hezbollah / Lebanon
+  { id: 't_beirut_air',    name: 'Beirut Rafic Hariri airport',lat: 33.8209, lon: 35.4884, faction: 'hezbollah', importance: 8,  type: 'airbase', hardness: 0.35 },
+  { id: 't_beirut_port',   name: 'Beirut port',                lat: 33.9010, lon: 35.5180, faction: 'hezbollah', importance: 8,  type: 'port',    hardness: 0.30 },
+  { id: 't_jiyeh_power',   name: 'Jiyeh power plant',          lat: 33.6500, lon: 35.4100, faction: 'hezbollah', importance: 7,  type: 'power',   hardness: 0.35 },
+  { id: 't_litani_bridge', name: 'Litani river bridge',        lat: 33.3500, lon: 35.3700, faction: 'hezbollah', importance: 6,  type: 'bridge',  hardness: 0.30 },
+  { id: 't_hez_sam',       name: 'SA-22 SAM site',             lat: 33.4500, lon: 35.5000, faction: 'hezbollah', importance: 8,  type: 'sam',     hardness: 0.40 },
+  { id: 't_hez_radar',     name: 'Early-warning radar',        lat: 33.5000, lon: 35.4500, faction: 'hezbollah', importance: 7,  type: 'radar',   hardness: 0.35 },
+  // Iran
+  { id: 't_mehrabad',      name: 'Mehrabad airbase',           lat: 35.6890, lon: 51.3130, faction: 'iran',      importance: 8,  type: 'airbase', hardness: 0.40 },
+  { id: 't_tehran_sam',    name: 'S-300 SAM battery',          lat: 35.6000, lon: 51.3000, faction: 'iran',      importance: 9,  type: 'sam',     hardness: 0.55 },
+  { id: 't_tehran_radar',  name: 'Strategic radar array',      lat: 35.5500, lon: 51.5000, faction: 'iran',      importance: 8,  type: 'radar',   hardness: 0.45 },
+  { id: 't_bandar_port',   name: 'Bandar Abbas port',          lat: 27.1500, lon: 56.2100, faction: 'iran',      importance: 8,  type: 'port',    hardness: 0.30 },
+  { id: 't_iran_power',    name: 'Karun-3 power plant',        lat: 32.0500, lon: 50.0200, faction: 'iran',      importance: 7,  type: 'power',   hardness: 0.40 },
+  { id: 't_irgc_c2',       name: 'IRGC aerospace C2',          lat: 35.6700, lon: 51.4500, faction: 'iran',      importance: 9,  type: 'c2',      hardness: 0.60 },
+  // Houthi / Yemen
+  { id: 't_sanaa_air',     name: 'Sanaa airbase',              lat: 15.4760, lon: 44.2197, faction: 'houthi',    importance: 7,  type: 'airbase', hardness: 0.30 },
+  { id: 't_houthi_radar',  name: 'Coastal radar (Hodeida)',    lat: 14.7300, lon: 42.9400, faction: 'houthi',    importance: 6,  type: 'radar',   hardness: 0.30 },
+  { id: 't_houthi_sam',    name: 'SAM site (Sanaa)',           lat: 15.3200, lon: 44.2400, faction: 'houthi',    importance: 7,  type: 'sam',     hardness: 0.35 },
+  { id: 't_houthi_c2',     name: 'Drone command center',       lat: 15.4000, lon: 44.1800, faction: 'houthi',    importance: 7,  type: 'c2',      hardness: 0.45 }
 ];
 
 // === Attack sources — real launch sites by faction ===
@@ -6544,7 +6582,7 @@ function updateAirStrikes(dt) {
               target.alive = false;
               target.damage = 100;
               target.deadAt = Date.now(); target.deadAtGameTime = state.gameTime;
-              createExplosion(target.lat, target.lon, 42, 1800, true);
+              enemyTargetHitFx(target, true);
               logEvent(`✈ ★${target.importance} DESTROYED: ${target.name}`, 'success');
               showNotification('DESTROYED', `${target.name} (★${target.importance})`, 'success');
               // v2.24.17 — launch-site suppression now handled on hit by suppressNearestLaunchSite()
@@ -6626,7 +6664,7 @@ function updateAirStrikes(dt) {
           target.alive = false;
           target.damage = 100;
           target.deadAt = Date.now(); target.deadAtGameTime = state.gameTime;
-          createExplosion(a.targetLat, a.targetLon, 38, 1800, true);
+          enemyTargetHitFx(target, true);
           logEvent(`✈ ★${target.importance} DESTROYED: ${target.name} +$${reward}`, 'success');
           showNotification('TARGET DESTROYED', `${target.name} +$${(reward/1000).toFixed(1)}K`, 'success');
           // v2.24.17 — launch-site suppression now handled on hit by suppressNearestLaunchSite()
@@ -6637,7 +6675,7 @@ function updateAirStrikes(dt) {
             sandboxCheckMission();
           }
         } else {
-          createExplosion(a.targetLat, a.targetLon, 28, 1400, true);
+          enemyTargetHitFx(target, false);
           logEvent(`✈ Hit: ${target.name} (${damage}%) +$${reward}`, 'success');
           showNotification('Target damaged', `${target.name}: ${target.damage}% +$${(reward/1000).toFixed(1)}K`, 'warn');
         }
@@ -6922,7 +6960,7 @@ function render() {
   if (state.playAs === 'attacker') { if (typeof mpDrawReachZone === 'function') mpDrawReachZone(); drawAttackerBases(); }
   if (Date.now() < (state.intelRevealUntil || 0)) drawIntelReveal();
   if (state.tsts && state.tsts.length > 0) drawTSTMarkers();
-  if (L.enemyTargets !== false) drawEnemyTargets();
+  if (L.enemyTargets !== false) { drawEnemyTargets(); if (typeof drawHitMarkers === 'function') drawHitMarkers(); }
   if (L.airbases !== false) drawAirbases();
   if (L.factories !== false) drawFactories();
   if (L.coverage !== false) drawCoverage();
@@ -7369,6 +7407,12 @@ function drawEnemyTargets() {
         ctx.stroke();
         ctx.restore();
       }
+    } else if (['airbase', 'port', 'radar', 'sam', 'power', 'c2', 'comms', 'bridge', 'base', 'depot'].indexOf(t.type) >= 0) {
+      // v2.26.4 #6 — installations: circle marker + a type letter (full name shows in the label at zoom)
+      const letter = { airbase: 'A', port: 'P', radar: 'R', sam: 'S', power: 'E', c2: 'C', comms: 'T', bridge: 'B', base: 'M', depot: 'D' }[t.type] || '?';
+      ctx.beginPath(); ctx.arc(sx, sy, baseSize, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#fff'; ctx.font = `bold ${Math.max(8, baseSize * 1.1)}px Consolas`; ctx.textAlign = 'center';
+      ctx.fillText(letter, sx, sy + baseSize * 0.38); ctx.textAlign = 'left';
     } else {
       // city — простой круг
       ctx.beginPath(); ctx.arc(sx, sy, baseSize, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
@@ -13620,6 +13664,42 @@ function updateBatteries(dt) {
    ЭФФЕКТЫ — взрывы, дым, искры, ударные волны, тряска
    ========================================================= */
 // big = попадание по городу; exo = экзоатмосферный; screenYOffset = смещение по Y (для воздушных перехватов)
+// v2.26.4 #6 — varied hit FX for enemy targets: blast scales with importance, high-value targets throw
+// secondary detonations/fires, and a floating "TARGET HIT" / "★n DESTROYED" marker rises off the map.
+function enemyTargetHitFx(target, destroyed) {
+  if (!target) return;
+  const imp = target.importance || 5;
+  if (destroyed) {
+    createExplosion(target.lat, target.lon, 34 + imp * 1.8, 1900, true);
+    if (imp >= 8) { const gen = state.scenarioGen; for (let k = 1; k <= 2; k++) setTimeout(function () { if (state.scenarioGen !== gen || !state.active) return; try { createExplosion(target.lat + (Math.random() - 0.5) * 0.03, target.lon + (Math.random() - 0.5) * 0.03, 16 + Math.random() * 12, 1400, true); } catch (e) {} }, k * 280); }
+    spawnHitMarker(target.lat, target.lon, '★' + imp + ' DESTROYED', '#ff5b50');
+  } else {
+    createExplosion(target.lat, target.lon, 22 + imp, 1300, imp >= 7);
+    spawnHitMarker(target.lat, target.lon, 'TARGET HIT', '#ffd479');
+  }
+}
+function spawnHitMarker(lat, lon, text, color) {
+  state.hitMarkers = state.hitMarkers || [];
+  state.hitMarkers.push({ lat: lat, lon: lon, text: text, color: color || '#fff', life: 1600, maxLife: 1600 });
+  if (state.hitMarkers.length > 30) state.hitMarkers.shift();
+}
+function updateHitMarkers(dt) {
+  if (!state.hitMarkers || !state.hitMarkers.length) return;
+  for (let i = state.hitMarkers.length - 1; i >= 0; i--) { state.hitMarkers[i].life -= dt; if (state.hitMarkers[i].life <= 0) state.hitMarkers.splice(i, 1); }
+}
+function drawHitMarkers() {
+  if (!state.hitMarkers || !state.hitMarkers.length || typeof ctx === 'undefined' || !ctx) return;
+  ctx.save(); ctx.textAlign = 'center'; ctx.font = 'bold 12px Consolas';
+  state.hitMarkers.forEach(function (m) {
+    const t = m.life / m.maxLife;
+    const p = geoToScreen(m.lat, m.lon); if (!isFinite(p[0]) || !isFinite(p[1])) return;
+    const y = p[1] - 14 - (1 - t) * 26;
+    ctx.globalAlpha = Math.min(1, t * 1.6);
+    ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,0.8)'; ctx.strokeText(m.text, p[0], y);
+    ctx.fillStyle = m.color; ctx.fillText(m.text, p[0], y);
+  });
+  ctx.globalAlpha = 1; ctx.textAlign = 'left'; ctx.restore();
+}
 function createExplosion(lat, lon, maxRadius, duration, big, exo, screenYOffset) {
   state.explosions.push({
     lat, lon, life: 1, maxLife: duration, maxRadius,
@@ -13910,11 +13990,13 @@ function gameLoop(time) {
       updateFactories(dt);
       updateRandomEvents(dt);
       updateAirStrikes(dt);
+      if (typeof updateHitMarkers === 'function') updateHitMarkers(dt);   // v2.26.4 #6 — floating hit/destroyed markers
       tickFighterChases(dt);                  // F-16 anti-UAV intercepts (auto)
       tickPlayerFighters(dt);                 // NEW v2.17.0: player-commanded F-16 squadrons
       tickCrisis(dt);                         // crisis-popup spawn + countdown
       updateIDFRetaliation(dt);
       if (typeof tickStrikeOnSight === 'function') tickStrikeOnSight(dt);   // v2.25.11 — Strike-on-Sight doctrine
+      if (typeof tickRedLines === 'function') tickRedLines(dt);             // v2.26.4 — red-line crisis triggers (#7)
       updateCivilian(dt);
       updateIntel(dt);
       updateCyberStatus(dt);
@@ -22367,6 +22449,7 @@ function startScenario(name) {
   state.factoryProgress = {};
   // Свежие копии вражеских целей
   state.enemyTargets = ENEMY_TARGETS.map(t => ({ ...t, alive: true, damage: 0 }));
+  state.redLines = {};                                     // v2.26.4 — red-line crisis flags reset each game
   state.iranDelayUntil = 0;
   state.sandstormUntil = 0;
   state.earlyWarningUntil = 0;
@@ -23626,6 +23709,7 @@ function mpGuestOnMessage(msg) {
     case 'oref': state.orefAlerts = msg.a || []; break;   // v2.25.4 — synced OREF alert polygons
     case 'phase': MP.phase = msg.phase || 'battle'; if (MP.phase === 'battle') mpHideDeployOverlay(); else mpShowDeployOverlay(); break;   // v2.25.11
     case 'pause': mpApplyRemotePause(!!msg.paused); break;
+    case 'redline': if (typeof showNotification === 'function') showNotification(msg.title || '🔴 RED LINE', msg.body || '', 'danger'); if (typeof logEvent === 'function') logEvent('🔴 ' + (msg.title || 'RED LINE'), 'danger'); break;   // v2.26.4 — OPFOR sees red-line crises
   }
 }
 function mpGuestApplySnapshot(s) {
@@ -23831,10 +23915,17 @@ function mpUpdateGuestPanel() {
     ? `<button disabled style="opacity:.5;width:100%;margin-top:5px;padding:5px;font-size:11px;background:#1a1a1a;color:#999;border:1px solid #444;border-radius:3px;">📦 SMUGGLING… ${smugRem}s</button>`
     : `<button onclick="window.__mpSmuggle&&window.__mpSmuggle()" style="width:100%;margin-top:5px;padding:5px;font-size:11px;background:rgba(40,90,150,.25);color:#7fd1ff;border:1px solid #2e6da4;border-radius:3px;cursor:pointer;">📦 RESUPPLY · smuggle (Egypt / sea)</button>`;
   const reachKm = Math.round(mpReachKm(fid));
+  let inRange = 0;   // v2.26.4 (#5) — how many Israeli cities the faction can currently reach
+  try {
+    const cs = state.cities || [];
+    if (fid === 'iran' || fid === 'houthi') inRange = cs.length;   // states: unlimited reach
+    else { const sites = (ENEMIES[fid] && ENEMIES[fid].launchSites) || []; inRange = cs.filter(function (c) { return sites.some(function (s) { return haversineKm(s.lat, s.lon, c.lat, c.lon) <= reachKm; }); }).length; }
+  } catch (e) {}
   box.innerHTML =
     `<div style="letter-spacing:2px;color:#7fd1ff;font-weight:bold;">🌐 OPFOR · ${(ENEMIES[fid] ? ENEMIES[fid].name : fid).toUpperCase()}</div>` +
     armLine +
     `<div>Reach: <b style="color:#7fd1ff">~${reachKm} km</b> <span style="color:var(--text-dim)">(↑эскалация = глубже удары)</span></div>` +
+    `<div>Targets in range: <b style="color:#ffd479">${inRange}</b> ${(fid === 'iran' || fid === 'houthi') ? 'cities (unlimited)' : 'cities'}</div>` +
     `<div>Score — YOU <b style="color:#ff8a76">${Math.round(MP.scoreOpf || 0)}</b> · DEF <b style="color:#7fffb0">${Math.round(MP.scoreDef || 0)}</b> · жертвы <b style="color:#ff8a76">${MP.casualties || 0}</b></div>` +
     `<div>Escalation: <b style="color:${escColor}">${esc}</b>/100 ${MP.warDeclared ? '<b style="color:#ff3b30">⚠ WAR</b>' : `<span style="color:var(--text-dim)">(${esc >= 40 ? 'INTENSE — all fronts open' : 'raise to open new fronts'})</span>`}</div>` +
     `<div style="height:5px;background:rgba(255,255,255,0.1);border-radius:3px;margin-top:2px;overflow:hidden;"><div style="height:100%;width:${esc}%;background:${escColor};transition:width .3s;"></div></div>` +
@@ -24276,7 +24367,41 @@ function usPanel() {
     '<div>support <b style="color:' + st.c + '">' + s + '</b>/100 · patience ' + Math.floor(state.world.usPatience || 0) + '</div>' +
     (state.usLastResponse ? '<div>last response: <b>' + state.usLastResponse + '</b></div>' : '') +
     (delay ? '<div style="color:#ffd479">⏳ diplomatic window ' + Math.ceil((state.usDelayUntil - Date.now()) / 1000) + 's</div>' : '') +
-    (frozen ? '<div style="color:#ff8a76">⚠ arms supply frozen ' + Math.ceil((state.usSupplyFrozenUntil - Date.now()) / 1000) + 's</div>' : '');
+    (frozen ? '<div style="color:#ff8a76">⚠ arms supply frozen ' + Math.ceil((state.usSupplyFrozenUntil - Date.now()) / 1000) + 's</div>' : '') +
+    usRedLineSummary();
+}
+// v2.26.4 — RED LINES (#7): escalation/US-defiance crossing critical thresholds triggers irreversible
+// crisis events (US aid freeze, Hezbollah expands, Iran enters, isolation, new front) with warnings as
+// you approach. Each fires once per game; host broadcasts to the OPFOR. Ties escalation + US together.
+function usRedLineSummary() {
+  const rl = state.redLines || {}; const a = [];
+  if (rl.usFroze) a.push('US aid frozen'); if (rl.hez) a.push('Hezbollah expanded'); if (rl.iran) a.push('Iran in war'); if (rl.intl) a.push('Isolation'); if (rl.newFront) a.push('New front');
+  return a.length ? '<div style="color:#ff5b50;margin-top:3px;border-top:1px solid rgba(255,91,80,.3);padding-top:3px;">🔴 ' + a.join(' · ') + '</div>' : '';
+}
+function redLineFire(title, body) {
+  if (typeof showNotification === 'function') showNotification(title, body, 'danger');
+  if (typeof logEvent === 'function') logEvent('🔴 ' + title, 'danger');
+  if (typeof MP !== 'undefined' && MP.enabled && MP.role === 'host' && typeof mpSend === 'function') { try { mpSend({ t: 'redline', title: title, body: body }); } catch (e) {} }
+}
+function tickRedLines(dt) {
+  if (!state.active) return;
+  if (!state.redLines) state.redLines = {};
+  const rl = state.redLines; const now = Date.now();
+  const mpOn = (typeof MP !== 'undefined' && MP.enabled);
+  const esc = mpOn ? (MP.escalation || 0) : 0;
+  const sup = (typeof usSupportVal === 'function') ? usSupportVal() : 60;
+  const intl = (state.world && state.world.intlPressure) || 0;
+  const warR = mpOn ? (MP.warRisk || 0) : 0;
+  if (!rl._warnAt) rl._warnAt = {};
+  const warn = function (key, msg) { if (now - (rl._warnAt[key] || 0) > 25000) { rl._warnAt[key] = now; if (typeof showNotification === 'function') showNotification('⚠ APPROACHING A RED LINE', msg, 'warn'); } };
+  if (esc >= 72 && esc < 85 && !rl.iran) warn('iran', 'Escalation critical — Iran threatens to enter the war directly.');
+  if (sup <= 22 && sup > 15 && !rl.usFroze) warn('us', 'US support near collapse — Washington warns it will freeze all military aid.');
+  if (intl >= 70 && intl < 80 && !rl.intl) warn('intl', 'International pressure peaking — isolation imminent.');
+  if (sup <= 15 && !rl.usFroze) { rl.usFroze = true; state.usSupplyFrozenUntil = now + 180000; redLineFire('🇺🇸 RED LINE — US FREEZES ALL MILITARY AID', 'Support collapsed: interceptor & arms resupply frozen 3 min. Washington demands an immediate halt.'); }
+  if (esc >= 70 && !rl.hez) { rl.hez = true; redLineFire('🔴 RED LINE — HEZBOLLAH EXPANDS THE WAR', 'Hezbollah widens the front and pushes rocket reach deeper into Israel.'); if (mpOn && MP.role === 'host') { MP.escalation = Math.min(100, MP.escalation + 4); if (typeof mpEscHoldMajor === 'function') mpEscHoldMajor(2); } }
+  if (esc >= 85 && !rl.iran) { rl.iran = true; redLineFire('🔴 RED LINE — IRAN ENTERS THE WAR DIRECTLY', 'Tehran launches direct strikes — full regional war. Escalation locked high.'); if (mpOn && MP.role === 'host') { MP.escalation = Math.max(MP.escalation, 92); if (typeof mpEscHoldMajor === 'function') mpEscHoldMajor(3); } if (state.world) state.world.intlPressure = Math.min(100, (state.world.intlPressure || 30) + 15); }
+  if (intl >= 80 && !rl.intl) { rl.intl = true; redLineFire('🔴 RED LINE — INTERNATIONAL ISOLATION', 'Global pressure peaks: sanctions, embargoes, diplomatic isolation.'); if (typeof usSetSupport === 'function') usSetSupport(sup - 8); }
+  if (esc >= 80 && warR >= 60 && !rl.newFront && Math.random() < 0.0008 * dt) { rl.newFront = true; redLineFire('🔴 RED LINE — A NEW FRONT OPENS', 'A second front ignites — the war spreads to a new theatre.'); }
 }
 
 /* ---------------- FX capture (host) — wrap the two FX entry points ---------------- */
