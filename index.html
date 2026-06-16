@@ -2182,6 +2182,13 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.27.9  — CHAT FIX + bigger US role. CHAT: the FFA host's own messages now reach guests (guests handle
+//            't:chat', not only 'chatRelay') and the host relays a guest message to OTHERS only (mpSendExcept)
+//            so the sender no longer sees it twice. US: panel gains Strike Hezbollah / Strike Houthis /
+//            ⚠ Punish Israel (strike) on top of Strike Iran (usStrikeFaction / strikeIsraeliTarget — hits an
+//            IDF airbase). The US now BOMBS ISRAEL automatically when Israel defies Washington and support
+//            collapses (<25, 35% in usDefy). New ✈✈ MASS STRIKE button for the defender — always needs US
+//            approval (routes to the human US player, else AI verdict); on approval it saturates 3-5 targets.
 //   2.27.8  — DIPLOMACY + TRUMP. (1) Ceasefire is now a NEGOTIATION: the button opens talks where success
 //            depends on escalation (esc 0 ≈ 80% / esc 100 ≈ 9%) and you can BRIBE ($50K/$200K) to raise the
 //            odds; host/single-player rolls authoritatively, guests propose to the host (diploPropose), and
@@ -3429,7 +3436,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.27.8';
+const GAME_VERSION = '2.27.9';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -14268,6 +14275,7 @@ function gameLoop(time) {
     if (typeof mpInstallIranPanel === 'function' && _axis && state.attackMode.faction === 'iran') mpInstallIranPanel();   // v2.26.7 #8 — Iran command panel for the Iran player
     else { const _ic = document.getElementById('iran-cmd-panel'); if (_ic) _ic.style.display = 'none'; }
     if (MP && MP.enabled && state.active && typeof mpInstallCeasefireBtn === 'function') mpInstallCeasefireBtn();   // v2.27.6 — ceasefire button (host toggle / player request)
+    if (MP && MP.enabled && state.active && typeof mpInstallMassStrikeBtn === 'function') mpInstallMassStrikeBtn();   // v2.27.9 — defender mass-strike (US approval)
     if (typeof usInvVal === 'function' && MP && MP.enabled && MP.myFaction === 'usa' && state.active) { const _ie = document.getElementById('mp-usa-inv'); if (_ie) { const _ti = usInvTier(); _ie.innerHTML = '🇺🇸 Involvement: <b style="color:' + _ti.c + '">' + _ti.t + '</b> (' + Math.round(usInvVal()) + ')' + (usAtWar() ? ' <b style="color:#ff3b30">⚔ AT WAR</b>' : ''); } }   // v2.26.9 — USA player sees their involvement scale
   } catch (e) {}
   requestAnimationFrame(gameLoop);
@@ -23593,6 +23601,7 @@ function mpSend(msg) {
   } catch (e) {}
 }
 function mpSendTo(c, msg) { try { if (c && c.conn) c.conn.send(msg); } catch (e) {} }
+function mpSendExcept(except, msg) { if (MP.role !== 'host' || !MP.conns) return; for (const c of MP.conns) { if (c && c !== except && c.open && c.conn) { try { c.conn.send(msg); } catch (e) {} } } }   // v2.27.9 — broadcast to all guests EXCEPT one (no chat echo to the sender)
 function mpOnMessage(msg) {
   if (!msg || !msg.t) return;
   MP.lastRecvAt = Date.now();
@@ -23638,7 +23647,7 @@ function mpReset() {
 function mpTeardownUI() {
   try { mpReset(); } catch (e) {}
   MP.started = false; MP.peerNick = ''; MP.ping = 0; MP.phase = 'battle'; MP.siteDamage = {};
-  ['mp-hud', 'mp-status', 'mp-chat', 'mp-opfor-info', 'mp-deploy-overlay', 'mp-usa-panel', 'mp-aid-btn', 'us-panel', 'iran-panel', 'iran-cmd-panel', 'us-perm-modal', 'iran-perm-modal', 'mp-ally-decide', 'mp-ceasefire-btn', 'mp-diplo-modal'].forEach(function (id) {
+  ['mp-hud', 'mp-status', 'mp-chat', 'mp-opfor-info', 'mp-deploy-overlay', 'mp-usa-panel', 'mp-aid-btn', 'us-panel', 'iran-panel', 'iran-cmd-panel', 'us-perm-modal', 'iran-perm-modal', 'mp-ally-decide', 'mp-ceasefire-btn', 'mp-diplo-modal', 'mp-massstrike-btn'].forEach(function (id) {
     const e = el(id); if (e && e.parentNode) e.parentNode.removeChild(e);
   });
 }
@@ -24282,7 +24291,7 @@ function mpEnsureChat() {
     '</div></div>';
   document.body.appendChild(box);
   const input = el('mp-chat-input'), sendBtn = el('mp-chat-send');
-  const doSend = function () { const t = (input.value || '').trim(); if (!t) return; mpSend({ t: 'chat', text: t.slice(0, 200) }); mpChatAppend(MP.nick || 'YOU', t, true); input.value = ''; };
+  const doSend = function () { const t = (input.value || '').trim(); if (!t) return; mpSend({ t: 'chat', who: MP.nick || 'YOU', text: t.slice(0, 200) }); mpChatAppend(MP.nick || 'YOU', t, true); input.value = ''; };   // v2.27.9 — carry the sender's nick (so the FFA host's own messages reach guests too)
   sendBtn.onclick = doSend;
   // stopPropagation so typing doesn't fire game hotkeys (space=pause, 1/2, etc.)
   input.addEventListener('keydown', function (e) { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); doSend(); } });
@@ -24337,7 +24346,7 @@ function mpFfaHostOnMessage(msg, cRec) {
   if (!msg || !msg.t) return;
   if (msg.t === 'ping') { mpSendTo(cRec, { t: 'pong', ts: msg.ts }); return; }
   if (msg.t === 'pong') { if (msg.ts) MP.ping = Math.max(0, Math.min(9999, Date.now() - msg.ts)); return; }
-  if (msg.t === 'chat') { const who = cRec.nick || ffaRoleLabel(cRec.faction) || 'Player'; mpChatAppend(who, msg.text, false); mpSend({ t: 'chatRelay', who: who, text: msg.text }); return; }
+  if (msg.t === 'chat') { const who = cRec.nick || ffaRoleLabel(cRec.faction) || 'Player'; mpChatAppend(who, msg.text, false); mpSendExcept(cRec, { t: 'chatRelay', who: who, text: msg.text }); return; }   // v2.27.9 — relay to OTHER guests only (sender already showed it → no duplicate)
   if (msg.t === 'join') {
     const f = msg.faction; cRec.nick = String(msg.nick || 'Player').slice(0, 16);
     if (!FFA_ROLES.includes(f) || MP.factionOwners[f]) { mpSendTo(cRec, { t: 'reject', reason: 'taken', owners: MP.factionOwners }); return; }
@@ -24424,6 +24433,7 @@ function mpFfaGuestOnMessage(msg) {
   if (!msg || !msg.t) return;
   if (msg.t === 'ping') { mpSend({ t: 'pong', ts: msg.ts }); return; }
   if (msg.t === 'pong') { if (msg.ts) MP.ping = Math.max(0, Math.min(9999, Date.now() - msg.ts)); return; }
+  if (msg.t === 'chat') { mpChatAppend(msg.who || 'HOST', msg.text, false); return; }   // v2.27.9 — the FFA host's own messages now reach guests
   if (msg.t === 'chatRelay') { mpChatAppend(msg.who || 'Player', msg.text, false); return; }
   switch (msg.t) {
     case 'roster': MP.factionOwners = msg.owners || {}; MP.usaPresent = !!msg.usa; mpFfaBuildPicker(); break;
@@ -24471,6 +24481,41 @@ function mpFfaGuestStart() {
 }
 
 /* ---- USA support ---- */
+// v2.27.9 — US strikes a faction's target (Iran/Hezbollah/Houthi) — the US fighting the war directly.
+function usStrikeFaction(f) {
+  if (typeof usInvSet === 'function') usInvSet((typeof usInvVal === 'function' ? usInvVal() : 12) + 16);
+  if (typeof MP !== 'undefined' && MP.enabled) { MP.escalation = Math.min(100, (MP.escalation || 0) + 10); if (typeof mpEscHoldMajor === 'function') mpEscHoldMajor(2); }
+  const it = (state.enemyTargets || []).find(function (t) { return t.faction === f && t.alive !== false && (t.importance || 0) >= 7; }) || (state.enemyTargets || []).find(function (t) { return t.faction === f && t.alive !== false; });
+  if (it) { it.damage = Math.min(100, (it.damage || 0) + 55); if (it.damage >= 100) { it.alive = false; it.damage = 100; } if (typeof enemyTargetHitFx === 'function') enemyTargetHitFx(it, it.alive === false); }
+  const nm = (ENEMIES[f] && ENEMIES[f].name) || f;
+  if (typeof showNotification === 'function') showNotification('🇺🇸 US STRIKE', 'US forces struck a ' + nm + ' target — Washington is in the fight.', 'danger');
+  if (typeof logEvent === 'function') logEvent('🇺🇸 US strike on ' + nm, 'danger');
+}
+// v2.27.9 — the US bombs ISRAEL when Israel defies Washington (a fracturing alliance) — hits an IDF airbase.
+function strikeIsraeliTarget(reason) {
+  const bases = (typeof IL_AIRBASES !== 'undefined') ? IL_AIRBASES : [];
+  if (bases.length && state.airbaseFighters) { const b = bases[Math.floor(Math.random() * bases.length)]; if (state.airbaseFighters[b.id]) state.airbaseFighters[b.id] = Math.floor((state.airbaseFighters[b.id] || 0) * 0.5); if (typeof createExplosion === 'function') try { createExplosion(b.lat, b.lon, 34, 1800, true); } catch (e) {} if (typeof spawnHitMarker === 'function') spawnHitMarker(b.lat, b.lon, 'US STRIKE', '#ff5b50'); }
+  if (typeof MP !== 'undefined' && MP.enabled) MP.escalation = Math.min(100, (MP.escalation || 0) + 8);
+  if (state.world) state.world.intlPressure = Math.min(100, (state.world.intlPressure || 30) + 8);
+  if (typeof trumpEvent === 'function') trumpEvent('💥 US STRIKES ISRAEL', (reason || 'Israel defied Washington') + ' — US aircraft hit an Israeli airbase. The alliance is fracturing.', 'danger');
+  else if (typeof showNotification === 'function') showNotification('💥 US STRIKES ISRAEL', reason || 'Israel defied Washington', 'danger');
+}
+// v2.27.9 — MASS STRIKE (defender): always needs Washington's nod; on approval, saturates several targets.
+function massStrikeRequest() {
+  if (state.ceasefire) { showNotification('🏳 CEASEFIRE', 'A ceasefire is in effect — hold fire.', 'warn'); return; }
+  if (typeof mpUsHuman === 'function' && mpUsHuman()) mpAllyRequest('us', 'MASS STRIKE on enemy targets', 2, function (v) { massStrikeResolve(v); });
+  else if (typeof usEvaluate === 'function') massStrikeResolve(usEvaluate(2));
+  else massStrikeResolve('approve');
+}
+function massStrikeResolve(v) {
+  if (!v || v === 'deny' || v === 'defer') { if (typeof showNotification === 'function') showNotification('🇺🇸 US BLOCKED THE MASS STRIKE', 'Washington refused. Strike targets one by one, or defy them (consequences).', 'warn'); return; }
+  const n = (v === 'limited') ? 3 : 5;
+  const alive = (state.enemyTargets || []).filter(function (t) { return t.alive !== false && !t._isLaunchSite; });
+  let hit = 0;
+  for (let i = 0; i < n && alive.length; i++) { const t = alive.splice(Math.floor(Math.random() * alive.length), 1)[0]; t.damage = Math.min(100, (t.damage || 0) + 40 + Math.random() * 35); if (t.damage >= 100) { t.alive = false; t.damage = 100; } if (typeof enemyTargetHitFx === 'function') enemyTargetHitFx(t, t.alive === false); hit++; }
+  if (typeof showNotification === 'function') showNotification('✈✈ MASS STRIKE', 'US-approved mass strike — ' + hit + ' targets hit.', 'success');
+  if (typeof logEvent === 'function') logEvent('✈✈ MASS STRIKE (US approved) — ' + hit + ' enemy targets struck', 'success');
+}
 function mpFfaApplyUsaGrant(kind) {
   if (MP.role !== 'host' || !state.active) return;
   if (typeof usInvEnsure === 'function') usInvEnsure();
@@ -24488,6 +24533,9 @@ function mpFfaApplyUsaGrant(kind) {
   else if (kind === 'fighters') { usInvSet(usInvVal() + 12); state.batteries.forEach(function (b) { b.ammo = Math.min(b.capacity || 999, (b.ammo || 0) + 8); }); showNotification('🇺🇸 US AIR SUPPORT', 'US fighters & air-defense reinforce Israeli skies — active intercepts.', 'success'); logEvent('🇺🇸 US fighters + AD committed', 'success'); }
   else if (kind === 'strikeIran') { usInvSet(usInvVal() + 20); if (typeof MP !== 'undefined' && MP.enabled) { MP.escalation = Math.min(100, (MP.escalation || 0) + 12); if (typeof mpEscHoldMajor === 'function') mpEscHoldMajor(2); } const it = (state.enemyTargets || []).find(function (t) { return t.faction === 'iran' && t.alive !== false && (t.importance || 0) >= 8; }); if (it) { it.damage = Math.min(100, (it.damage || 0) + 60); if (it.damage >= 100) { it.alive = false; it.damage = 100; } if (typeof enemyTargetHitFx === 'function') enemyTargetHitFx(it, it.alive === false); } showNotification('🇺🇸 US STRIKE ON IRAN', 'US forces struck an Iranian strategic target — major escalation.', 'danger'); logEvent('🇺🇸 US strike on Iran', 'danger'); }
   else if (kind === 'enterWar') { usInvSet(Math.max(usInvVal(), 90)); state.usHasCasusBelli = true; if (typeof MP !== 'undefined' && MP.enabled) { MP.escalation = Math.min(100, (MP.escalation || 0) + 15); if (typeof mpEscHoldMajor === 'function') mpEscHoldMajor(3); } showNotification('🇺🇸 US ENTERS THE WAR', 'The United States enters the war directly — its assets are now in the fight, and become targets.', 'danger'); logEvent('🔴 US ENTERS THE WAR DIRECTLY', 'danger'); }
+  else if (kind === 'strikeHez') usStrikeFaction('hezbollah');     // v2.27.9 — US strikes other factions
+  else if (kind === 'strikeHouthi') usStrikeFaction('houthi');
+  else if (kind === 'strikeIsrael') strikeIsraeliTarget('Washington punishes a defiant Israel');   // v2.27.9 — US can bomb Israel
 }
 function mpFfaRequestUsAid() {
   const now = Date.now();
@@ -24532,6 +24580,13 @@ function mpInstallCeasefireBtn() {
     document.body.appendChild(b);
   }
   mpUpdateCeasefireBtn();
+}
+// v2.27.9 — MASS STRIKE button for the defender (needs US approval each time)
+function mpInstallMassStrikeBtn() {
+  if (!(typeof MP !== 'undefined' && MP.enabled) || state.playAs === 'attacker') { const ex = el('mp-massstrike-btn'); if (ex) ex.style.display = 'none'; return; }
+  let b = el('mp-massstrike-btn');
+  if (!b) { b = document.createElement('button'); b.id = 'mp-massstrike-btn'; b.textContent = '✈✈ MASS STRIKE (US OK)'; b.style.cssText = 'position:fixed;bottom:160px;left:14px;z-index:9999;background:rgba(70,30,20,0.95);border:1px solid #ff8a76;color:#ffd0c0;padding:8px 12px;font-size:12px;cursor:pointer;border-radius:5px;'; b.onclick = function () { massStrikeRequest(); }; document.body.appendChild(b); }
+  b.style.display = 'block';
 }
 function mpUpdateCeasefireBtn() {
   const b = el('mp-ceasefire-btn'); if (!b) return;
@@ -24655,7 +24710,10 @@ function mpFfaInstallUsaPanel() {
       '<button class="mp-usa-btn" data-kind="carrier" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(70,70,120,.3);border:1px solid #8a8adf;color:#cfcfff;border-radius:4px;cursor:pointer;">⚓ Deploy carrier group</button>' +
       '<button class="mp-usa-btn" data-kind="fighters" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(70,70,120,.3);border:1px solid #8a8adf;color:#cfcfff;border-radius:4px;cursor:pointer;">✈ Fighters + AD (intercept)</button>' +
       '<button class="mp-usa-btn" data-kind="strikeIran" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(150,60,40,.3);border:1px solid #cf5b3a;color:#ffb3a0;border-radius:4px;cursor:pointer;">💥 Strike Iran</button>' +
-      '<button class="mp-usa-btn" data-kind="enterWar" style="width:100%;padding:7px;background:rgba(180,30,30,.35);border:1px solid #ff3b30;color:#ff8a76;border-radius:4px;cursor:pointer;">⚔ Enter the war</button>';
+      '<button class="mp-usa-btn" data-kind="strikeHez" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(150,60,40,.3);border:1px solid #cf5b3a;color:#ffb3a0;border-radius:4px;cursor:pointer;">💥 Strike Hezbollah</button>' +
+      '<button class="mp-usa-btn" data-kind="strikeHouthi" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(150,60,40,.3);border:1px solid #cf5b3a;color:#ffb3a0;border-radius:4px;cursor:pointer;">💥 Strike Houthis</button>' +
+      '<button class="mp-usa-btn" data-kind="enterWar" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(180,30,30,.35);border:1px solid #ff3b30;color:#ff8a76;border-radius:4px;cursor:pointer;">⚔ Enter the war</button>' +
+      '<button class="mp-usa-btn" data-kind="strikeIsrael" style="width:100%;padding:7px;background:rgba(120,30,30,.4);border:1px solid #ff5b50;color:#ff8a76;border-radius:4px;cursor:pointer;">⚠ Punish Israel (strike)</button>';
     document.body.appendChild(p);
     p.querySelectorAll('.mp-usa-btn').forEach(function (b) { b.onclick = function () { const k = b.dataset.kind; if (MP.role === 'host') mpFfaApplyUsaGrant(k); else mpSend({ t: 'usaGrant', kind: k }); mpToast('US action: ' + k, 'success'); const r = el('mp-usa-req'); if (r) r.style.display = 'none'; }; });
   }
@@ -24764,6 +24822,7 @@ function usDefy(sev, label) {
   if (typeof MP !== 'undefined' && MP.enabled && MP.role === 'host') { MP.escalation = Math.min(100, (MP.escalation || 0) + 6 + sev * 3); if (typeof mpEscHoldMajor === 'function') mpEscHoldMajor(ESC_HOLD_DEFY_MULT); }
   if (typeof showNotification === 'function') showNotification('⚠ AGAINST THE US POSITION', 'Operation conducted against Washington. US support −' + (10 + sev * 5) + ', arms supply frozen 60s, escalation up.', 'danger');
   if (typeof logEvent === 'function') logEvent('⚠ ' + (label || 'Major op') + ' conducted AGAINST the US — support now ' + Math.round(usSupportVal()) + ', supply frozen', 'danger');
+  if (usSupportVal() < 25 && Math.random() < 0.35 && typeof strikeIsraeliTarget === 'function' && (typeof MP === 'undefined' || !MP.enabled || MP.role === 'host')) strikeIsraeliTarget('Repeated defiance — Washington has had enough');   // v2.27.9 — defy + collapsed support → the US bombs Israel
 }
 function usCloseModal() { const m = el('us-perm-modal'); if (m) m.style.display = 'none'; }
 function usExecPending() { usCloseModal(); const p = state._usPending; state._usPending = null; if (p) launchAirStrike(p.lat, p.lon, true); }
