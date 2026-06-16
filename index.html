@@ -2125,6 +2125,14 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.25.4  — MP gameplay layer (user): (1) OPFOR now sees the OREF/Tzofar alert POLYGONS its attacks
+//            trigger — host broadcasts state.orefAlerts (event-driven) and the guest renders them.
+//            (2) PURE PvP — disabled ALL AI offence in MP (no AI waves/events/crisis/IDF-retaliation),
+//            so only the two humans act. (3) SCORE for both sides (DEF = intercepts; OPFOR = hits +
+//            damage + casualties) shown to both. (4) Richer ESCALATION: volume raises it, a STRATEGIC-
+//            target hit spikes it, casualties build a WAR-RISK meter — enough casualties roll a
+//            full-scale-war trigger (all fronts open, no limits). (5) RESUPPLY: passive arsenal
+//            trickle + an active 'smuggle (Egypt/sea)' button giving a stock burst on a 45 s cooldown.
 //   2.25.3  — MP freeze hardening + diagnostics (user: "карта отображается но просто зависает"). The
 //            ENTIRE per-frame update tick (host sim AND guest) is now wrapped in try/catch, so NO
 //            exception on either side can ever stop the requestAnimationFrame loop. Host snapshot
@@ -3148,7 +3156,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.25.3';
+const GAME_VERSION = '2.25.4';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -6608,6 +6616,7 @@ function pickWeightedEvent(pool) {
 function updateRandomEvents(dt) {
   // Disable random AI events when player is the attacker
   if (state.playAs === 'attacker') return;
+  if (MP && MP.enabled) return;   // v2.25.4 — pure PvP: no AI events in multiplayer
   // Gaza campaign now ALSO uses random events (more aid, more variety) — was: skipped entirely
   // (Use a smaller pool of Gaza-relevant events: US support / IDF-related / Hamas-only)
   // if (state.scenario && state.scenario.campaign === 'gaza') return;
@@ -10326,6 +10335,10 @@ function drawThreats() {
     };
     const arc = arcAt(t.progress);
     const sx = sx0, sy = sy0 + arc;
+    // v2.25.4 — guard non-finite coords (e.g. an incomplete network-synced threat): a NaN slips past
+    // the offscreen check below (NaN comparisons are always false) and would throw in createRadialGradient,
+    // aborting the WHOLE frame every tick → a "frozen"/glitchy map. Skip drawing this one threat instead.
+    if (!isFinite(sx) || !isFinite(sy)) return;
     if (sx < -80 || sx > canvasW + 80 || sy < -80 || sy > canvasH + 80) return;
 
     // Дымный шлейф — три слоя для максимальной заметности
@@ -12144,6 +12157,31 @@ function handleImpact(threat, smallBlast) {
   }
   state.stats.missed++;
   state.stats.cityDamage += damage;
+  // === MULTIPLAYER (host authority): OPFOR score, escalation, casualties, war risk ===
+  if (MP && MP.enabled && MP.role === 'host') {
+    const pop = city.population || 0, imp = city.importance || 0;
+    const strategic = imp >= 7, populated = pop > 0;
+    if (populated || strategic) {
+      const cas = populated ? Math.max(1, Math.round(damage * 0.35 * (pop / 200 + 0.4))) : 0;
+      MP.casualties = (MP.casualties || 0) + cas;
+      MP.scoreOpf = (MP.scoreOpf || 0) + (strategic ? 40 : 15) + Math.round(damage) + cas * 2;
+      // escalation: volume is handled at launch; a STRATEGIC hit spikes it hard, casualties add war risk
+      let esc = strategic ? 14 : 3;
+      if (cas > 0) esc += Math.min(18, cas * 0.5);
+      MP.escalation = Math.min(100, (MP.escalation || 0) + esc);
+      if (cas > 0 || strategic) {
+        MP.warRisk = Math.min(100, (MP.warRisk || 0) + (cas > 0 ? Math.min(22, 4 + cas * 0.5) : 0) + (strategic ? 6 : 0));
+        // "chance of war": each casualty-causing strike rolls against the rising war-risk meter
+        if (!MP.warDeclared && (MP.warRisk >= 100 || (MP.warRisk >= 50 && Math.random() < MP.warRisk / 600))) {
+          MP.warDeclared = true; MP.escalation = 100;
+          FACTION_ORDER.forEach(function (f) { MP.unlocked[f] = true; });
+          if (typeof mpToast === 'function') mpToast('⚠ FULL-SCALE WAR — casualties tipped it over. All fronts open, no limits.', 'danger');
+          if (typeof logEvent === 'function') logEvent('⚠⚠ MULTIPLAYER: full-scale war declared (mass-casualty strike)', 'danger');
+        }
+      }
+      if (typeof mpRecomputeUnlocks === 'function') mpRecomputeUnlocks();
+    }
+  }
   // v2.23.3 — OPFOR: an impact that LANDS builds IDF retaliation pressure (the IDF responds to
   // damage done, not to launches). Intercepted threats never reach here, so a fully-defended
   // salvo provokes nothing.
@@ -13661,7 +13699,8 @@ function gameLoop(time) {
       try {
         mpGuestTick(dt);
         updateExplosions(dt);
-        if (typeof updateAlerts === 'function') updateAlerts(dt);
+        // OREF zones are synced from the host (drawn in render); don't run updateAlerts here — it
+        // would recompute/clobber them from the guest's incomplete threat objects. (v2.25.4)
         if (typeof mpUpdateGuestPanel === 'function') mpUpdateGuestPanel();
       } catch (e) { if (!window.__shieldGuestErr) { console.error('[MP] guest tick error', e); window.__shieldGuestErr = true; } }
     } else if (state.buildPhase) {
@@ -13728,6 +13767,7 @@ const IDF_IMPACT_PRESSURE = {
 };
 function updateIDFRetaliation(dt) {
   if (state.playAs !== 'attacker') return;
+  if (MP && MP.enabled) return;   // v2.25.4 — pure PvP: no AI retaliation in multiplayer
   state.idfPressure = state.idfPressure || 0;
   state.idfRetalCD  = (state.idfRetalCD || 0) - dt;
   // Threshold + cooldown gate; pressure itself only grows on impacts (see handleImpact).
@@ -16089,6 +16129,7 @@ function closeCrisisPopup() {
 
 // Per-frame crisis tick — handles spawn + countdown timer
 function tickCrisis(dt) {
+  if (MP && MP.enabled) return;   // v2.25.4 — pure PvP: no AI crisis popups in multiplayer
   // === CRISIS / DILEMMA POPUPS are IDF-defender-only ===
   // The dilemmas are about IDF strike decisions (civilian collateral, ceasefire votes, etc.)
   // — they make no sense when the player IS the attacker (Resistance Axis).
@@ -22897,8 +22938,11 @@ var MP = (window.MP = {
   unlocked: { hamas: true, hezbollah: false, iran: false, houthi: false },
   arsenal: {}, reload: {}, reloadRemaining: {}, fxQueue: [],
   guestStats: null, onStatus: null,
+  scoreOpf: 0, scoreDef: 0, casualties: 0, warRisk: 0, warDeclared: false,
+  smuggleReady: 0, smuggleRemaining: 0, _regenAt: 0, _orefSig: '', _orefAt: 0,
   _peerLoading: false, _peerWaiters: [], _origFlash: null, _origExpl: null
 });
+const MP_REGEN_MULT = 1.0;   // passive resupply rate multiplier (smuggling gives the bursts)
 
 const FACTION_ORDER = ['hamas', 'hezbollah', 'iran', 'houthi'];
 const el = (id) => document.getElementById(id);
@@ -23022,7 +23066,8 @@ function mpReset() {
 
 /* ============================ HOST ============================ */
 function mpInitHostEconomy() {
-  MP.escalation = 0;
+  MP.escalation = 0; MP.warRisk = 0; MP.warDeclared = false;
+  MP.scoreOpf = 0; MP.casualties = 0; MP.smuggleReady = 0; MP._regenAt = 0; MP._orefSig = ''; MP._orefAt = 0;
   MP.unlocked = { hamas: false, hezbollah: false, iran: false, houthi: false };
   MP.arsenal = {}; MP.reload = {};
   FACTION_ORDER.forEach((fid) => {
@@ -23050,6 +23095,7 @@ function mpHostOnMessage(msg) {
       if (MP.unlocked[msg.faction]) MP.guestFaction = msg.faction;
       break;
     case 'launch': mpHostApplyLaunch(msg); break;
+    case 'smuggle': mpHostSmuggle(); break;
     case 'pause': mpApplyRemotePause(!!msg.paused); break;
     case 'ping': break;
   }
@@ -23094,15 +23140,67 @@ function mpBumpEscalation(type, salvo) {
   mpRecomputeUnlocks();
 }
 function mpRecomputeUnlocks() {
-  const intense = MP.escalation >= 40;
+  const intense = MP.warDeclared || MP.escalation >= 40;
   FACTION_ORDER.forEach((fid) => { MP.unlocked[fid] = (fid === MP.guestFaction) || intense; });
 }
 function mpReloadRemaining() { const now = Date.now(), o = {}; FACTION_ORDER.forEach((f) => { o[f] = Math.max(0, (MP.reload[f] || 0) - now); }); return o; }
+// v2.25.4 — OPFOR resupply: a smuggling run (Egypt/sea) delivers a burst of stock on a cooldown.
+function mpHostSmuggle() {
+  if (!MP.enabled || !state.active) return;
+  const now = Date.now();
+  if (now < (MP.smuggleReady || 0)) return;
+  const fid = MP.guestFaction, f = (typeof ATTACKER_FACTIONS !== 'undefined' && ATTACKER_FACTIONS[fid]) || {};
+  const cap = f.arsenalCap || {}, start = f.arsenalStart || {}, ars = MP.arsenal[fid] || (MP.arsenal[fid] = {});
+  Object.keys(start).forEach(function (ty) {
+    const max = cap[ty] || start[ty] || 0;
+    ars[ty] = Math.min(max, (ars[ty] || 0) + Math.ceil((cap[ty] || start[ty] || 1) * 0.35));
+  });
+  MP.smuggleReady = now + 45000;
+  if (typeof logEvent === 'function') logEvent('📦 OPFOR resupply: smuggling run reached ' + fid + ' — fresh stock delivered', 'warn');
+}
+// v2.25.4 — host-side conflict status panel (escalation / scores / casualties / war risk)
+function mpRenderHostStatus() {
+  let box = el('mp-status');
+  if (!box) { box = document.createElement('div'); box.id = 'mp-status'; box.style.cssText = 'position:fixed;top:30px;left:50%;transform:translateX(-50%);z-index:9000;background:rgba(10,18,30,0.92);border:1px solid #2e6da4;color:#cfe8ff;padding:6px 12px;font:11px/1.6 monospace;border-radius:5px;min-width:220px;text-align:center;pointer-events:none;'; document.body.appendChild(box); }
+  if (MP._statusAt && Date.now() - MP._statusAt < 250) return;
+  MP._statusAt = Date.now();
+  const esc = Math.round(MP.escalation || 0), war = Math.round(MP.warRisk || 0);
+  const escC = esc >= 40 ? '#ff6b5e' : (esc >= 20 ? '#ffaa00' : '#7fffb0');
+  box.innerHTML =
+    '<div style="color:#7fd1ff;font-weight:bold;letter-spacing:1px;">YOU (DEF) <b style="color:#7fffb0">' + Math.round((state.stats ? state.stats.intercepted * 10 : 0)) + '</b> · OPFOR <b style="color:#ff8a76">' + Math.round(MP.scoreOpf || 0) + '</b></div>' +
+    '<div>casualties <b style="color:#ff8a76">' + (MP.casualties || 0) + '</b> · escalation ' + esc + (MP.warDeclared ? ' · <b style="color:#ff3b30">⚠ WAR</b>' : '') + '</div>' +
+    '<div style="height:4px;background:rgba(255,255,255,.12);border-radius:2px;overflow:hidden;margin-top:2px;"><div style="height:100%;width:' + esc + '%;background:' + escC + '"></div></div>' +
+    '<div style="margin-top:2px;">war risk ' + war + '/100</div>' +
+    '<div style="height:4px;background:rgba(255,255,255,.12);border-radius:2px;overflow:hidden;"><div style="height:100%;width:' + war + '%;background:#ff3b30"></div></div>';
+}
 function mpHostMaybeSnapshot(dt) {
   if (!MP.connected) return;
   const now = Date.now();
   if (now - MP.lastRecvAt > 9000 && !MP._lostNotified) mpOnPeerLost('timeout');   // notify once, keep simulating (no auto-pause)
   if (MP.escalation > 0) { MP.escalation = Math.max(0, MP.escalation - dt * 0.0015); mpRecomputeUnlocks(); }
+  if (MP.warRisk > 0 && !MP.warDeclared) MP.warRisk = Math.max(0, MP.warRisk - dt * 0.0008);   // war risk cools without fresh casualties
+  // v2.25.4 — passive arsenal resupply trickle (smuggling gives the bursts)
+  if (!MP._regenAt) MP._regenAt = now;
+  if (now - MP._regenAt >= 1000) {
+    const sec = Math.min(5, (now - MP._regenAt) / 1000); MP._regenAt = now;
+    FACTION_ORDER.forEach(function (fid) {
+      const f = (typeof ATTACKER_FACTIONS !== 'undefined' && ATTACKER_FACTIONS[fid]) || {};
+      const regen = f.arsenalRegenPerSec, cap = f.arsenalCap || {}, ars = MP.arsenal[fid] || (MP.arsenal[fid] = {});
+      if (!regen) return;
+      Object.keys(regen).forEach(function (ty) { ars[ty] = Math.min(cap[ty] || 99999, (ars[ty] || 0) + regen[ty] * sec * MP_REGEN_MULT); });
+    });
+  }
+  // v2.25.4 — OREF zone sync (event-driven): OPFOR sees the alert polygons its attacks trigger
+  if (!MP._orefAt || now - MP._orefAt > 350) {
+    MP._orefAt = now;
+    const al = state.orefAlerts || [];
+    const sig = al.length + ':' + al.map(function (a) { return (a.cityId || a.regionName || '') + '@' + Math.round(a.expiresAtGameTime || a.expiresAt || 0); }).join(',');
+    if (sig !== MP._orefSig) {
+      MP._orefSig = sig;
+      mpSend({ t: 'oref', a: al.map(function (a) { return { kind: a.kind, cityId: a.cityId, cityName: a.cityName, regionName: a.regionName, polygons: a.polygons, type: a.type, durationMs: a.durationMs, spawnedAtGameTime: a.spawnedAtGameTime, expiresAtGameTime: a.expiresAtGameTime }; }) });
+    }
+  }
+  mpRenderHostStatus();   // v2.25.4 — both sides see the conflict state (escalation/scores/war)
   // v2.25.3 — host heartbeat in the HUD (loop-alive spinner / opponent-silent warning)
   if (!MP._hudAt || now - MP._hudAt > 250) {
     MP._hudAt = now;
@@ -23138,6 +23236,8 @@ function mpBuildSnapshot() {
     t: 'snap', gt: Math.round(state.gameTime), dn: state.dayNight,
     esc: Math.round(MP.escalation), unl: Object.assign({}, MP.unlocked), gf: MP.guestFaction,
     ars: MP.arsenal, rel: mpReloadRemaining(),
+    op: Math.round(MP.scoreOpf || 0), dfd: Math.round((st.intercepted || 0) * 10), cas: MP.casualties || 0,
+    war: Math.round(MP.warRisk || 0), wd: MP.warDeclared ? 1 : 0, smug: Math.max(0, (MP.smuggleReady || 0) - Date.now()),
     th: th, ic: ic, ct: ct, fx: fx,
     st: { intc: st.intercepted || 0, miss: st.missed || 0, tot: st.threatsTotal || 0, saf: st.civilianSafety != null ? Math.round(st.civilianSafety) : 100 }
   };
@@ -23164,6 +23264,7 @@ function mpGuestOnMessage(msg) {
     case 'hello': break;
     case 'start': mpGuestStart(msg.faction || MP.guestFaction); break;
     case 'snap': mpGuestApplySnapshot(msg); break;
+    case 'oref': state.orefAlerts = msg.a || []; break;   // v2.25.4 — synced OREF alert polygons
     case 'pause': mpApplyRemotePause(!!msg.paused); break;
   }
 }
@@ -23174,6 +23275,8 @@ function mpGuestApplySnapshot(s) {
   state.gameTime = s.gt; state.dayNight = s.dn;
   MP.escalation = s.esc; MP.unlocked = s.unl || MP.unlocked; MP.guestFaction = s.gf || MP.guestFaction;
   MP.arsenal = s.ars || MP.arsenal; MP.reloadRemaining = s.rel || {}; MP.guestStats = s.st || null;
+  MP.scoreOpf = s.op || 0; MP.scoreDef = s.dfd || 0; MP.casualties = s.cas || 0;
+  MP.warRisk = s.war || 0; MP.warDeclared = !!s.wd; MP.smuggleRemaining = s.smug || 0;
   // THREATS — merge by id, preserve local trail, store velocity for extrapolation
   const oldT = {}; state.threats.forEach((t) => { oldT[t.id] = t; });
   state.threats = (s.th || []).map((n) => {
@@ -23287,14 +23390,24 @@ function mpUpdateGuestPanel() {
   const ars = (MP.arsenal && MP.arsenal[fid]) || {}; const rem = (MP.reloadRemaining && MP.reloadRemaining[fid]) || 0;
   const esc = Math.round(MP.escalation || 0);
   const escColor = esc >= 40 ? '#ff6b5e' : (esc >= 20 ? '#ffaa00' : '#7fffb0');
+  const war = Math.round(MP.warRisk || 0);
   let armLine = '';
   if (am.type) { const left = Math.floor(ars[am.type] || 0); armLine = `<div>${(WEAPON_DISPLAY[am.type] || {}).label || am.type}: <b style="color:${left > 0 ? '#7fffb0' : '#ff6b5e'}">${left}</b> in stock${rem > 0 ? ` · <span style="color:#ffaa00">reload ${Math.ceil(rem / 1000)}s</span>` : ''}</div>`; }
+  const smugRem = Math.max(0, Math.round((MP.smuggleRemaining || 0) / 1000));
+  const smugBtn = smugRem > 0
+    ? `<button disabled style="opacity:.5;width:100%;margin-top:5px;padding:5px;font-size:11px;background:#1a1a1a;color:#999;border:1px solid #444;border-radius:3px;">📦 SMUGGLING… ${smugRem}s</button>`
+    : `<button onclick="window.__mpSmuggle&&window.__mpSmuggle()" style="width:100%;margin-top:5px;padding:5px;font-size:11px;background:rgba(40,90,150,.25);color:#7fd1ff;border:1px solid #2e6da4;border-radius:3px;cursor:pointer;">📦 RESUPPLY · smuggle (Egypt / sea)</button>`;
   box.innerHTML =
     `<div style="letter-spacing:2px;color:#7fd1ff;font-weight:bold;">🌐 OPFOR · ${(ENEMIES[fid] ? ENEMIES[fid].name : fid).toUpperCase()}</div>` +
     armLine +
-    `<div>Escalation: <b style="color:${escColor}">${esc}</b>/100 <span style="color:var(--text-dim)">(${esc >= 40 ? 'INTENSE — all fronts open' : 'build up to open new fronts'})</span></div>` +
-    `<div style="height:5px;background:rgba(255,255,255,0.1);border-radius:3px;margin-top:2px;overflow:hidden;"><div style="height:100%;width:${esc}%;background:${escColor};transition:width .3s;"></div></div>`;
+    `<div>Score — YOU <b style="color:#ff8a76">${Math.round(MP.scoreOpf || 0)}</b> · DEF <b style="color:#7fffb0">${Math.round(MP.scoreDef || 0)}</b> · жертвы <b style="color:#ff8a76">${MP.casualties || 0}</b></div>` +
+    `<div>Escalation: <b style="color:${escColor}">${esc}</b>/100 ${MP.warDeclared ? '<b style="color:#ff3b30">⚠ WAR</b>' : `<span style="color:var(--text-dim)">(${esc >= 40 ? 'INTENSE — all fronts open' : 'raise to open new fronts'})</span>`}</div>` +
+    `<div style="height:5px;background:rgba(255,255,255,0.1);border-radius:3px;margin-top:2px;overflow:hidden;"><div style="height:100%;width:${esc}%;background:${escColor};transition:width .3s;"></div></div>` +
+    `<div style="margin-top:3px;">War risk: <b style="color:#ff3b30">${war}</b>/100 <span style="color:var(--text-dim)">(жертвы → шанс войны)</span></div>` +
+    `<div style="height:4px;background:rgba(255,255,255,0.1);border-radius:3px;margin-top:1px;overflow:hidden;"><div style="height:100%;width:${war}%;background:#ff3b30;"></div></div>` +
+    smugBtn;
 }
+window.__mpSmuggle = function () { if (MP.enabled && MP.role === 'guest' && MP.connected) mpSend({ t: 'smuggle' }); };
 
 /* ---------------- shared HUD chip ---------------- */
 function mpHudShow(roleLabel) {
