@@ -2125,6 +2125,15 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.25.5  — MP escalation→reach mechanic (user). (1) Escalation now scales with strike DEPTH +
+//            seriousness: an OPFOR hit deeper into Israel escalates harder (distanceKm term); a
+//            DEFENDER air strike deeper into enemy land escalates more, and the symbolic capitals
+//            (Beirut / Gaza City / Tehran / Sanaa) spike it. (2) INVERSE link: escalation gates the
+//            OPFOR's strike REACH — low escalation = short border-only strikes (short trajectories,
+//            small OREF zones), high escalation opens deep, long-range strikes (Hamas/Hezbollah
+//            graduate border→deep via mpReachKm; Iran/Houthi are deep by nature, gated by the
+//            unlock). The bigger trajectories + wider alert zones follow automatically since both
+//            already scale with distance. Reach shown in the OPFOR panel.
 //   2.25.4  — MP gameplay layer (user): (1) OPFOR now sees the OREF/Tzofar alert POLYGONS its attacks
 //            trigger — host broadcasts state.orefAlerts (event-driven) and the guest renders them.
 //            (2) PURE PvP — disabled ALL AI offence in MP (no AI waves/events/crisis/IDF-retaliation),
@@ -3156,7 +3165,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.25.4';
+const GAME_VERSION = '2.25.5';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -6247,6 +6256,7 @@ function launchAirStrike(lat, lon) {
 
   state.strikesLeft--;
   state.strikeCooldown = 8000;   // быстрая перезарядка
+  if (typeof MP !== 'undefined' && MP.enabled && MP.role === 'host') mpEscalateDefenderStrike(target.lat, target.lon, target);   // v2.25.5 — deep/symbolic strikes raise escalation
   state.strikeMode = false;
   document.getElementById('btn-strike').classList.remove('active');
   document.getElementById('strike-count').textContent = state.strikesLeft;
@@ -12167,6 +12177,8 @@ function handleImpact(threat, smallBlast) {
       MP.scoreOpf = (MP.scoreOpf || 0) + (strategic ? 40 : 15) + Math.round(damage) + cas * 2;
       // escalation: volume is handled at launch; a STRATEGIC hit spikes it hard, casualties add war risk
       let esc = strategic ? 14 : 3;
+      // v2.25.5 — DEEPER strikes into Israel escalate harder (Tel Aviv hit >> border-town hit)
+      esc += Math.min(20, (threat.distanceKm || 0) * 0.06);
       if (cas > 0) esc += Math.min(18, cas * 0.5);
       MP.escalation = Math.min(100, (MP.escalation || 0) + esc);
       if (cas > 0 || strategic) {
@@ -23084,6 +23096,7 @@ function mpHostStart() {
   mpSend({ t: 'start', faction: MP.guestFaction });
   const m = el('mp-menu'); if (m) m.classList.add('hidden');
   startScenario('mpHost');
+  state.strikesLeft = Math.max(state.strikesLeft || 0, 99);   // v2.25.5 — defender can strike enemy territory (drives escalation)
   mpHudShow('DEFENDER');
 }
 function mpHostOnMessage(msg) {
@@ -23115,6 +23128,8 @@ function mpHostApplyLaunch(cmd) {
                                         : Math.max(0, Math.min(cmd.siteIndex | 0, e.launchSites.length - 1));
   const spreadDeg = cmd.spread || 0.005;
   const lat = cmd.targetLat, lon = cmd.targetLon;
+  const _site = e.launchSites[siteIdx];   // v2.25.5 — enforce escalation-gated reach (authority)
+  if (_site && haversineKm(_site.lat, _site.lon, lat, lon) > mpReachKm(fid)) return;
   const useCluster = (type === 'ballistic' && cmd.clusterWarhead);
   const droneRoute = (type === 'drone' && cmd.droneRoute && cmd.droneRoute.length) ? cmd.droneRoute.map(w => ({ lat: w.lat, lon: w.lon })) : null;
   const gen = state.scenarioGen;
@@ -23142,6 +23157,45 @@ function mpBumpEscalation(type, salvo) {
 function mpRecomputeUnlocks() {
   const intense = MP.warDeclared || MP.escalation >= 40;
   FACTION_ORDER.forEach((fid) => { MP.unlocked[fid] = (fid === MP.guestFaction) || intense; });
+}
+// v2.25.5 — ESCALATION → REACH. Low escalation = short, border-only strikes; high escalation opens
+// deep, long-range strikes. Reach is the max km a faction may strike from its launch site, ramping
+// with escalation. Hamas/Hezbollah graduate border→deep; Iran/Houthi are deep by nature (their floor
+// covers Israel) and are instead gated by the faction-unlock at escalation ≥ 40.
+const MP_REACH = {
+  hamas:     { floor: 25,   span: 110 },
+  hezbollah: { floor: 30,   span: 130 },
+  iran:      { floor: 1100, span: 700 },
+  houthi:    { floor: 1700, span: 520 }
+};
+function mpReachKm(fid) {
+  const r = MP_REACH[fid] || { floor: 45, span: 220 };
+  const e = Math.max(0, Math.min(100, MP.escalation || 0));
+  return r.floor + Math.pow(e / 100, 1.4) * r.span;
+}
+// Symbolic enemy capitals — striking these (or near them) escalates hard.
+const MP_SYMBOLIC = [
+  { name: 'Beirut',    lat: 33.8938, lon: 35.5018, r: 30 },
+  { name: 'Gaza City', lat: 31.5018, lon: 34.4668, r: 16 },
+  { name: 'Tehran',    lat: 35.6892, lon: 51.3890, r: 70 },
+  { name: 'Sanaa',     lat: 15.3694, lon: 44.1910, r: 70 }
+];
+// v2.25.5 — DEFENDER deep strikes raise escalation: deeper into enemy land = more, and the symbolic
+// capitals (Beirut / Gaza City / Tehran / Sanaa) spike it. "Depth" = distance from the nearest
+// Israeli city (a border-Lebanon strike is shallow; Beirut/Tehran are deep).
+function mpEscalateDefenderStrike(lat, lon, target) {
+  if (!MP.enabled || MP.role !== 'host') return;
+  let depthKm = Infinity;
+  for (const c of state.cities) { if (!c.alive) continue; const d = haversineKm(lat, lon, c.lat, c.lon); if (d < depthKm) depthKm = d; }
+  if (!isFinite(depthKm)) depthKm = 0;
+  let esc = 2 + Math.min(22, depthKm * 0.03);
+  let sym = null;
+  for (const s of MP_SYMBOLIC) { if (haversineKm(lat, lon, s.lat, s.lon) <= s.r) { esc += 22; sym = s.name; break; } }
+  esc += ((target && target.importance) || 0) * 0.8;
+  MP.escalation = Math.min(100, (MP.escalation || 0) + esc);
+  MP.warRisk = Math.min(100, (MP.warRisk || 0) + (sym ? 8 : 2));
+  mpRecomputeUnlocks();
+  if (sym && typeof logEvent === 'function') logEvent('⚠ Deep strike on ' + sym + ' — escalation spikes', 'danger');
 }
 function mpReloadRemaining() { const now = Date.now(), o = {}; FACTION_ORDER.forEach((f) => { o[f] = Math.max(0, (MP.reload[f] || 0) - now); }); return o; }
 // v2.25.4 — OPFOR resupply: a smuggling run (Egypt/sea) delivers a burst of stock on a cooldown.
@@ -23360,6 +23414,9 @@ function mpGuestLaunchAt(lat, lon) {
   const distKm = haversineKm(site.lat, site.lon, lat, lon);
   const maxKm = (typeof WEAPON_MAX_RANGE !== 'undefined' && WEAPON_MAX_RANGE[am.type]) || 99999;
   if (distKm > maxKm) { showNotification('OUT OF RANGE', `${(WEAPON_DISPLAY[am.type] || {}).label || am.type} max ${maxKm} km — target is ${distKm.toFixed(0)} km from ${site.name}`, 'warn'); return false; }
+  // v2.25.5 — escalation-gated reach: a low escalation keeps strikes short/local (border only)
+  const reach = mpReachKm(am.faction);
+  if (distKm > reach) { showNotification('ESCALATION TOO LOW', `War is still limited — strikes capped at ~${Math.round(reach)} km from ${site.name} (${distKm.toFixed(0)} km away). Hit closer, or raise escalation with deeper/bigger strikes.`, 'warn'); return false; }
   const rem = (MP.reloadRemaining && MP.reloadRemaining[am.faction]) || 0;
   if (rem > 0) { showNotification('RELOADING', `Wait ${Math.ceil(rem / 1000)}s before next launch`, 'warn'); return false; }
   const stock = Math.floor((MP.arsenal && MP.arsenal[am.faction] && MP.arsenal[am.faction][am.type]) || 0);
@@ -23397,9 +23454,11 @@ function mpUpdateGuestPanel() {
   const smugBtn = smugRem > 0
     ? `<button disabled style="opacity:.5;width:100%;margin-top:5px;padding:5px;font-size:11px;background:#1a1a1a;color:#999;border:1px solid #444;border-radius:3px;">📦 SMUGGLING… ${smugRem}s</button>`
     : `<button onclick="window.__mpSmuggle&&window.__mpSmuggle()" style="width:100%;margin-top:5px;padding:5px;font-size:11px;background:rgba(40,90,150,.25);color:#7fd1ff;border:1px solid #2e6da4;border-radius:3px;cursor:pointer;">📦 RESUPPLY · smuggle (Egypt / sea)</button>`;
+  const reachKm = Math.round(mpReachKm(fid));
   box.innerHTML =
     `<div style="letter-spacing:2px;color:#7fd1ff;font-weight:bold;">🌐 OPFOR · ${(ENEMIES[fid] ? ENEMIES[fid].name : fid).toUpperCase()}</div>` +
     armLine +
+    `<div>Reach: <b style="color:#7fd1ff">~${reachKm} km</b> <span style="color:var(--text-dim)">(↑эскалация = глубже удары)</span></div>` +
     `<div>Score — YOU <b style="color:#ff8a76">${Math.round(MP.scoreOpf || 0)}</b> · DEF <b style="color:#7fffb0">${Math.round(MP.scoreDef || 0)}</b> · жертвы <b style="color:#ff8a76">${MP.casualties || 0}</b></div>` +
     `<div>Escalation: <b style="color:${escColor}">${esc}</b>/100 ${MP.warDeclared ? '<b style="color:#ff3b30">⚠ WAR</b>' : `<span style="color:var(--text-dim)">(${esc >= 40 ? 'INTENSE — all fronts open' : 'raise to open new fronts'})</span>`}</div>` +
     `<div style="height:5px;background:rgba(255,255,255,0.1);border-radius:3px;margin-top:2px;overflow:hidden;"><div style="height:100%;width:${esc}%;background:${escColor};transition:width .3s;"></div></div>` +
