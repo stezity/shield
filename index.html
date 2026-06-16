@@ -2215,6 +2215,13 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.28.4  — US = FULL MILITARY PLAYER IN MULTIPLAYER. (1) US assets + air-defense level now SYNC to all
+//            players (snapshot ust/usad) — deployed carriers & damage show everywhere. (2) A guest's strike
+//            on a US asset routes to the host (usStrike), and the US player's map strike routes too
+//            (usMapStrike) — both applied authoritatively. (3) PICK-TARGET STRIKE: the US panel gets
+//            🎯 Air-strike mode / 🚀 Tomahawk mode — toggle, then CLICK an enemy target on the map; nearest
+//            US ship fires the Tomahawk. (4) ✈✈ US MASS STRIKE (hits the 5 highest-value targets) and
+//            🛡 Assist Israel intercepts (shoots down incoming over Israel). All work in MP via the host.
 //   2.28.3  — US own AIR DEFENSE + Iran can bomb the US anytime (so the Iran player isn't idle). state.usAdLevel
 //            (Patriot/THAAD on US bases, default 40%): strikeUSTarget now rolls it FIRST — on success the
 //            strike is INTERCEPTED (exo flash + marker, no damage) but still raises US involvement; on a miss
@@ -3495,7 +3502,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.28.3';
+const GAME_VERSION = '2.28.4';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -20933,8 +20940,13 @@ function setupCanvasInteraction() {
       const buildPanelOpen = document.getElementById('build-panel').style.display !== 'none';
       const attackerArmed = (state.playAs === 'attacker' && state.attackMode && state.attackMode.type);
       if (!isDragging) {
+        // === US PLAYER — strike mode: click an enemy target to strike it (air / Tomahawk) ===
+        if (state.usStrikeMode && typeof usMapStrike === 'function') {
+          const [lat, lon] = screenToGeo(sx, sy);
+          usMapStrike(lat, lon);
+        }
         // === RESISTANCE AXIS — player-as-attacker click-to-launch ===
-        if (attackerArmed) {
+        else if (attackerArmed) {
           const [lat, lon] = screenToGeo(sx, sy);
           // v2.23.0 — DRONE ROUTING: Shift+click drops a route waypoint (fly around PVO / via the
           // sea); a normal click launches the drone routed through the queued waypoints to the target.
@@ -22796,6 +22808,7 @@ function startScenario(name) {
   state.iranSupplyDelayUntil = 0; state.iranHoldUntil = 0; state.iranLastResponse = ''; state.iranTask = null; state.iranGateUntil = 0;
   state.usInvolvement = 12; state.usTargets = null; state.usHasCasusBelli = false;   // v2.26.6 #9/#10 — US military reset
   state.usAdLevel = 40; state.usFightersBanned = false; state.usIntelCutUntil = 0;   // v2.28.3 — US air-defense level + pressure flags reset
+  state.usStrikeMode = false; state.usStrikeWeapon = 'air';   // v2.28.4 — US pick-target strike mode reset
   state.iranDelayUntil = 0;
   state.sandstormUntil = 0;
   state.earlyWarningUntil = 0;
@@ -24066,6 +24079,8 @@ function mpBuildSnapshot() {
     lsd: (function () { const o = {}; (state.enemyTargets || []).forEach(function (et) { if (!et._isLaunchSite) return; const k = et._siteFaction + '_' + et._siteIdx; const d = (et.alive === false) ? 100 : Math.round(et.damage || 0); if (o[k] == null || d > o[k]) o[k] = d; }); return o; })(),   // v2.25.12 — defender's damage to OPFOR launch sites
     etd: (function () { const o = {}; (state.enemyTargets || []).forEach(function (et) { if (et._isLaunchSite || !et.id) return; if (et.alive === false) o[et.id] = -1; else if ((et.damage || 0) > 0) o[et.id] = Math.round(et.damage); }); return o; })(),   // v2.27.7 — sync defender's damage on ALL enemy targets (HQ/leader/airbase/strategic/city) so the OPFOR sees them damaged/destroyed
     ml: (function () { const a = []; (state.mobileLaunchers || []).forEach(function (m) { if (m.alive) a.push({ id: m.id, f: m.faction, la: r5(m.lat), lo: r5(m.lon), b: m.bornAt, tl: m.ttl }); }); return a; })(),   // v2.27.7 — mobile launchers (exposed) synced to the OPFOR
+    ust: (function () { if (typeof usTargetsEnsure === 'function') usTargetsEnsure(); const a = []; (state.usTargets || []).forEach(function (t) { a.push({ id: t.id, ty: t.type, la: r5(t.lat), lo: r5(t.lon), im: t.importance, nm: t.name, d: (t.alive === false ? 100 : Math.round(t.damage || 0)), al: t.alive === false ? 0 : 1 }); }); return a; })(),   // v2.28.4 — US assets (incl. deployed carriers) + damage synced to ALL players
+    usad: Math.round(state.usAdLevel != null ? state.usAdLevel : 40),   // v2.28.4 — US air-defense level
     st: { intc: st.intercepted || 0, miss: st.missed || 0, tot: st.threatsTotal || 0, saf: st.civilianSafety != null ? Math.round(st.civilianSafety) : 100 }
   };
 }
@@ -24173,6 +24188,8 @@ function mpGuestApplySnapshot(s) {
   MP.siteDamage = s.lsd || {};   // v2.25.12 — defender's damage on OPFOR launch sites
   if (s.etd && state.enemyTargets) { state.enemyTargets.forEach(function (et) { const d = s.etd[et.id]; if (d == null) return; if (d === -1) { et.alive = false; et.damage = 100; } else { et.damage = d; et.alive = true; } }); }   // v2.27.7 — apply synced enemy-target damage so the OPFOR sees his assets struck
   if (s.ml) { state.mobileLaunchers = s.ml.map(function (m) { return { id: m.id, faction: m.f, lat: m.la, lon: m.lo, bornAt: m.b, ttl: m.tl, alive: true }; }); }   // v2.27.7 — exposed mobile launchers (render-only on guest)
+  if (s.ust && s.ust.length) { state.usTargets = s.ust.map(function (t) { return { id: t.id, type: t.ty, lat: t.la, lon: t.lo, importance: t.im, name: t.nm, faction: 'usa', damage: t.d, alive: t.al !== 0, hardness: 0.5 }; }); }   // v2.28.4 — synced US assets (deployed carriers + damage)
+  if (s.usad != null) state.usAdLevel = s.usad;   // v2.28.4 — US air-defense level synced
   // FX events → spawn local particles
   if (s.fx) s.fx.forEach(mpGuestPlayFx);
 }
@@ -24444,6 +24461,8 @@ function mpFfaHostOnMessage(msg, cRec) {
   if (msg.t === 'launch') { if (cRec.faction && cRec.faction === msg.faction) mpHostApplyLaunch(msg); return; }
   if (msg.t === 'smuggle') { if (cRec.faction && cRec.faction !== 'usa') mpHostSmuggle(cRec.faction); return; }
   if (msg.t === 'usaGrant') { if (cRec.faction === 'usa') mpFfaApplyUsaGrant(msg.kind); return; }
+  if (msg.t === 'usStrike') { const ut = (state.usTargets || []).find(function (t) { return t.id === msg.id; }); if (ut && typeof strikeUSTarget === 'function') strikeUSTarget(ut); return; }   // v2.28.4 — axis guest struck a US asset → host applies
+  if (msg.t === 'usMapStrike') { if (cRec.faction === 'usa' && typeof usHostMapStrike === 'function') usHostMapStrike(msg.lat, msg.lon, msg.weapon); return; }   // v2.28.4 — US player's map strike (pick target/base) → host applies
   if (msg.t === 'axistask') { if (cRec.faction === 'iran') { state.iranTask = msg.task; if (typeof showNotification === 'function') showNotification('☪ TEHRAN DIRECTIVE', msg.task, 'info'); mpSend({ t: 'axistask', task: msg.task }); } return; }   // v2.26.7 #8 — Iran (guest) directive → host applies + rebroadcasts to the axis
   if (msg.t === 'permReq') { mpDeliverPermReq(msg, cRec); return; }   // v2.27.1 — relay an ally-permission request to the US/Iran player
   if (msg.t === 'permResp') { const rc = MP._permRoute && MP._permRoute[msg.reqId]; if (MP._permRoute) delete MP._permRoute[msg.reqId]; if (rc) mpSendTo(rc, msg); else mpApplyPermResp(msg); return; }   // v2.27.1 — relay the decision back to the requester
@@ -24616,6 +24635,68 @@ function usConusFighters() {
   if (typeof showNotification === 'function') showNotification('✈ CONUS REINFORCEMENT', 'US fighter wings surge from the mainland — Israeli airbases reinforced.', 'success');
   if (typeof logEvent === 'function') logEvent('✈ US mainland (CONUS) fighters deployed', 'success');
 }
+// v2.28.4 — US PLAYER pick-target strikes (works in MP): click an enemy target on the map, choose Air or
+// Tomahawk; a guest routes it to the host (authoritative), the host applies + syncs.
+function usStrikeSpecific(target) {
+  if (!target || target.alive === false) return;
+  if (typeof usInvSet === 'function') usInvSet((typeof usInvVal === 'function' ? usInvVal() : 12) + 12);
+  if (typeof MP !== 'undefined' && MP.enabled) { MP.escalation = Math.min(100, (MP.escalation || 0) + 8); if (typeof mpEscHoldMajor === 'function') mpEscHoldMajor(2); }
+  target.damage = Math.min(100, (target.damage || 0) + 50 + Math.random() * 35); const k = target.damage >= 100; if (k) { target.alive = false; target.damage = 100; }
+  if (typeof enemyTargetHitFx === 'function') enemyTargetHitFx(target, k);
+  if (typeof showNotification === 'function') showNotification('🇺🇸 US AIRSTRIKE', 'US aircraft struck ' + target.name + '.', 'danger');
+  if (typeof logEvent === 'function') logEvent('🇺🇸 US airstrike → ' + target.name, 'danger');
+}
+function usTomahawkTarget(target) {
+  if (!target || target.alive === false) return;
+  if (typeof usTargetsEnsure === 'function') usTargetsEnsure();
+  const ships = (state.usTargets || []).filter(function (t) { return t.alive !== false && (t.type === 'carrier' || t.type === 'destroyer' || t.type === 'naval'); });
+  if (!ships.length) { if (typeof showNotification === 'function') showNotification('NO PLATFORM', 'Deploy a carrier or destroyer first to fire Tomahawks.', 'warn'); return; }
+  const ship = ships[Math.floor(Math.random() * ships.length)];
+  if (typeof usInvSet === 'function') usInvSet((typeof usInvVal === 'function' ? usInvVal() : 12) + 10);
+  if (typeof MP !== 'undefined' && MP.enabled) { MP.escalation = Math.min(100, (MP.escalation || 0) + 8); if (typeof mpEscHoldMajor === 'function') mpEscHoldMajor(2); }
+  state.tomahawks = state.tomahawks || []; state.tomahawks.push({ sLat: ship.lat, sLon: ship.lon, tLat: target.lat, tLon: target.lon, target: target, p: 0 });
+  if (typeof showNotification === 'function') showNotification('🚀 TOMAHAWK LAUNCH', 'Tomahawk from ' + ship.name + ' → ' + target.name + '.', 'danger');
+  if (typeof logEvent === 'function') logEvent('🚀 US Tomahawk → ' + target.name, 'danger');
+}
+function usHostMapStrike(lat, lon, weapon) {
+  let best = null, bd = Infinity;
+  (state.enemyTargets || []).forEach(function (t) { if (t.alive === false) return; const d = haversineKm(lat, lon, t.lat, t.lon); if (d < 70 && d < bd) { bd = d; best = t; } });
+  if (!best) { if (typeof showNotification === 'function') showNotification('NO TARGET', 'No enemy target near that point.', 'warn'); return; }
+  if (weapon === 'tomahawk') usTomahawkTarget(best); else usStrikeSpecific(best);
+}
+function usMapStrike(lat, lon) {
+  const weapon = state.usStrikeWeapon || 'air';
+  if (typeof MP !== 'undefined' && MP.enabled && MP.role === 'guest') { mpSend({ t: 'usMapStrike', lat: lat, lon: lon, weapon: weapon }); if (typeof mpToast === 'function') mpToast('US ' + (weapon === 'tomahawk' ? 'Tomahawk' : 'airstrike') + ' ordered', 'info'); return; }
+  usHostMapStrike(lat, lon, weapon);
+}
+function usSetStrikeMode(weapon) {
+  if (state.usStrikeMode && state.usStrikeWeapon === weapon) state.usStrikeMode = false;
+  else { state.usStrikeMode = true; state.usStrikeWeapon = weapon; }
+  usUpdateStrikeBtns();
+  if (typeof mpToast === 'function') mpToast(state.usStrikeMode ? ((weapon === 'tomahawk' ? 'Tomahawk' : 'Air-strike') + ' mode ON — click an enemy target') : 'US strike mode OFF', 'info');
+}
+function usUpdateStrikeBtns() {
+  const sa = document.getElementById('us-strike-air'), st = document.getElementById('us-strike-toma');
+  const onA = !!(state.usStrikeMode && state.usStrikeWeapon === 'air'), onT = !!(state.usStrikeMode && state.usStrikeWeapon === 'tomahawk');
+  if (sa) { sa.style.borderColor = onA ? '#7fffb0' : '#cf5b3a'; sa.textContent = onA ? '🎯 Air-strike mode: ON' : '🎯 Air-strike mode'; }
+  if (st) { st.style.borderColor = onT ? '#7fffb0' : '#cf5b3a'; st.textContent = onT ? '🚀 Tomahawk mode: ON' : '🚀 Tomahawk mode (needs a ship)'; }
+}
+function usMassStrike() {   // US saturates several enemy targets (most-valuable first)
+  const alive = (state.enemyTargets || []).filter(function (t) { return t.alive !== false && !t._isLaunchSite; }).sort(function (a, b) { return (b.importance || 0) - (a.importance || 0); });
+  if (!alive.length) { if (typeof showNotification === 'function') showNotification('NO TARGETS', 'No enemy targets to strike.', 'warn'); return; }
+  const n = Math.min(5, alive.length);
+  for (let i = 0; i < n; i++) usStrikeSpecific(alive[i]);
+  if (typeof usInvSet === 'function') usInvSet((typeof usInvVal === 'function' ? usInvVal() : 12) + 6);
+  if (typeof showNotification === 'function') showNotification('✈✈ US MASS STRIKE', n + ' enemy targets hit by US air power.', 'danger');
+  if (typeof logEvent === 'function') logEvent('✈✈ US mass strike — ' + n + ' targets', 'danger');
+}
+function usAssistIntercept() {   // US helps Israel — shoot down several incoming threats + brief support
+  let n = 0;
+  (state.threats || []).forEach(function (t) { if (n >= 6) return; if (t.intercepted || t.impacted || t.enemy === false) return; if (Math.random() < 0.7) { t.intercepted = true; n++; if (typeof createExplosion === 'function') try { createExplosion(t.curLat, t.curLon, 12, 600, false, true); } catch (e) {} } });
+  if (typeof usInvSet === 'function') usInvSet((typeof usInvVal === 'function' ? usInvVal() : 12) + 6);
+  if (typeof showNotification === 'function') showNotification('🛡 US INTERCEPTS', 'US air defense knocked down ' + n + ' incoming threat' + (n === 1 ? '' : 's') + ' over Israel.', 'success');
+  if (typeof logEvent === 'function') logEvent('🛡 US assisted intercepts — ' + n + ' shot down', 'success');
+}
 // v2.27.9 — US strikes a faction's target (Iran/Hezbollah/Houthi) — the US fighting the war directly.
 function usStrikeFaction(f) {
   if (typeof usInvSet === 'function') usInvSet((typeof usInvVal === 'function' ? usInvVal() : 12) + 16);
@@ -24681,6 +24762,8 @@ function mpFfaApplyUsaGrant(kind) {
   else if (kind === 'tomaHouthi') usTomahawk('houthi');
   else if (kind === 'conusFighters') usConusFighters();           // v2.28.0 — fighters from the US mainland
   else if (kind === 'usAd') { state.usAdLevel = Math.min(95, (state.usAdLevel || 40) + 18); if (typeof usInvSet === 'function') usInvSet((typeof usInvVal === 'function' ? usInvVal() : 12) + 4); if (typeof showNotification === 'function') showNotification('🛡 US AIR DEFENSE REINFORCED', 'Patriot/THAAD batteries deployed to US bases — intercept chance now ' + state.usAdLevel + '%.', 'success'); if (typeof logEvent === 'function') logEvent('🛡 US air defense reinforced → ' + state.usAdLevel + '%', 'success'); }   // v2.28.3 — US own ПВО
+  else if (kind === 'usMass') usMassStrike();             // v2.28.4 — US mass strike (like Israel's)
+  else if (kind === 'usIntercept') usAssistIntercept();   // v2.28.4 — US helps intercept threats over Israel
 }
 function mpFfaRequestUsAid() {
   const now = Date.now();
@@ -24918,9 +25001,16 @@ function mpFfaInstallUsaPanel() {
       '<button class="mp-usa-btn" data-kind="tomaHez" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(150,60,40,.3);border:1px solid #cf5b3a;color:#ffb3a0;border-radius:4px;cursor:pointer;">🚀 Tomahawk → Hezbollah</button>' +
       '<button class="mp-usa-btn" data-kind="tomaHouthi" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(150,60,40,.3);border:1px solid #cf5b3a;color:#ffb3a0;border-radius:4px;cursor:pointer;">🚀 Tomahawk → Houthis</button>' +
       '<button class="mp-usa-btn" data-kind="conusFighters" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(40,90,150,.3);border:1px solid #5b8def;color:#bfe0ff;border-radius:4px;cursor:pointer;">✈ Fighters from CONUS (mainland)</button>' +
-      '<button class="mp-usa-btn" data-kind="usAd" style="width:100%;padding:7px;background:rgba(40,110,90,.3);border:1px solid #7fffb0;color:#bfffd8;border-radius:4px;cursor:pointer;">🛡 Reinforce US air defense (Patriot/THAAD)</button>';
+      '<button class="mp-usa-btn" data-kind="usAd" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(40,110,90,.3);border:1px solid #7fffb0;color:#bfffd8;border-radius:4px;cursor:pointer;">🛡 Reinforce US air defense (Patriot/THAAD)</button>' +
+      '<div style="margin:9px 0 4px;color:#9fbada;font-size:10px;letter-spacing:1px;border-top:1px solid rgba(91,141,239,.3);padding-top:7px;">PICK-TARGET STRIKE (click a target on the map)</div>' +
+      '<button id="us-strike-air" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(150,60,40,.3);border:1px solid #cf5b3a;color:#ffb3a0;border-radius:4px;cursor:pointer;">🎯 Air-strike mode</button>' +
+      '<button id="us-strike-toma" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(150,60,40,.3);border:1px solid #cf5b3a;color:#ffb3a0;border-radius:4px;cursor:pointer;">🚀 Tomahawk mode (needs a ship)</button>' +
+      '<button class="mp-usa-btn" data-kind="usMass" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(180,40,30,.35);border:1px solid #ff5b50;color:#ff8a76;border-radius:4px;cursor:pointer;">✈✈ US MASS STRIKE</button>' +
+      '<button class="mp-usa-btn" data-kind="usIntercept" style="width:100%;padding:7px;background:rgba(40,110,90,.3);border:1px solid #7fffb0;color:#bfffd8;border-radius:4px;cursor:pointer;">🛡 Assist Israel intercepts</button>';
     document.body.appendChild(p);
     p.querySelectorAll('.mp-usa-btn').forEach(function (b) { b.onclick = function () { const k = b.dataset.kind; if (MP.role === 'host') mpFfaApplyUsaGrant(k); else mpSend({ t: 'usaGrant', kind: k }); mpToast('US action: ' + k, 'success'); const r = el('mp-usa-req'); if (r) r.style.display = 'none'; }; });
+    const _sa = el('us-strike-air'); if (_sa) _sa.onclick = function () { usSetStrikeMode('air'); };
+    const _st = el('us-strike-toma'); if (_st) _st.onclick = function () { usSetStrikeMode('tomahawk'); };
   }
   p.style.display = 'block';
 }
@@ -25321,8 +25411,10 @@ const US_TARGETS = [
 ];
 function usTargetsEnsure() { if (!state.usTargets) state.usTargets = US_TARGETS.map(function (t) { return Object.assign({}, t, { faction: 'usa', alive: true, damage: 0 }); }); }
 function strikeUSTarget(target) {
+  if (!target) return;
+  if (typeof MP !== 'undefined' && MP.enabled && MP.role === 'guest') { if (typeof mpSend === 'function') mpSend({ t: 'usStrike', id: target.id }); if (typeof spawnHitMarker === 'function') spawnHitMarker(target.lat, target.lon, 'INCOMING', '#ffd479'); return; }   // v2.28.4 — a guest's strike on a US asset is applied by the host (authoritative + synced)
   usTargetsEnsure(); usInvEnsure();
-  if (!target || target.alive === false) return;
+  if (target.alive === false) return;
   const imp = target.importance || 7;
   // v2.28.3 — US AIR DEFENSE (Patriot/THAAD on US bases): chance to intercept the incoming strike (= usAdLevel).
   const ad = (state.usAdLevel != null) ? state.usAdLevel : 40;
