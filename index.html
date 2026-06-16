@@ -2075,6 +2075,13 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.24.27 — Night embers ACTUALLY fall (user: "осколки летят в небо а не на землю"). Root cause:
+//            in this north-up Mercator projection a POSITIVE vLat moves a particle UP on screen, so
+//            (a) the gravity term was the wrong sign (old `vLat +=` pushed embers UP) — flipped to
+//            `vLat -=`, and (b) the spawn used `sin(a)` for the vertical kick, which is + for half the
+//            embers — launching them skyward. Now the vertical component is `-|sin(a)|` (always ≤ 0)
+//            so every ember fans out sideways and rains straight DOWN. Verified: 24/24 embers move
+//            screen-down over ~2 s.
 //   2.24.26 — Night embers refinement (user): (1) embers RAIN DOWN to the ground instead of
 //            scattering in the sky — tighter spread (vLat ×0.25, vLon ×0.4). (2) they fall SLOWER —
 //            per-particle gMul 0.35 on gravity + longer life (close kill ~4.2-7.4 s) so the gentle
@@ -3064,7 +3071,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.24.26';
+const GAME_VERSION = '2.24.27';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -13415,9 +13422,12 @@ function createInterceptFlash(lat, lon, screenYOffset, exo, lift, groundProg) {
       const sp = (0.4 + Math.random() * 1.7) * 0.0003;
       state.particles.push({
         kind: 'debris', glow: true, lat, lon, screenYOffset: screenYOffset || 0, lift: lift || null,
-        // v2.24.26 — TIGHTER spread (less scatter in the sky) so they rain straight DOWN to the ground.
-        vLat: Math.sin(a) * sp * 0.25 - 0.00006,
-        vLon: Math.cos(a) * sp * 0.4,
+        // v2.24.27 — vertical velocity is ALWAYS downward. In this north-up projection a POSITIVE vLat
+        // moves a particle UP on screen, so the old `sin(a)` (which is + for half the embers) was
+        // literally launching half of them into the sky — the user's bug. Using -|sin| guarantees the
+        // vertical component is ≤ 0, so every ember fans out sideways (vLon) and rains straight DOWN.
+        vLat: -Math.abs(Math.sin(a)) * sp * 0.16 - 0.00003,
+        vLon: Math.cos(a) * sp * 0.6,
         gMul: 0.35,                               // v2.24.26 — SLOWER fall (gentle descent — user wanted slower)
         delay: 240 + Math.random() * 170,         // v2.24.26 — appear AFTER the flash (flash first, then embers)
         // long life so the slow descent actually reaches the ground
@@ -13502,9 +13512,10 @@ function updateExplosions(dt) {
       p.vLon *= 0.98;
       p.size *= 1.005;
     } else if (p.kind === 'debris') {
-      // NEW v2.14.0: falling fragments — gravity pulls them down, with drag.
-      // v2.24.26 — gMul lets the glowing embers fall SLOWER (a gentle descent to the ground).
-      p.vLat += 0.0000009 * (p.gMul || 1) * dt;
+      // v2.24.27 — gravity pulls DOWN. In this north-up projection higher lat = UP on screen, so
+      // "down" means DECREASING lat → the sign must be MINUS (the old += made debris fly UP into the
+      // sky — the user's bug). gMul lets the glowing embers fall SLOWER (a gentle descent).
+      p.vLat -= 0.0000009 * (p.gMul || 1) * dt;
       p.vLon *= 0.99;
     } else if (p.kind === 'ismoke') {
       // v2.24.18 — intercept cloud BILLOWS then plateaus and keeps drifting on a steady wind, so it
