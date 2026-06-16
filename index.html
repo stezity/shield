@@ -2130,6 +2130,14 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.25.11 — Doctrines + MP deploy phase (user). (1) Two doctrines did NOTHING (defined + shown but
+//            never read): strikeOnSight now auto counter-batteries the firing launch sites (tickStrikeOnSight,
+//            ~7s cooldown); strictROE now conserves interceptors (ignore pop<5 non-strategic — open
+//            desert was already skipped by default, hence it "did nothing"). (2) MP DEPLOY PHASE: the
+//            host now starts in a build phase — places batteries from scratch + the doctrines panel
+//            opens at the start ("ready deploy") — while the OPFOR WAITS behind a "defender is
+//            deploying" overlay with launches blocked. Host READY (endBuildPhase) → {t:'phase',battle}
+//            → OPFOR overlay clears, launches enabled, snapshots/sim go live.
 //   2.25.10 — MP sync gaps (user): (1) remaining JERK — lat/lon were smoothed but the threat ARC (and
 //            interceptor lift) read `progress`, which steps every snapshot → the dot jumped vertically.
 //            Now progress is derived from the SMOOTHED position each frame, so the arc eases too.
@@ -3205,7 +3213,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.25.10';
+const GAME_VERSION = '2.25.11';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -12468,6 +12476,11 @@ function endBuildPhase() {
   showNotification('COMBAT READY', 'Warning — threats incoming.', 'danger');
   // Сброс таймера задержки первой волны
   state.waveDelayTimer = state.scenario.waves[0].delay;
+  // v2.25.11 — MP: deployment done → tell the OPFOR the battle is live
+  if (typeof MP !== 'undefined' && MP.enabled && MP.role === 'host') {
+    MP.phase = 'battle';
+    mpSend({ t: 'phase', phase: 'battle' });
+  }
 }
 
 /* =========================================================
@@ -13223,6 +13236,9 @@ function autoTarget() {
     const isPopulated = target.population > 0;
     const isStrategic = target.importance >= 7;
     if (!isPopulated && !isStrategic) return;
+    // v2.25.11 — STRICT ROE doctrine: conserve interceptors — ignore tiny/low-value targets (pop < 5)
+    // unless strategic. (Open desert is already skipped above by default.)
+    if (state.doctrines && state.doctrines.strictROE && !isStrategic && (target.population || 0) < 5) return;
     // Pick the battery first — terminal-phase gate depends on which system is engaging.
     // During a salvo, ripple mode lets findBestBattery ignore the reload gate (saturation fire).
     const battery = findBestBattery(threat, rippleMode);
@@ -13790,6 +13806,7 @@ function gameLoop(time) {
       tickPlayerFighters(dt);                 // NEW v2.17.0: player-commanded F-16 squadrons
       tickCrisis(dt);                         // crisis-popup spawn + countdown
       updateIDFRetaliation(dt);
+      if (typeof tickStrikeOnSight === 'function') tickStrikeOnSight(dt);   // v2.25.11 — Strike-on-Sight doctrine
       updateCivilian(dt);
       updateIntel(dt);
       updateCyberStatus(dt);
@@ -13825,6 +13842,21 @@ const IDF_IMPACT_PRESSURE = {
   drone: 2.0, mortar: 1.2, rocket: 2.5, heavyRocket: 4.0,
   cruise: 4.0, tacBallistic: 6.0, cluster: 6.0, ballistic: 8.0, submunition: 1.0
 };
+// v2.25.11 — STRIKE ON SIGHT doctrine (was defined but never applied): auto counter-battery — the
+// defender automatically air-strikes the firing launch sites of incoming threats, on a cooldown.
+// Works for the defender in any mode incl. multiplayer (it's the player's own doctrine, not AI).
+function tickStrikeOnSight(dt) {
+  if (!state.doctrines || !state.doctrines.strikeOnSight) return;
+  if (state.playAs === 'attacker') return;
+  if ((state.strikesLeft || 0) <= 0) return;
+  state._sosCD = (state._sosCD || 0) - dt;
+  if (state._sosCD > 0) return;
+  const live = state.threats.filter(t => !t.intercepted && !t.impacted && t.startLat != null && !t.foreignTheater);
+  if (!live.length) return;
+  state._sosCD = 7000;   // ~7s between auto counter-battery strikes
+  const t = live[live.length - 1];
+  try { launchAirStrike(t.startLat, t.startLon); } catch (e) {}
+}
 function updateIDFRetaliation(dt) {
   if (state.playAs !== 'attacker') return;
   if (MP && MP.enabled) return;   // v2.25.4 — pure PvP: no AI retaliation in multiplayer
@@ -16287,7 +16319,7 @@ function showDoctrinesPanel() {
     row('emergencyUS', 'Emergency US Support', 'If civilian safety < 30%, auto-request US strike token + ammo refill.') +
     row('strikeOnSight', 'Strike on Sight', 'Auto-strike intel-revealed enemy launchers.') +
     row('saturationDefense', 'Saturation Defense', 'If 15+ threats simultaneously, all batteries cooldown ×0.5.') +
-    row('strictROE', 'Strict ROE', 'Iron Dome ignores rockets falling on open desert (saves interceptors).') +
+    row('strictROE', 'Strict ROE', 'Conserve interceptors — ignore tiny/low-value targets (pop < 5); engage only towns &amp; strategic sites.') +
     row('maximumForce', 'Maximum Force', 'Each player STRIKE launches 3 sorties instead of 1 (3× cost).');
   el.querySelectorAll('[data-doctrine]').forEach(cb => {
     cb.onchange = () => {
@@ -23005,7 +23037,7 @@ var MP = (window.MP = {
   guestStats: null, onStatus: null,
   scoreOpf: 0, scoreDef: 0, casualties: 0, warRisk: 0, warDeclared: false,
   smuggleReady: 0, smuggleRemaining: 0, _regenAt: 0, _orefSig: '', _orefAt: 0,
-  nick: 'Player', peerNick: '', ping: 0,
+  nick: 'Player', peerNick: '', ping: 0, phase: 'battle',
   _peerLoading: false, _peerWaiters: [], _origFlash: null, _origExpl: null
 });
 const MP_REGEN_MULT = 1.0;   // passive resupply rate multiplier (smuggling gives the bursts)
@@ -23142,8 +23174,8 @@ function mpReset() {
 // UI (HUD chip, status panel, chat, OPFOR panel) so nothing lingers on the menu.
 function mpTeardownUI() {
   try { mpReset(); } catch (e) {}
-  MP.started = false; MP.peerNick = ''; MP.ping = 0;
-  ['mp-hud', 'mp-status', 'mp-chat', 'mp-opfor-info'].forEach(function (id) {
+  MP.started = false; MP.peerNick = ''; MP.ping = 0; MP.phase = 'battle';
+  ['mp-hud', 'mp-status', 'mp-chat', 'mp-opfor-info', 'mp-deploy-overlay'].forEach(function (id) {
     const e = el(id); if (e && e.parentNode) e.parentNode.removeChild(e);
   });
 }
@@ -23169,9 +23201,18 @@ function mpHostStart() {
   const m = el('mp-menu'); if (m) m.classList.add('hidden');
   startScenario('mpHost');
   state.strikesLeft = Math.max(state.strikesLeft || 0, 99);   // v2.25.5 — defender can strike enemy territory (drives escalation)
+  // v2.25.11 — DEPLOY PHASE: defender places batteries + picks doctrines while the OPFOR waits.
+  MP.phase = 'deploy';
+  state.batteries = [];                                        // clear the sandbox auto-grid — place from scratch
+  state.buildPhase = true; state.buildTimer = 90;             // generous cap; READY starts the battle early
+  state.batteryStock = { ironDome: 8, davidsSling: 3, arrow3: 2, thaad: 1 };
+  const bp = el('build-panel'); if (bp) bp.style.display = 'block';
+  if (typeof updateBuildPanel === 'function') updateBuildPanel();
+  if (typeof showDoctrinesPanel === 'function') showDoctrinesPanel();   // doctrines presented at the start
+  mpSend({ t: 'phase', phase: 'deploy' });
   mpHudShow('DEFENDER');
   mpEnsureChat();
-  mpChatAppend('—', 'You are DEFENDER. Good luck.', true);
+  mpChatAppend('—', 'You are DEFENDER. Place your batteries & pick doctrines, then press READY.', true);
 }
 function mpHostOnMessage(msg) {
   switch (msg.t) {
@@ -23188,7 +23229,7 @@ function mpHostOnMessage(msg) {
   }
 }
 function mpHostApplyLaunch(cmd) {
-  if (!MP.enabled || !state.active) return;
+  if (!MP.enabled || !state.active || MP.phase !== 'battle') return;   // v2.25.11 — no launches during deploy phase
   const fid = cmd.faction, type = cmd.type;
   if (!ENEMIES[fid] || !THREAT_TYPES[type]) return;
   if (!MP.unlocked[fid]) return;
@@ -23390,9 +23431,11 @@ function mpGuestStart(faction) {
   if (typeof renderAttackerBases === 'function') renderAttackerBases();
   if (typeof renderAttackerWeapons === 'function') renderAttackerWeapons();
   document.querySelectorAll('.attacker-cheats, .attacker-cheats-header').forEach((e) => { e.style.display = 'none'; });  // host is authoritative
+  MP.phase = 'deploy';   // v2.25.11 — wait until the defender finishes deploying
   mpHudShow('OPFOR');
   mpEnsureChat();
-  mpChatAppend('—', 'You are OPFOR · ' + (MP.guestFaction || 'hamas').toUpperCase() + '. Good luck.', true);
+  mpShowDeployOverlay();
+  mpChatAppend('—', 'You are OPFOR · ' + (MP.guestFaction || 'hamas').toUpperCase() + '. Waiting for the defender to deploy…', true);
 }
 function mpGuestOnMessage(msg) {
   switch (msg.t) {
@@ -23400,6 +23443,7 @@ function mpGuestOnMessage(msg) {
     case 'start': mpGuestStart(msg.faction || MP.guestFaction); break;
     case 'snap': mpGuestApplySnapshot(msg); break;
     case 'oref': state.orefAlerts = msg.a || []; break;   // v2.25.4 — synced OREF alert polygons
+    case 'phase': MP.phase = msg.phase || 'battle'; if (MP.phase === 'battle') mpHideDeployOverlay(); else mpShowDeployOverlay(); break;   // v2.25.11
     case 'pause': mpApplyRemotePause(!!msg.paused); break;
   }
 }
@@ -23529,13 +23573,15 @@ function mpGuestTick(rawDt) {
     const dot = el('mp-hud-conn');
     if (dot) {
       const age = now - (MP.lastSnapAt || now);
-      if (age > 3000) { dot.style.color = '#ff5544'; dot.textContent = '○ no data ' + Math.floor(age / 1000) + 's'; }
+      if (MP.phase === 'deploy') { dot.style.color = '#ffaa00'; dot.textContent = '⏳ defender deploying'; }
+      else if (age > 3000) { dot.style.color = '#ff5544'; dot.textContent = '○ no data ' + Math.floor(age / 1000) + 's'; }
       else { dot.style.color = '#7fffb0'; dot.textContent = ['◐', '◓', '◑', '◒'][Math.floor(now / 250) % 4] + ' live · ' + (MP.ping || '?') + 'ms'; }
     }
   }
 }
 function mpGuestLaunchAt(lat, lon) {
   const am = state.attackMode; if (!am || !am.faction || !am.type) return false;
+  if (MP.phase && MP.phase !== 'battle') { showNotification('STANDBY', 'Defender is still deploying — wait for the battle to start', 'warn'); return false; }   // v2.25.11
   const inBox = (lat >= 29.45 && lat <= 33.30 && lon >= 34.20 && lon <= 35.60);
   const inGolan = (lat >= 32.65 && lat <= 33.34 && lon >= 35.55 && lon <= 35.83);
   if (!inBox && !inGolan) { showNotification('OUT OF RANGE', 'Target must be inside Israeli territory', 'warn'); return false; }
@@ -23616,6 +23662,18 @@ function mpReadNick() {
   MP.nick = n;
   try { localStorage.setItem('shieldNick', n); } catch (e) {}
 }
+// v2.25.11 — OPFOR "defender is deploying" overlay (shown until the host presses READY)
+function mpShowDeployOverlay() {
+  let o = el('mp-deploy-overlay');
+  if (!o) {
+    o = document.createElement('div'); o.id = 'mp-deploy-overlay';
+    o.style.cssText = 'position:fixed;inset:0;z-index:8500;display:flex;align-items:center;justify-content:center;pointer-events:none;';
+    o.innerHTML = '<div style="background:rgba(8,16,28,0.92);border:1px solid #2e6da4;border-radius:10px;padding:22px 34px;color:#cfe8ff;font:16px/1.5 monospace;text-align:center;box-shadow:0 6px 30px rgba(0,0,0,.6);">⏳ <b style="color:#7fd1ff;">DEFENDER IS DEPLOYING</b><div style="font-size:12px;color:#9fbada;margin-top:6px;">Air defenses are being positioned — the battle starts when the defender is ready.</div></div>';
+    document.body.appendChild(o);
+  }
+  o.style.display = 'flex';
+}
+function mpHideDeployOverlay() { const o = el('mp-deploy-overlay'); if (o) o.style.display = 'none'; }
 // v2.25.6 — in-game chat (over the same datachannel)
 function mpEnsureChat() {
   if (el('mp-chat')) return;
