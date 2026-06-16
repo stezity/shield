@@ -2182,6 +2182,11 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.27.2  — HIT EFFECTS MATTER (#7): a defender strike on an OPFOR depot/arsenal cuts that faction's
+//            stockpile (−35% destroyed / −15% damaged, every weapon); an airbase strike cuts its drone/
+//            cruise capability. Host-authoritative, synced to the OPFOR via the arsenal snapshot, logged.
+//            (Launch sites already suppress 30-60s; US assets → strikeUSTarget consequences; capitals →
+//            red lines.) NEXT: war fatigue + operational windows (#8).
 //   2.27.1  — NETWORKED ALLY REQUESTS (#3/#4/#5) — US & Iran are now REAL player-run control centers. When
 //            Israel asks the US (capital/strategic strike) or an axis faction asks Iran (mass salvo / center
 //            strike / US-target) AND that ally is a human player, the request is routed over the net to THAT
@@ -3379,7 +3384,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.27.1';
+const GAME_VERSION = '2.27.2';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -13746,6 +13751,22 @@ function updateBatteries(dt) {
 // big = попадание по городу; exo = экзоатмосферный; screenYOffset = смещение по Y (для воздушных перехватов)
 // v2.26.4 #6 — varied hit FX for enemy targets: blast scales with importance, high-value targets throw
 // secondary detonations/fires, and a floating "TARGET HIT" / "★n DESTROYED" marker rises off the map.
+// v2.27.2 #7 — hit effects that actually change the game (host-authoritative, synced via the arsenal
+// snapshot). Striking a depot/arsenal cuts the faction's stockpile; an airbase cuts its drone/cruise
+// capability. (Launch sites already suppress; US assets handled by strikeUSTarget; capitals fire red lines.)
+function applyTargetHitConsequence(target, destroyed) {
+  if (!target || !(typeof MP !== 'undefined' && MP.enabled && MP.role === 'host')) return;
+  const fid = target.faction, ars = MP.arsenal && MP.arsenal[fid];
+  if (!ars) return;
+  const cut = destroyed ? 0.35 : 0.15;
+  if (target.type === 'arsenal' || target.type === 'depot') {
+    Object.keys(ars).forEach(function (w) { ars[w] = Math.floor((ars[w] || 0) * (1 - cut)); });
+    if (typeof logEvent === 'function') logEvent('📦 ' + ((ENEMIES[fid] && ENEMIES[fid].name) || fid) + ' arsenal struck — stockpile −' + Math.round(cut * 100) + '%', 'success');
+  } else if (target.type === 'airbase') {
+    ['drone', 'cruise'].forEach(function (w) { if (ars[w] != null) ars[w] = Math.floor((ars[w] || 0) * (1 - cut)); });
+    if (typeof logEvent === 'function') logEvent('✈ ' + ((ENEMIES[fid] && ENEMIES[fid].name) || fid) + ' airbase struck — air/drone capability cut', 'success');
+  }
+}
 function enemyTargetHitFx(target, destroyed) {
   if (!target) return;
   const imp = target.importance || 5;
@@ -13757,6 +13778,7 @@ function enemyTargetHitFx(target, destroyed) {
     createExplosion(target.lat, target.lon, 22 + imp, 1300, imp >= 7);
     spawnHitMarker(target.lat, target.lon, 'TARGET HIT', '#ffd479');
   }
+  if (typeof applyTargetHitConsequence === 'function') applyTargetHitConsequence(target, destroyed);   // v2.27.2 #7 — damage has gameplay effect
 }
 function spawnHitMarker(lat, lon, text, color) {
   state.hitMarkers = state.hitMarkers || [];
