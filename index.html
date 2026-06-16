@@ -2130,6 +2130,10 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.25.13 — MP: restore the standard IDF grid (user: "верни старое расположение пво"). The deploy
+//            phase was clearing the auto-deployed grid (place-from-scratch); now it keeps it — the
+//            defender starts with the normal layout and may still add/reposition during deploy, then
+//            READY. (Deploy phase + OPFOR-waits + doctrines-at-start all unchanged.)
 //   2.25.12 — MP polish (user): (1) the WORLD MODIFIERS panel (#world-hud) overlapped the chat and is
 //            unrelated to MP — now hidden whenever MP is active. (2) Defender's DAMAGE to OPFOR launch
 //            sites is synced (snapshot `lsd`): drawAttackerBases shows the damage bar / destroyed marker
@@ -3219,7 +3223,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.25.12';
+const GAME_VERSION = '2.25.13';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -23210,11 +23214,12 @@ function mpHostStart() {
   const m = el('mp-menu'); if (m) m.classList.add('hidden');
   startScenario('mpHost');
   state.strikesLeft = Math.max(state.strikesLeft || 0, 99);   // v2.25.5 — defender can strike enemy territory (drives escalation)
-  // v2.25.11 — DEPLOY PHASE: defender places batteries + picks doctrines while the OPFOR waits.
+  // v2.25.11 — DEPLOY PHASE: defender sets up while the OPFOR waits.
+  // v2.25.13 — KEEP the standard IDF grid (user: "верни старое расположение пво"); startScenario already
+  // auto-deployed it. The defender may still add/reposition from the stock during deploy, then READY.
   MP.phase = 'deploy';
-  state.batteries = [];                                        // clear the sandbox auto-grid — place from scratch
   state.buildPhase = true; state.buildTimer = 90;             // generous cap; READY starts the battle early
-  state.batteryStock = { ironDome: 8, davidsSling: 3, arrow3: 2, thaad: 1 };
+  state.batteryStock = { ironDome: 4, davidsSling: 2, arrow3: 1, thaad: 1 };
   const bp = el('build-panel'); if (bp) bp.style.display = 'block';
   if (typeof updateBuildPanel === 'function') updateBuildPanel();
   if (typeof showDoctrinesPanel === 'function') showDoctrinesPanel();   // doctrines presented at the start
