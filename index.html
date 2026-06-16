@@ -2182,6 +2182,14 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.27.7  — (1) SYNC FIX: the defender's damage to ALL enemy targets (HQ/leader/airbase/strategic/city —
+//            not just launch sites) now syncs to the OPFOR via a new snapshot field (etd), so both players
+//            see the same damaged/destroyed targets (was: defender saw ✕, OPFOR saw them intact). (2) MOBILE
+//            LAUNCHERS (TELs): firing EXPOSES a mobile launcher near the site for ~32s ("shoot & scoot");
+//            the defender can strike it while exposed (click it in strike mode) for an instant counter-
+//            battery kill — denies the launcher, suppresses the fixed site, pays a bounty. Spawned in
+//            spawnThreat (covers MP host, single-player, AI), rendered as a pulsing orange TEL, synced to
+//            the OPFOR (ml), expire after the window.
 //   2.27.6  — LAUNCH-SITE DESTRUCTION + CAPITULATION + CEASEFIRE. (1) Defender strikes on a launch site now
 //            ACCUMULATE on one persistent wrapper (was a fresh damage:0 wrapper per strike → never reached
 //            100). At 100 the site is PERMANENTLY destroyed (state.destroyedLaunchSites, synced to the OPFOR
@@ -3413,7 +3421,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.27.6';
+const GAME_VERSION = '2.27.7';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -6467,6 +6475,12 @@ function suppressNearestLaunchSite(lat, lon) {
 function launchAirStrike(lat, lon, approved) {
   if (state.strikesLeft <= 0 || state.strikeCooldown > 0) return;
   if (state.ceasefire) { showNotification('🏳 CEASEFIRE', 'A ceasefire is in effect — hold fire.', 'warn'); return; }   // v2.27.6
+  // v2.27.7 — catch an exposed MOBILE LAUNCHER first (instant counter-battery while it's exposed)
+  if (state.mobileLaunchers && state.mobileLaunchers.length) {
+    let _ml = null, _md = Infinity;
+    for (const m of state.mobileLaunchers) { if (!m.alive) continue; const d = haversineKm(lat, lon, m.lat, m.lon); if (d < 22 && d < _md) { _md = d; _ml = m; } }
+    if (_ml) { strikeMobileLauncher(_ml); state.strikesLeft--; state.strikeCooldown = 3000; const sc = document.getElementById('strike-count'); if (sc) sc.textContent = state.strikesLeft; return; }
+  }
   // Gaza Campaign: warn the player if launching a strike would violate an agreed ceasefire.
   if (state.gaza && state.scenario && state.scenario.campaign === 'gaza') {
     if (!checkGazaCeasefire('air strike on Hamas target')) return;
@@ -7071,7 +7085,7 @@ function render() {
   if (state.playAs === 'attacker') { if (typeof mpDrawReachZone === 'function') mpDrawReachZone(); drawAttackerBases(); }
   if (Date.now() < (state.intelRevealUntil || 0)) drawIntelReveal();
   if (state.tsts && state.tsts.length > 0) drawTSTMarkers();
-  if (L.enemyTargets !== false) { drawEnemyTargets(); if (typeof drawHitMarkers === 'function') drawHitMarkers(); if (typeof drawUSTargets === 'function') drawUSTargets(); }
+  if (L.enemyTargets !== false) { drawEnemyTargets(); if (typeof drawHitMarkers === 'function') drawHitMarkers(); if (typeof drawUSTargets === 'function') drawUSTargets(); if (typeof drawMobileLaunchers === 'function') drawMobileLaunchers(); }
   if (L.airbases !== false) drawAirbases();
   if (L.factories !== false) drawFactories();
   if (L.coverage !== false) drawCoverage();
@@ -11637,6 +11651,7 @@ function spawnThreat(typeId, enemyId, targetCityId, explicitLat, explicitLon, ex
   };
 
   state.threats.push(threat);
+  if (typeof spawnMobileLauncher === 'function') try { spawnMobileLauncher(enemyId, sLat, sLon, siteIdx); } catch (e) {}   // v2.27.7 — firing EXPOSES a mobile launcher the defender can strike
   state.stats.threatsTotal++;
   // === Escalation accumulation: each enemy launch nudges global escalation up ===
   // Different threat classes contribute differently (ballistic = big, mortar = tiny)
@@ -13867,6 +13882,49 @@ function drawHitMarkers() {
   });
   ctx.globalAlpha = 1; ctx.textAlign = 'left'; ctx.restore();
 }
+// v2.27.7 — MOBILE LAUNCHERS (TELs): when a faction fires it EXPOSES a mobile launcher near the firing
+// site for ~32s ("shoot & scoot"). The defender can strike it while exposed — an instant counter-battery
+// kill that denies the launcher, suppresses the site and pays a small bounty. Synced to the OPFOR (ml).
+function spawnMobileLauncher(faction, lat, lon, siteIdx) {
+  if (lat == null || lon == null) return;
+  state.mobileLaunchers = state.mobileLaunchers || [];
+  const now = Date.now(), key = faction + '_' + (siteIdx == null ? 'r' : siteIdx);
+  const ex = state.mobileLaunchers.find(function (m) { return m.key === key && m.alive; });
+  if (ex) { ex.bornAt = now; return; }   // already exposed → refresh the window
+  if (state.mobileLaunchers.filter(function (m) { return m.alive; }).length >= 14) return;
+  state.mobileLaunchers.push({ id: 'tel_' + (nextId++), key: key, faction: faction, lat: lat + (Math.random() - 0.5) * 0.05, lon: lon + (Math.random() - 0.5) * 0.05, bornAt: now, ttl: 32000, alive: true });
+}
+function updateMobileLaunchers() {
+  if (!state.mobileLaunchers || !state.mobileLaunchers.length) return;
+  const now = Date.now();
+  for (let i = state.mobileLaunchers.length - 1; i >= 0; i--) { const m = state.mobileLaunchers[i]; if (!m.alive || now > m.bornAt + m.ttl) state.mobileLaunchers.splice(i, 1); }   // scoot / hide
+}
+function drawMobileLaunchers() {
+  if (typeof ctx === 'undefined' || !ctx || !state.mobileLaunchers || !state.mobileLaunchers.length) return;
+  const now = Date.now();
+  state.mobileLaunchers.forEach(function (m) {
+    if (!m.alive) return; const left = (m.bornAt + m.ttl) - now; if (left <= 0) return;
+    const p = geoToScreen(m.lat, m.lon); if (!isFinite(p[0]) || !isFinite(p[1])) return;
+    if (p[0] < -20 || p[0] > canvasW + 20 || p[1] < -20 || p[1] > canvasH + 20) return;
+    const pulse = 0.5 + 0.5 * Math.sin(now / 200);
+    const g = ctx.createRadialGradient(p[0], p[1], 0, p[0], p[1], 17); g.addColorStop(0, 'rgba(255,170,40,' + (0.4 * pulse) + ')'); g.addColorStop(1, 'rgba(255,140,0,0)'); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(p[0], p[1], 17, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ff9b30'; ctx.strokeStyle = '#1a0f00'; ctx.lineWidth = 1.5;
+    ctx.fillRect(p[0] - 6, p[1] - 3, 12, 6); ctx.strokeRect(p[0] - 6, p[1] - 3, 12, 6);   // TEL body
+    ctx.strokeStyle = '#ffd479'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(p[0] - 4, p[1]); ctx.lineTo(p[0] + 7, p[1] - 8); ctx.stroke();   // raised missile rail
+    if (camera.zoom >= 5) { ctx.font = 'bold 9px Consolas'; ctx.fillStyle = '#ffb347'; ctx.textAlign = 'center'; ctx.fillText('⊕ MOBILE TEL ' + Math.ceil(left / 1000) + 's', p[0], p[1] - 13); ctx.textAlign = 'left'; }
+  });
+}
+function strikeMobileLauncher(m) {
+  if (!m || !m.alive) return;
+  m.alive = false;
+  state.mobileLaunchers = (state.mobileLaunchers || []).filter(function (x) { return x !== m; });
+  if (typeof createExplosion === 'function') try { createExplosion(m.lat, m.lon, 26, 1500, true); } catch (e) {}
+  if (typeof spawnHitMarker === 'function') spawnHitMarker(m.lat, m.lon, 'TEL DESTROYED', '#ffd479');
+  if (typeof suppressNearestLaunchSite === 'function') try { suppressNearestLaunchSite(m.lat, m.lon); } catch (e) {}   // counter-battery: also freezes the fixed site
+  if (state.playAs !== 'attacker') state.money = (state.money || 0) + 2000;
+  if (typeof logEvent === 'function') logEvent('🎯 MOBILE LAUNCHER destroyed (' + ((ENEMIES[m.faction] && ENEMIES[m.faction].name) || m.faction) + ') — counter-battery', 'success');
+  if (typeof showNotification === 'function') showNotification('🎯 TEL DESTROYED', 'Mobile launcher caught exposed and destroyed.', 'success');
+}
 function createExplosion(lat, lon, maxRadius, duration, big, exo, screenYOffset) {
   state.explosions.push({
     lat, lon, life: 1, maxLife: duration, maxRadius,
@@ -14158,6 +14216,7 @@ function gameLoop(time) {
       updateRandomEvents(dt);
       updateAirStrikes(dt);
       if (typeof updateHitMarkers === 'function') updateHitMarkers(dt);   // v2.26.4 #6 — floating hit/destroyed markers
+      if (typeof updateMobileLaunchers === 'function') updateMobileLaunchers();   // v2.27.7 — expire exposed mobile launchers
       tickFighterChases(dt);                  // F-16 anti-UAV intercepts (auto)
       tickPlayerFighters(dt);                 // NEW v2.17.0: player-commanded F-16 squadrons
       tickCrisis(dt);                         // crisis-popup spawn + countdown
@@ -22629,6 +22688,7 @@ function startScenario(name) {
   state.redLines = {};                                     // v2.26.4 — red-line crisis flags reset each game
   state._warStrikeAt = 0;                                  // v2.27.4 — daily war-strike timer reset
   state.destroyedLaunchSites = {}; state.capitulated = {}; state.ceasefire = false;   // v2.27.6 — base destruction / capitulation / ceasefire reset
+  state.mobileLaunchers = [];                              // v2.27.7 — mobile launchers reset
   state.iranControl = 70; state.iranPatience = 0; state.iranChaos = 0;   // v2.26.5 #8 — Iran axis system reset
   state.iranSupplyDelayUntil = 0; state.iranHoldUntil = 0; state.iranLastResponse = ''; state.iranTask = null; state.iranGateUntil = 0;
   state.usInvolvement = 12; state.usTargets = null; state.usHasCasusBelli = false;   // v2.26.6 #9/#10 — US military reset
@@ -23898,6 +23958,8 @@ function mpBuildSnapshot() {
     as: (state.airstrikes || []).filter(function (a) { return !a.done; }).map(function (a) { return { id: a.id, cla: r5(a.curLat), clo: r5(a.curLon), tla: r5(a.targetLat), tlo: r5(a.targetLon) }; }),
     ds: (function () { const o = {}, dm = state.disabledLaunchSites || {}, nw = Date.now(); for (const k in dm) { const rem = dm[k] - nw; if (rem > 0) o[k] = Math.round(rem); } return o; })(),
     lsd: (function () { const o = {}; (state.enemyTargets || []).forEach(function (et) { if (!et._isLaunchSite) return; const k = et._siteFaction + '_' + et._siteIdx; const d = (et.alive === false) ? 100 : Math.round(et.damage || 0); if (o[k] == null || d > o[k]) o[k] = d; }); return o; })(),   // v2.25.12 — defender's damage to OPFOR launch sites
+    etd: (function () { const o = {}; (state.enemyTargets || []).forEach(function (et) { if (et._isLaunchSite || !et.id) return; if (et.alive === false) o[et.id] = -1; else if ((et.damage || 0) > 0) o[et.id] = Math.round(et.damage); }); return o; })(),   // v2.27.7 — sync defender's damage on ALL enemy targets (HQ/leader/airbase/strategic/city) so the OPFOR sees them damaged/destroyed
+    ml: (function () { const a = []; (state.mobileLaunchers || []).forEach(function (m) { if (m.alive) a.push({ id: m.id, f: m.faction, la: r5(m.lat), lo: r5(m.lon), b: m.bornAt, tl: m.ttl }); }); return a; })(),   // v2.27.7 — mobile launchers (exposed) synced to the OPFOR
     st: { intc: st.intercepted || 0, miss: st.missed || 0, tot: st.threatsTotal || 0, saf: st.civilianSafety != null ? Math.round(st.civilianSafety) : 100 }
   };
 }
@@ -24003,6 +24065,8 @@ function mpGuestApplySnapshot(s) {
   // v2.25.10 — disabled/struck launch sites (defender counter-battery) → OPFOR sees its sites go offline
   if (s.ds) { state.disabledLaunchSites = {}; for (const k in s.ds) state.disabledLaunchSites[k] = now + s.ds[k]; }
   MP.siteDamage = s.lsd || {};   // v2.25.12 — defender's damage on OPFOR launch sites
+  if (s.etd && state.enemyTargets) { state.enemyTargets.forEach(function (et) { const d = s.etd[et.id]; if (d == null) return; if (d === -1) { et.alive = false; et.damage = 100; } else { et.damage = d; et.alive = true; } }); }   // v2.27.7 — apply synced enemy-target damage so the OPFOR sees his assets struck
+  if (s.ml) { state.mobileLaunchers = s.ml.map(function (m) { return { id: m.id, faction: m.f, lat: m.la, lon: m.lo, bornAt: m.b, ttl: m.tl, alive: true }; }); }   // v2.27.7 — exposed mobile launchers (render-only on guest)
   // FX events → spawn local particles
   if (s.fx) s.fx.forEach(mpGuestPlayFx);
 }
