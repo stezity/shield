@@ -2182,6 +2182,15 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.27.1  — NETWORKED ALLY REQUESTS (#3/#4/#5) — US & Iran are now REAL player-run control centers. When
+//            Israel asks the US (capital/strategic strike) or an axis faction asks Iran (mass salvo / center
+//            strike / US-target) AND that ally is a human player, the request is routed over the net to THAT
+//            player, who decides live in an incoming-request modal (Approve / Limited / Custom / Escalate /
+//            Defer / Deny); the verdict returns and gates the op via the existing usShowVerdict/iranShowVerdict
+//            (so defy/support/control/supply/escalation consequences all apply). Host relays guest↔guest
+//            (permReq/permResp, reqId-routed); falls back to the AI verdict if no human ally or after a 22s
+//            timeout. mpUsHuman()/mpIranHuman() detect the ally. NEXT: hit-effect consequences, war fatigue,
+//            operational windows.
 //   2.27.0  — CRITICAL FIX — multi-faction launches were silently dropped. mpHostApplyLaunch rejected any
 //            launch whose faction wasn't MP.unlocked[fid]; in FFA, MP.unlocked is derived from a single
 //            guestFaction (mpRecomputeUnlocks), so Hezbollah/Iran/Houthi/USA-side players were blocked until
@@ -3370,7 +3379,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.27.0';
+const GAME_VERSION = '2.27.1';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -23467,7 +23476,7 @@ function mpReset() {
 function mpTeardownUI() {
   try { mpReset(); } catch (e) {}
   MP.started = false; MP.peerNick = ''; MP.ping = 0; MP.phase = 'battle'; MP.siteDamage = {};
-  ['mp-hud', 'mp-status', 'mp-chat', 'mp-opfor-info', 'mp-deploy-overlay', 'mp-usa-panel', 'mp-aid-btn', 'us-panel', 'iran-panel', 'iran-cmd-panel', 'us-perm-modal', 'iran-perm-modal'].forEach(function (id) {
+  ['mp-hud', 'mp-status', 'mp-chat', 'mp-opfor-info', 'mp-deploy-overlay', 'mp-usa-panel', 'mp-aid-btn', 'us-panel', 'iran-panel', 'iran-cmd-panel', 'us-perm-modal', 'iran-perm-modal', 'mp-ally-decide'].forEach(function (id) {
     const e = el(id); if (e && e.parentNode) e.parentNode.removeChild(e);
   });
 }
@@ -24136,6 +24145,8 @@ function mpFfaHostOnMessage(msg, cRec) {
   if (msg.t === 'smuggle') { if (cRec.faction && cRec.faction !== 'usa') mpHostSmuggle(cRec.faction); return; }
   if (msg.t === 'usaGrant') { if (cRec.faction === 'usa') mpFfaApplyUsaGrant(msg.kind); return; }
   if (msg.t === 'axistask') { if (cRec.faction === 'iran') { state.iranTask = msg.task; if (typeof showNotification === 'function') showNotification('☪ TEHRAN DIRECTIVE', msg.task, 'info'); mpSend({ t: 'axistask', task: msg.task }); } return; }   // v2.26.7 #8 — Iran (guest) directive → host applies + rebroadcasts to the axis
+  if (msg.t === 'permReq') { mpDeliverPermReq(msg, cRec); return; }   // v2.27.1 — relay an ally-permission request to the US/Iran player
+  if (msg.t === 'permResp') { const rc = MP._permRoute && MP._permRoute[msg.reqId]; if (MP._permRoute) delete MP._permRoute[msg.reqId]; if (rc) mpSendTo(rc, msg); else mpApplyPermResp(msg); return; }   // v2.27.1 — relay the decision back to the requester
 }
 function mpFfaBroadcastRoster() { if (MP.role === 'host') mpSend({ t: 'roster', owners: MP.factionOwners, usa: MP.usaPresent }); }
 function mpFfaHostStart() {
@@ -24218,6 +24229,8 @@ function mpFfaGuestOnMessage(msg) {
     case 'usaReq': if (MP.myFaction === 'usa') mpFfaUsaShowRequest(); break;
     case 'redline': if (typeof showNotification === 'function') showNotification(msg.title || '🔴 RED LINE', msg.body || '', 'danger'); if (typeof logEvent === 'function') logEvent('🔴 ' + (msg.title || 'RED LINE'), 'danger'); break;   // v2.26.9 FIX — FFA axis players now see red-line crises
     case 'axistask': state.iranTask = msg.task; if (typeof showNotification === 'function') showNotification('☪ IRGC / TEHRAN DIRECTIVE', msg.task, 'info'); if (typeof logEvent === 'function') logEvent('☪ Iran directive: ' + msg.task, 'info'); break;   // v2.26.9 FIX — FFA axis players now RECEIVE Iran's directives
+    case 'permReq': if (typeof mpShowAllyDecision === 'function') mpShowAllyDecision(msg); break;   // v2.27.1 — this player is the US/Iran ally: decide on the request
+    case 'permResp': if (typeof mpApplyPermResp === 'function') mpApplyPermResp(msg); break;        // v2.27.1 — this player is the requester: apply the ally's verdict
   }
 }
 function mpFfaOnJoined() {
@@ -24439,7 +24452,14 @@ function usPermissionModal(lat, lon, target, sev) {
     '<div id="us-perm-btns" style="display:flex;gap:8px;flex-wrap:wrap;"></div>';
   m.style.display = 'block';
   const btns = el('us-perm-btns');
-  usMkBtn(btns, '🇺🇸 Request US permission', '#7fb0ff', function () { usShowVerdict(usEvaluate(sev)); });
+  usMkBtn(btns, '🇺🇸 Request US permission', '#7fb0ff', function () {
+    if (typeof mpUsHuman === 'function' && mpUsHuman()) {   // v2.27.1 — route to the human US player in real time
+      const body = el('us-perm-body'), bb = el('us-perm-btns');
+      if (body) body.innerHTML = '⏳ Awaiting the <b>US player</b>’s decision…';
+      if (bb) { bb.innerHTML = ''; usMkBtn(bb, 'Cancel', '#999', function () { state._usPending = null; usCloseModal(); }); }
+      mpAllyRequest('us', (target && target.name) || usSevLabel(sev), sev, function (v) { const mm = el('us-perm-modal'); if (mm && mm.style.display !== 'none') usShowVerdict(v || usEvaluate(sev)); });
+    } else { usShowVerdict(usEvaluate(sev)); }
+  });
   usMkBtn(btns, '⚠ Execute without asking', '#ff8a76', function () { usDefy(sev, target && target.name); usExecPending(); });
   usMkBtn(btns, 'Cancel', '#999', function () { state._usPending = null; usCloseModal(); });
 }
@@ -24583,7 +24603,14 @@ function iranPermissionModal(fid, am, lat, lon, sev) {
     '<div id="iran-perm-btns" style="display:flex;gap:8px;flex-wrap:wrap;"></div>';
   m.style.display = 'block';
   const btns = el('iran-perm-btns');
-  iranMkBtn(btns, '☪ Request Iran’s position', '#ff9b6b', function () { iranShowVerdict(iranEvaluate(sev)); });
+  iranMkBtn(btns, '☪ Request Iran’s position', '#ff9b6b', function () {
+    if (typeof mpIranHuman === 'function' && mpIranHuman()) {   // v2.27.1 — route to the human Iran player in real time
+      const body = el('iran-perm-body'), bb = el('iran-perm-btns');
+      if (body) body.innerHTML = '⏳ Awaiting the <b>Iran player</b>’s decision…';
+      if (bb) { bb.innerHTML = ''; iranMkBtn(bb, 'Cancel', '#999', function () { state._iranPending = null; iranCloseModal(); }); }
+      mpAllyRequest('iran', iranSevLabel(sev), sev, function (v) { const mm = el('iran-perm-modal'); if (mm && mm.style.display !== 'none') iranShowVerdict(v || iranEvaluate(sev)); });
+    } else { iranShowVerdict(iranEvaluate(sev)); }
+  });
   iranMkBtn(btns, '⚠ Act without coordinating', '#ff7a60', function () { iranDefy(sev, fid); iranExecPending(); });
   iranMkBtn(btns, 'Cancel', '#999', function () { state._iranPending = null; iranCloseModal(); });
 }
@@ -24764,6 +24791,68 @@ function mpInstallIranPanel() {
   }
   const t = el('iran-cmd-task'); if (t) t.textContent = state.iranTask ? ('Directive: ' + state.iranTask) : 'No active directive';
   p.style.display = 'block';
+}
+
+/* ============================================================================
+   NETWORKED ALLY REQUESTS (v2.27.1 #3/#4/#5) — when Israel asks the US, or an axis
+   faction asks Iran, and that ally is a HUMAN player, the request is routed over
+   the network to THAT player, who decides in real time; the verdict comes back and
+   gates the operation (falling back to the AI verdict if no human ally / timeout).
+   Star topology: the host relays guest↔guest. Verdicts reuse usShowVerdict /
+   iranShowVerdict, so all existing consequences (defy, support/control, supply,
+   escalation) apply unchanged.
+   ============================================================================ */
+function mpUsHuman() { return !!(typeof MP !== 'undefined' && MP.enabled && MP.ffa && (MP.usaPresent || MP.myFaction === 'usa' || (MP.factionOwners && MP.factionOwners.usa))); }
+function mpIranHuman() { return !!(typeof MP !== 'undefined' && MP.enabled && MP.ffa && MP.myFaction !== 'iran' && ((MP.factionOwners && MP.factionOwners.iran) || false)); }
+function mpAllyRequest(ally, op, sev, onVerdict) {
+  MP._permPending = MP._permPending || {};
+  const reqId = 'q' + (MP._reqSeq = (MP._reqSeq || 0) + 1);
+  MP._permPending[reqId] = { onVerdict: onVerdict };
+  const msg = { t: 'permReq', reqId: reqId, ally: ally, op: op, sev: sev, fromNick: MP.nick || 'Ally', fromFaction: MP.myFaction || (MP.role === 'host' ? 'israel' : MP.guestFaction) };
+  if (MP.role === 'host') mpDeliverPermReq(msg, null); else mpSend(msg);
+  setTimeout(function () { const p = MP._permPending[reqId]; if (p) { delete MP._permPending[reqId]; if (typeof p.onVerdict === 'function') p.onVerdict(null); } }, 22000);   // timeout → AI fallback
+}
+function mpDeliverPermReq(msg, requesterConn) {   // host-side routing to the ally player
+  MP._permRoute = MP._permRoute || {};
+  const allyFaction = msg.ally === 'us' ? 'usa' : 'iran';
+  if (requesterConn) MP._permRoute[msg.reqId] = requesterConn;
+  if (MP.myFaction === allyFaction) { mpShowAllyDecision(msg); return; }   // host IS the ally → decide locally
+  const c = (MP.conns || []).find(function (x) { return x.faction === allyFaction && x.open; });
+  if (c) { mpSendTo(c, msg); return; }
+  const v = (msg.ally === 'us') ? (typeof usEvaluate === 'function' ? usEvaluate(msg.sev) : 'approve') : (typeof iranEvaluate === 'function' ? iranEvaluate(msg.sev) : 'approve');   // no human ally → AI
+  const resp = { t: 'permResp', reqId: msg.reqId, ally: msg.ally, verdict: v };
+  if (requesterConn) mpSendTo(requesterConn, resp); else mpApplyPermResp(resp);
+}
+function mpApplyPermResp(msg) {
+  MP._permPending = MP._permPending || {};
+  const p = MP._permPending[msg.reqId]; if (!p) return; delete MP._permPending[msg.reqId];
+  if (typeof p.onVerdict === 'function') p.onVerdict(msg.verdict);
+}
+function mpSendPermResp(msg, verdict) {
+  const resp = { t: 'permResp', reqId: msg.reqId, ally: msg.ally, verdict: verdict };
+  if (MP.role === 'host') { const rc = MP._permRoute && MP._permRoute[msg.reqId]; if (MP._permRoute) delete MP._permRoute[msg.reqId]; if (rc) mpSendTo(rc, resp); else mpApplyPermResp(resp); }
+  else mpSend(resp);
+}
+function mpShowAllyDecision(msg) {
+  const isUs = msg.ally === 'us';
+  let m = el('mp-ally-decide');
+  if (!m) { m = document.createElement('div'); m.id = 'mp-ally-decide'; document.body.appendChild(m); }
+  m.style.cssText = 'position:fixed;top:46%;left:50%;transform:translate(-50%,-50%);z-index:10001;background:rgba(' + (isUs ? '12,18,30' : '20,12,12') + ',0.98);border:2px solid ' + (isUs ? '#5b8def' : '#cf5b3a') + ';border-radius:10px;padding:18px 20px;color:#dde;font:13px/1.5 sans-serif;width:410px;box-shadow:0 8px 40px rgba(0,0,0,.7);';
+  const head = isUs ? '🇺🇸 INCOMING — ISRAEL REQUESTS' : '☪ INCOMING — AXIS REQUESTS';
+  const who = (typeof mpEscapeHtml === 'function' ? mpEscapeHtml(msg.fromNick || 'Ally') : (msg.fromNick || 'Ally'));
+  const fac = (typeof ffaRoleLabel === 'function' ? (ffaRoleLabel(msg.fromFaction) || msg.fromFaction || '') : (msg.fromFaction || ''));
+  m.innerHTML = '<div style="color:' + (isUs ? '#7fb0ff' : '#ff9b6b') + ';font-weight:bold;font-size:15px;margin-bottom:6px;">' + head + '</div>' +
+    '<div style="margin-bottom:10px;">' + who + ' <span style="color:#9aa;">(' + fac + ')</span> requests: <b>' + (typeof mpEscapeHtml === 'function' ? mpEscapeHtml(msg.op || 'a major operation') : (msg.op || 'a major operation')) + '</b></div>' +
+    '<div id="mp-ally-btns" style="display:flex;gap:8px;flex-wrap:wrap;"></div>';
+  m.style.display = 'block';
+  const btns = el('mp-ally-btns'); btns.innerHTML = '';
+  const mk = function (txt, col, verdict) { const b = document.createElement('button'); b.textContent = txt; b.style.cssText = 'padding:8px 12px;font-size:12px;border-radius:5px;cursor:pointer;border:1px solid ' + col + ';background:rgba(255,255,255,0.05);color:' + col + ';'; b.onclick = function () { m.style.display = 'none'; mpSendPermResp(msg, verdict); if (typeof showNotification === 'function') showNotification('DECISION SENT', verdict.toUpperCase(), 'info'); }; btns.appendChild(b); };
+  mk('✓ Approve', '#7fffb0', 'approve');
+  mk('Approve w/ limits', '#bfe0ff', 'limited');
+  if (!isUs) { mk('Custom plan', '#cfe0ff', 'custom'); mk('🔥 Escalate', '#ffd479', 'stronger'); }
+  mk('⏳ Defer', '#ffd479', 'defer');
+  mk('✗ Deny', '#ff5b50', 'deny');
+  try { if (typeof audio !== 'undefined' && audio.alarm) audio.alarm(); } catch (e) {}
 }
 
 /* ---------------- FX capture (host) — wrap the two FX entry points ---------------- */
