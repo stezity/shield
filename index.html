@@ -2182,6 +2182,19 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.29.0  — US = A FULL PLAYER LIKE ISRAEL: its OWN air defense AND its OWN air force, same controls.
+//            AIR DEFENSE — click-to-place: the US panel's "Place Patriot/THAAD/C-RAM" buttons ARM a battery,
+//            then you CLICK the map to drop it (right-click cancels), exactly like Israel's deploy phase.
+//            usSetAdPlaceMode/usPlaceAdAt; a guest's placement routes to the host (t:'usPlaceAd') and syncs
+//            via the usb snapshot. US batteries now draw COVERAGE RINGS and are selectable (selectedUsBattery).
+//            AIR FORCE — the US scrambles & commands its OWN jets from US airbases (Al Udeid, Incirlik, PSAB,
+//            5th Fleet, Muwaffaq, Ali Al Salem) just like Israel: click a white US airbase → scramble popup;
+//            left-click a jet to select (Shift adds), right-click to vector / strike / intercept; "Scramble ALL
+//            US airbases" button. Fighters carry a side tag (US jets = gold outline). MP: player fighters +
+//            airbase pools now SYNC to all clients (snapshot pf/af) so the air war is visible to everyone; a
+//            guest's scramble (t:'scramble') and fighter commands (t:'fcommand') route to the authoritative
+//            host. The US player (playAs scaffold) is excluded from OPFOR launch/drone clicks so its map
+//            clicks drive AD/strike/fighter control instead. (US still NEVER bombs Israel.)
 //   2.28.5  — US AD PLACEMENT PANEL (like Israel) + pre-deployed batteries; Patriot/C-RAM/THAAD REMOVED from
 //            Israel's build panel. (1) US bases start WITH air defense: usDeployInitialAD() puts THAAD+Patriot
 //            on carriers/ships, Patriot+C-RAM on airbases/bases, Patriot elsewhere (called from usTargetsEnsure).
@@ -3478,7 +3491,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.28.5';
+const GAME_VERSION = '2.29.0';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -16868,6 +16881,13 @@ const FIGHTER_AAM_SPEED = 0.26;     // v2.17.2: slightly slowed too
 function scrambleSquadron(baseId, count) {
   const base = IL_AIRBASES.find(b => b.id === baseId) || US_AIRBASES.find(b => b.id === baseId);
   if (!base) return;
+  // v2.29.0 — MP guest (e.g. the US player): the host owns the fighter sim. Send the scramble order
+  // upstream; the host launches the jets and syncs them back down (snapshot `pf`).
+  if (typeof MP !== 'undefined' && MP.enabled && MP.role === 'guest') {
+    if (typeof mpSend === 'function') mpSend({ t: 'scramble', baseId: base.id, count: count });
+    if (typeof mpToast === 'function') mpToast('✈ Scramble ordered: ' + base.name, 'success');
+    return;
+  }
   const avail = (state.airbaseFighters && state.airbaseFighters[base.id] !== undefined)
     ? state.airbaseFighters[base.id] : base.fighters;
   const n = Math.max(1, Math.min(count, avail));
@@ -16878,7 +16898,7 @@ function scrambleSquadron(baseId, count) {
     // default patrol point: a bit north/toward the threat axis of the base
     state.playerFighters.push({
       id: 'pf_' + (nextId++),
-      baseId: base.id, baseName: base.name,
+      baseId: base.id, baseName: base.name, side: base.side || 'IL',   // v2.29.0 — IL vs US ownership
       curLat: base.lat, curLon: base.lon,
       homeLat: base.lat, homeLon: base.lon,
       patrolLat: base.lat + 0.25, patrolLon: base.lon,   // orbit a point just north by default
@@ -16892,8 +16912,12 @@ function scrambleSquadron(baseId, count) {
     });
   }
   if (typeof audio !== 'undefined' && audio.launch) audio.launch();
-  showNotification('✈ SCRAMBLE', `${n} F-16 launched from ${base.name} — on CAP. Left-click to select (Shift = add), right-click to command (Shift = queue waypoints).`, 'success');
-  logEvent(`✈ ${n} F-16 scrambled from ${base.name} (combat air patrol)`, 'info');
+  showNotification('✈ SCRAMBLE', `${n} ${base.side === 'US' ? 'F-15/F-16' : 'F-16'} launched from ${base.name} — on CAP. Left-click to select (Shift = add), right-click to command (Shift = queue waypoints).`, 'success');
+  logEvent(`✈ ${n} fighters scrambled from ${base.name} (combat air patrol)`, 'info');
+}
+// v2.29.0 — convenience: scramble `count` jets from EVERY US airbase at once (panel button).
+function usScrambleAll(count) {
+  US_AIRBASES.forEach(function (b) { scrambleSquadron(b.id, count || 2); });
 }
 
 // Select a player fighter and open the command bar (Patrol / Strike / RTB).
@@ -16918,6 +16942,12 @@ function selectPlayerFighter(id, add) {
 // Apply a command to ALL selected fighters (with a small spread so they don't stack).
 function commandSelectedFighters(lat, lon, mode, targetId, append) {
   const sel = state.selectedFighters || (state.selectedFighter ? [state.selectedFighter] : []);
+  // v2.29.0 — MP guest (US player): the host owns the fighters; route the order upstream with the
+  // selected ids. (Threat ids match the host's, since threats are synced, so 'intercept' works too.)
+  if (typeof MP !== 'undefined' && MP.enabled && MP.role === 'guest') {
+    if (sel.length && typeof mpSend === 'function') mpSend({ t: 'fcommand', ids: sel.slice(), lat: lat, lon: lon, mode: mode, targetId: targetId || null, append: !!append });
+    return;
+  }
   sel.forEach((id, i) => {
     // fan out destination slightly per aircraft for non-strike orders
     const spread = (mode === 'strike' || mode === 'intercept') ? 0 : 0.05;
@@ -16945,8 +16975,8 @@ function showFighterCommandBar() {
         if (state.fighterCommandMode === 'strike') { state.fighterCommandMode = null; document.body.classList.remove('targeting-cursor'); }
         else { state.fighterCommandMode = 'strike'; document.body.classList.add('targeting-cursor'); showNotification('STRIKE ARMED', 'Right-click a ground target or location to bomb it.', 'warn'); }
       }
-      else if (cmd === 'rtb') { (state.selectedFighters||[]).forEach(id=>{ const ff=(state.playerFighters||[]).find(x=>x.id===id); if(ff){ff.mode='rtb';ff.waypoints=[];} }); state.fighterCommandMode = null; document.body.classList.remove('targeting-cursor'); }
-      else if (cmd === 'clearwp') { (state.selectedFighters||[]).forEach(id=>{ const ff=(state.playerFighters||[]).find(x=>x.id===id); if(ff){ff.waypoints=[];ff.mode='patrol';ff.patrolLat=ff.curLat;ff.patrolLon=ff.curLon;} }); }
+      else if (cmd === 'rtb') { const _ids=(state.selectedFighters||[]).slice(); if (typeof MP !== 'undefined' && MP.enabled && MP.role === 'guest') { if(_ids.length && typeof mpSend==='function') mpSend({t:'fcommand', ids:_ids, mode:'rtb'}); } else { _ids.forEach(id=>{ const ff=(state.playerFighters||[]).find(x=>x.id===id); if(ff){ff.mode='rtb';ff.waypoints=[];} }); } state.fighterCommandMode = null; document.body.classList.remove('targeting-cursor'); }
+      else if (cmd === 'clearwp') { const _ids=(state.selectedFighters||[]).slice(); if (typeof MP !== 'undefined' && MP.enabled && MP.role === 'guest') { if(_ids.length && typeof mpSend==='function') mpSend({t:'fcommand', ids:_ids, mode:'clearwp'}); } else { _ids.forEach(id=>{ const ff=(state.playerFighters||[]).find(x=>x.id===id); if(ff){ff.waypoints=[];ff.mode='patrol';ff.patrolLat=ff.curLat;ff.patrolLon=ff.curLon;} }); } }
       else if (cmd === 'close') { state.selectedFighter = null; state.selectedFighters = []; state.fighterCommandMode = null; document.body.classList.remove('targeting-cursor'); bar.style.display = 'none'; }
       showFighterCommandBar();
     });
@@ -16966,7 +16996,7 @@ function showFighterCommandBar() {
 
 // Airbase scramble popup — choose how many fighters to launch.
 function showScramblePopup(baseId, clientX, clientY) {
-  const base = IL_AIRBASES.find(b => b.id === baseId); if (!base) return;
+  const base = IL_AIRBASES.find(b => b.id === baseId) || US_AIRBASES.find(b => b.id === baseId); if (!base) return;
   const avail = (state.airbaseFighters && state.airbaseFighters[base.id] !== undefined) ? state.airbaseFighters[base.id] : base.fighters;
   let pop = document.getElementById('scramble-popup');
   if (!pop) {
@@ -17461,7 +17491,7 @@ function drawPlayerFighters() {
     ctx.save();
     ctx.translate(sx, sy);
     ctx.rotate(-(f.heading != null ? f.heading : 0));
-    ctx.fillStyle = modeCol; ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.3;
+    ctx.fillStyle = modeCol; ctx.strokeStyle = (f.side === 'US') ? '#ffd24d' : '#fff'; ctx.lineWidth = (f.side === 'US') ? 1.8 : 1.3;   // v2.29.0 — gold outline = US jets
     ctx.beginPath(); ctx.moveTo(9,0); ctx.lineTo(-5,-5); ctx.lineTo(-2,0); ctx.lineTo(-5,5); ctx.closePath();
     ctx.fill(); ctx.stroke();
     ctx.restore();
@@ -20914,10 +20944,18 @@ function setupCanvasInteraction() {
       const sx = e.clientX - rect.left;
       const sy = e.clientY - rect.top;
       const buildPanelOpen = document.getElementById('build-panel').style.display !== 'none';
-      const attackerArmed = (state.playAs === 'attacker' && state.attackMode && state.attackMode.type);
+      // v2.29.0 — the US player runs on the OPFOR/guest scaffold (playAs==='attacker') but is NOT an
+      // attacker: route its clicks to AD-placement / strike / fighter control, never OPFOR launches.
+      const usIsMe = (typeof MP !== 'undefined' && MP.enabled && MP.myFaction === 'usa');
+      const attackerArmed = (state.playAs === 'attacker' && !usIsMe && state.attackMode && state.attackMode.type);
       if (!isDragging) {
+        // === US PLAYER — AD placement mode: click the map to deploy a US battery there ===
+        if (state.usAdPlaceMode && typeof usPlaceAdAt === 'function') {
+          const [lat, lon] = screenToGeo(sx, sy);
+          usPlaceAdAt(state.usAdPlaceMode, lat, lon);   // stays armed for multi-placement; right-click cancels
+        }
         // === US PLAYER — strike mode: click an enemy target to strike it (air / Tomahawk) ===
-        if (state.usStrikeMode && typeof usMapStrike === 'function') {
+        else if (state.usStrikeMode && typeof usMapStrike === 'function') {
           const [lat, lon] = screenToGeo(sx, sy);
           usMapStrike(lat, lon);
         }
@@ -20937,7 +20975,7 @@ function setupCanvasInteraction() {
         }
         // === ATTACKER, no weapon armed → SELECT a launched drone to fly it in real time ===
         // (v2.23.2) click a drone to select it (white box), then right-click to steer/redirect it.
-        else if (state.playAs === 'attacker') {
+        else if (state.playAs === 'attacker' && !usIsMe) {
           let best = null, bestD = 18;
           for (const t of state.threats) {
             if (t.type !== 'drone' || t.intercepted || t.impacted) continue;
@@ -20968,9 +21006,17 @@ function setupCanvasInteraction() {
             if (best) { selectPlayerFighter(best.id, e.shiftKey); hitFighter = true; }   // Shift = add to selection
             else if (!e.shiftKey) { state.selectedFighters = []; state.selectedFighter = null; }  // empty click = deselect
           }
-          // === Click an airbase → scramble popup ===
+          // === Click an airbase → scramble popup (own bases only) ===
+          // v2.29.0 — the Israeli defender scrambles from IL airbases; the US player from US airbases.
           if (!hitFighter) {
-            for (const b of IL_AIRBASES) {
+            const _mpOn = (typeof MP !== 'undefined' && MP.enabled);
+            const myFac = _mpOn ? MP.myFaction : 'israel';
+            const ilMine = !_mpOn || MP.role === 'host' || myFac === 'israel' || myFac === 'defender';
+            const usMine = _mpOn && myFac === 'usa';
+            const bases = [];
+            if (ilMine) for (const b of IL_AIRBASES) bases.push(b);
+            if (usMine) for (const b of US_AIRBASES) bases.push(b);
+            for (const b of bases) {
               const [bsx, bsy] = geoToScreen(b.lat, b.lon);
               if (Math.hypot(bsx - sx, bsy - sy) < 16) { showScramblePopup(b.id, e.clientX, e.clientY); hitFighter = true; break; }
             }
@@ -21002,6 +21048,14 @@ function setupCanvasInteraction() {
               const [bsx, bsy] = geoToScreen(b.lat, b.lon);
               if (Math.hypot(bsx - sx, bsy - sy) < 14) { selectBattery(b.id); break; }
             }
+            // v2.29.0 — select a US battery (shows its coverage ring) to inspect/track it
+            if (state.usBatteries && state.usBatteries.length) {
+              state.selectedUsBattery = null;
+              for (const ub of state.usBatteries) {
+                const [ubx, uby] = geoToScreen(ub.lat, ub.lon);
+                if (Math.hypot(ubx - sx, uby - sy) < 13) { state.selectedUsBattery = ub.id; if (typeof audio !== 'undefined' && audio.click) audio.click(); break; }
+              }
+            }
           }
           }   // close the (hitFighter ? handled : TST/select) else block — v2.17.0
         }
@@ -21015,6 +21069,9 @@ function setupCanvasInteraction() {
   // ПКМ — команда выбранным истребителям / отмена выбора батареи / снятие оружия
   canvas.addEventListener('contextmenu', (e) => {
     e.preventDefault();
+    // === US PLAYER — right-click cancels an armed AD-placement / strike mode (v2.29.0) ===
+    if (state.usAdPlaceMode) { state.usAdPlaceMode = null; document.body.classList.remove('targeting-cursor'); if (typeof mpToast === 'function') mpToast('US AD placement OFF', 'info'); return; }
+    if (state.usStrikeMode) { state.usStrikeMode = false; document.body.classList.remove('targeting-cursor'); if (typeof usUpdateStrikeBtns === 'function') usUpdateStrikeBtns(); if (typeof mpToast === 'function') mpToast('US strike mode OFF', 'info'); return; }
     // === FIGHTER COMMAND via RIGHT-CLICK (v2.17.1 → multi-select + waypoints v2.17.2) ===
     //   • STRIKE armed (via button)  → bomb the clicked point/target
     //   • on/near an enemy drone     → intercept it (radar auto-fires the AAM)
@@ -22785,6 +22842,7 @@ function startScenario(name) {
   state.usInvolvement = 12; state.usTargets = null; state.usHasCasusBelli = false;   // v2.26.6 #9/#10 — US military reset
   state.usAdLevel = 40; state.usFightersBanned = false; state.usIntelCutUntil = 0;   // v2.28.3 — US air-defense level + pressure flags reset
   state.usBatteries = [];   // v2.28.5 — US AD batteries reset (re-deployed to bases on first usTargetsEnsure)
+  state.usAdPlaceMode = null; state.selectedUsBattery = null;   // v2.29.0 — US AD click-to-place mode / selection reset
   state.usStrikeMode = false; state.usStrikeWeapon = 'air';   // v2.28.4 — US pick-target strike mode reset
   state.iranDelayUntil = 0;
   state.sandstormUntil = 0;
@@ -24059,6 +24117,8 @@ function mpBuildSnapshot() {
     ust: (function () { if (typeof usTargetsEnsure === 'function') usTargetsEnsure(); const a = []; (state.usTargets || []).forEach(function (t) { a.push({ id: t.id, ty: t.type, la: r5(t.lat), lo: r5(t.lon), im: t.importance, nm: t.name, d: (t.alive === false ? 100 : Math.round(t.damage || 0)), al: t.alive === false ? 0 : 1 }); }); return a; })(),   // v2.28.4 — US assets (incl. deployed carriers) + damage synced to ALL players
     usad: Math.round(state.usAdLevel != null ? state.usAdLevel : 40),   // v2.28.4 — US air-defense level
     usb: (state.usBatteries || []).map(function (b) { return { i: b.id, t: b.type, la: r5(b.lat), lo: r5(b.lon) }; }),   // v2.28.5 — US AD batteries synced (render on all clients)
+    pf: (state.playerFighters || []).map(function (f) { return { i: f.id, la: r5(f.curLat), lo: r5(f.curLon), m: f.mode, h: (f.heading != null ? Math.round(f.heading * 100) / 100 : 0), s: f.side || 'IL', bn: f.baseName, fu: Math.round(f.fuel || 0) }; }),   // v2.29.0 — player fighters (IL + US) synced so the air war is visible to all players
+    af: state.airbaseFighters || {},   // v2.29.0 — airbase fighter pools (so the US player's scramble popup shows the right counts)
     st: { intc: st.intercepted || 0, miss: st.missed || 0, tot: st.threatsTotal || 0, saf: st.civilianSafety != null ? Math.round(st.civilianSafety) : 100 }
   };
 }
@@ -24169,6 +24229,20 @@ function mpGuestApplySnapshot(s) {
   if (s.ust && s.ust.length) { state.usTargets = s.ust.map(function (t) { return { id: t.id, type: t.ty, lat: t.la, lon: t.lo, importance: t.im, name: t.nm, faction: 'usa', damage: t.d, alive: t.al !== 0, hardness: 0.5 }; }); }   // v2.28.4 — synced US assets (deployed carriers + damage)
   if (s.usad != null) state.usAdLevel = s.usad;   // v2.28.4 — US air-defense level synced
   if (s.usb) state.usBatteries = s.usb.map(function (b) { return { id: b.i, type: b.t, lat: b.la, lon: b.lo }; });   // v2.28.5 — US AD batteries synced
+  if (s.af) state.airbaseFighters = s.af;   // v2.29.0 — synced airbase fighter pools (scramble popup counts)
+  if (s.pf) {   // v2.29.0 — synced player fighters (IL + US): render-only on the guest; selection stays local
+    const prevF = {}; (state.playerFighters || []).forEach(function (f) { prevF[f.id] = f; });
+    state.playerFighters = s.pf.map(function (n) {
+      const o = prevF[n.i] || { id: n.i, trail: [] };
+      o.id = n.i; o.curLat = n.la; o.curLon = n.lo; o.mode = n.m; o.heading = n.h; o.side = n.s; o.baseName = n.bn;
+      if (n.fu != null) o.fuel = n.fu; o.aam = null; o.waypoints = o.waypoints || [];
+      if (!o.trail) o.trail = [];
+      o.trail.push({ lat: n.la, lon: n.lo }); if (o.trail.length > 14) o.trail.shift();   // local contrail from synced positions
+      return o;
+    });
+    if (state.selectedFighters) state.selectedFighters = state.selectedFighters.filter(function (id) { return s.pf.some(function (n) { return n.i === id; }); });
+    if (state.selectedFighter && !s.pf.some(function (n) { return n.i === state.selectedFighter; })) { state.selectedFighter = null; if (typeof showFighterCommandBar === 'function') showFighterCommandBar(); }
+  }
   // FX events → spawn local particles
   if (s.fx) s.fx.forEach(mpGuestPlayFx);
 }
@@ -24442,6 +24516,9 @@ function mpFfaHostOnMessage(msg, cRec) {
   if (msg.t === 'usaGrant') { if (cRec.faction === 'usa') mpFfaApplyUsaGrant(msg.kind); return; }
   if (msg.t === 'usStrike') { const ut = (state.usTargets || []).find(function (t) { return t.id === msg.id; }); if (ut && typeof strikeUSTarget === 'function') strikeUSTarget(ut); return; }   // v2.28.4 — axis guest struck a US asset → host applies
   if (msg.t === 'usMapStrike') { if (cRec.faction === 'usa' && typeof usHostMapStrike === 'function') usHostMapStrike(msg.lat, msg.lon, msg.weapon); return; }   // v2.28.4 — US player's map strike (pick target/base) → host applies
+  if (msg.t === 'usPlaceAd') { if (cRec.faction === 'usa' && typeof usPlaceAdAt === 'function') usPlaceAdAt(msg.adtype, msg.lat, msg.lon); return; }   // v2.29.0 — US player placed an AD battery on the map
+  if (msg.t === 'scramble') { if (cRec.faction === 'usa' && typeof US_AIRBASES !== 'undefined' && US_AIRBASES.find(function (x) { return x.id === msg.baseId; }) && typeof scrambleSquadron === 'function') scrambleSquadron(msg.baseId, msg.count || 1); return; }   // v2.29.0 — US player scrambles from a US airbase (host owns the fighter sim)
+  if (msg.t === 'fcommand') { if (cRec.faction === 'usa' && typeof mpHostApplyUsFighterCommand === 'function') mpHostApplyUsFighterCommand(msg); return; }   // v2.29.0 — US player commands its jets
   if (msg.t === 'axistask') { if (cRec.faction === 'iran') { state.iranTask = msg.task; if (typeof showNotification === 'function') showNotification('☪ TEHRAN DIRECTIVE', msg.task, 'info'); mpSend({ t: 'axistask', task: msg.task }); } return; }   // v2.26.7 #8 — Iran (guest) directive → host applies + rebroadcasts to the axis
   if (msg.t === 'permReq') { mpDeliverPermReq(msg, cRec); return; }   // v2.27.1 — relay an ally-permission request to the US/Iran player
   if (msg.t === 'permResp') { const rc = MP._permRoute && MP._permRoute[msg.reqId]; if (MP._permRoute) delete MP._permRoute[msg.reqId]; if (rc) mpSendTo(rc, msg); else mpApplyPermResp(msg); return; }   // v2.27.1 — relay the decision back to the requester
@@ -24747,6 +24824,22 @@ function mpFfaApplyUsaGrant(kind) {
   else if (kind === 'usMass') usMassStrike();             // v2.28.4 — US mass strike (like Israel's)
   else if (kind === 'usIntercept') usAssistIntercept();   // v2.28.4 — US helps intercept threats over Israel
 }
+// v2.29.0 — host applies a US guest's fighter command to its (US-owned) jets, mirroring commandSelectedFighters.
+function mpHostApplyUsFighterCommand(msg) {
+  if (typeof MP === 'undefined' || MP.role !== 'host') return;
+  const ids = msg.ids || [], mode = msg.mode;
+  ids.forEach(function (id, i) {
+    const f = (state.playerFighters || []).find(function (x) { return x.id === id; });
+    if (!f || f.side !== 'US') return;   // a US guest may only command US jets
+    if (mode === 'rtb') { f.mode = 'rtb'; f.waypoints = []; }
+    else if (mode === 'clearwp') { f.waypoints = []; f.mode = 'patrol'; f.patrolLat = f.curLat; f.patrolLon = f.curLon; }
+    else if (typeof commandFighter === 'function') {
+      const spread = (mode === 'strike' || mode === 'intercept') ? 0 : 0.05;
+      const ox = spread ? Math.cos(i * 2.4) * spread : 0, oy = spread ? Math.sin(i * 2.4) * spread : 0;
+      commandFighter(id, (msg.lat != null ? msg.lat : f.curLat) + oy, (msg.lon != null ? msg.lon : f.curLon) + ox, mode, msg.targetId, msg.append);
+    }
+  });
+}
 function mpFfaRequestUsAid() {
   const now = Date.now();
   if (now < (MP.usaReqAt || 0)) { mpToast('US aid on cooldown (' + Math.ceil((MP.usaReqAt - now) / 1000) + 's)', 'warn'); return; }
@@ -24983,10 +25076,13 @@ function mpFfaInstallUsaPanel() {
       '<button class="mp-usa-btn" data-kind="tomaHez" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(150,60,40,.3);border:1px solid #cf5b3a;color:#ffb3a0;border-radius:4px;cursor:pointer;">🚀 Tomahawk → Hezbollah</button>' +
       '<button class="mp-usa-btn" data-kind="tomaHouthi" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(150,60,40,.3);border:1px solid #cf5b3a;color:#ffb3a0;border-radius:4px;cursor:pointer;">🚀 Tomahawk → Houthis</button>' +
       '<button class="mp-usa-btn" data-kind="conusFighters" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(40,90,150,.3);border:1px solid #5b8def;color:#bfe0ff;border-radius:4px;cursor:pointer;">✈ Fighters from CONUS (mainland)</button>' +
-      '<div style="margin:9px 0 4px;color:#9fbada;font-size:10px;letter-spacing:1px;border-top:1px solid rgba(91,141,239,.3);padding-top:7px;">AIR DEFENSE (deploys to US bases)</div>' +
-      '<button class="mp-usa-btn" data-kind="usAdPatriot" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(40,110,90,.3);border:1px solid #7fffb0;color:#bfffd8;border-radius:4px;cursor:pointer;">🛡 Deploy Patriot battery</button>' +
-      '<button class="mp-usa-btn" data-kind="usAdThaad" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(40,110,90,.3);border:1px solid #7fffb0;color:#bfffd8;border-radius:4px;cursor:pointer;">🛡 Deploy THAAD battery</button>' +
-      '<button class="mp-usa-btn" data-kind="usAdCram" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(40,110,90,.3);border:1px solid #7fffb0;color:#bfffd8;border-radius:4px;cursor:pointer;">🛡 Deploy C-RAM</button>' +
+      '<div style="margin:9px 0 4px;color:#9fbada;font-size:10px;letter-spacing:1px;border-top:1px solid rgba(91,141,239,.3);padding-top:7px;">AIR DEFENSE — arm, then CLICK the map to place</div>' +
+      '<button id="us-ad-patriot" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(40,110,90,.3);border:1px solid #7fffb0;color:#bfffd8;border-radius:4px;cursor:pointer;">🛡 Place Patriot</button>' +
+      '<button id="us-ad-thaad" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(40,110,90,.3);border:1px solid #7fffb0;color:#bfffd8;border-radius:4px;cursor:pointer;">🛡 Place THAAD</button>' +
+      '<button id="us-ad-cram" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(40,110,90,.3);border:1px solid #7fffb0;color:#bfffd8;border-radius:4px;cursor:pointer;">🛡 Place C-RAM</button>' +
+      '<div style="margin:9px 0 4px;color:#9fbada;font-size:10px;letter-spacing:1px;border-top:1px solid rgba(91,141,239,.3);padding-top:7px;">AIR FORCE — click a US airbase on the map</div>' +
+      '<div style="font-size:10px;color:#bfe0ff;margin-bottom:5px;line-height:1.4;">Click a white ✈ US airbase → scramble jets. Left-click a jet to select (Shift adds), right-click to vector / strike / intercept. Or:</div>' +
+      '<button id="us-scramble-all" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(40,90,150,.3);border:1px solid #5b8def;color:#bfe0ff;border-radius:4px;cursor:pointer;">✈✈ Scramble ALL US airbases (×2)</button>' +
       '<div style="margin:9px 0 4px;color:#9fbada;font-size:10px;letter-spacing:1px;border-top:1px solid rgba(91,141,239,.3);padding-top:7px;">PICK-TARGET STRIKE (click a target on the map)</div>' +
       '<button id="us-strike-air" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(150,60,40,.3);border:1px solid #cf5b3a;color:#ffb3a0;border-radius:4px;cursor:pointer;">🎯 Air-strike mode</button>' +
       '<button id="us-strike-toma" style="width:100%;margin-bottom:5px;padding:7px;background:rgba(150,60,40,.3);border:1px solid #cf5b3a;color:#ffb3a0;border-radius:4px;cursor:pointer;">🚀 Tomahawk mode (needs a ship)</button>' +
@@ -24996,6 +25092,11 @@ function mpFfaInstallUsaPanel() {
     p.querySelectorAll('.mp-usa-btn').forEach(function (b) { b.onclick = function () { const k = b.dataset.kind; if (MP.role === 'host') mpFfaApplyUsaGrant(k); else mpSend({ t: 'usaGrant', kind: k }); mpToast('US action: ' + k, 'success'); const r = el('mp-usa-req'); if (r) r.style.display = 'none'; }; });
     const _sa = el('us-strike-air'); if (_sa) _sa.onclick = function () { usSetStrikeMode('air'); };
     const _st = el('us-strike-toma'); if (_st) _st.onclick = function () { usSetStrikeMode('tomahawk'); };
+    // v2.29.0 — US AD click-to-place arming buttons (mirror Israel's deploy)
+    const _ap = el('us-ad-patriot'); if (_ap) _ap.onclick = function () { usSetAdPlaceMode('patriot'); };
+    const _at = el('us-ad-thaad');   if (_at) _at.onclick = function () { usSetAdPlaceMode('thaad'); };
+    const _ac = el('us-ad-cram');    if (_ac) _ac.onclick = function () { usSetAdPlaceMode('cram'); };
+    const _all = el('us-scramble-all'); if (_all) _all.onclick = function () { if (typeof usScrambleAll === 'function') usScrambleAll(2); };
   }
   p.style.display = 'block';
 }
@@ -25423,15 +25524,53 @@ function usPlaceAD(type) {
   if (typeof showNotification === 'function') showNotification('🛡 US AD DEPLOYED', sn + ' deployed to ' + best.name + ' — US intercept now ' + state.usAdLevel + '%.', 'success');
   if (typeof logEvent === 'function') logEvent('🛡 US AD: ' + sn + ' → ' + best.name + ' (intercept ' + state.usAdLevel + '%)', 'success');
 }
+// v2.29.0 — US AD click-to-place (mirrors Israel's deploy phase): arm a battery type, then click the map.
+function usAddBatteryExact(type, lat, lon, baseId) { state.usBatteries = state.usBatteries || []; const b = { id: 'usb_' + (nextId++), type: type, lat: lat, lon: lon, baseId: baseId || null }; state.usBatteries.push(b); return b; }
+function usSetAdPlaceMode(type) {
+  if (state.usAdPlaceMode === type) { state.usAdPlaceMode = null; document.body.classList.remove('targeting-cursor'); if (typeof mpToast === 'function') mpToast('US AD placement OFF', 'info'); return; }
+  state.usAdPlaceMode = type; state.usStrikeMode = false;   // can't strike & place at once
+  document.body.classList.add('targeting-cursor');
+  const sn = (BATTERY_TYPES[type] && BATTERY_TYPES[type].shortName) || type;
+  if (typeof mpToast === 'function') mpToast('🛡 ' + sn + ' place mode ON — click the map (right-click cancels)', 'info');
+  if (typeof showNotification === 'function') showNotification('🛡 US AD PLACEMENT', sn + ' armed — click anywhere on the map to deploy the battery. Right-click cancels.', 'info');
+}
+function usPlaceAdAt(type, lat, lon) {
+  // guest → host (authoritative + synced via the usb snapshot field), like usMapStrike
+  if (typeof MP !== 'undefined' && MP.enabled && MP.role === 'guest') { if (typeof mpSend === 'function') mpSend({ t: 'usPlaceAd', adtype: type, lat: lat, lon: lon }); if (typeof mpToast === 'function') mpToast('US AD deploy ordered', 'success'); return; }
+  usTargetsEnsure();
+  let baseId = null, bd = Infinity;
+  (state.usTargets || []).forEach(function (t) { if (t.alive === false) return; const d = haversineKm(lat, lon, t.lat, t.lon); if (d < bd) { bd = d; baseId = t.id; } });   // nearest base (cosmetic grouping)
+  usAddBatteryExact(type, lat, lon, baseId); usRecomputeAd();
+  const sn = (BATTERY_TYPES[type] && BATTERY_TYPES[type].shortName) || type;
+  if (typeof usInvSet === 'function') usInvSet((typeof usInvVal === 'function' ? usInvVal() : 12) + 2);
+  if (typeof audio !== 'undefined' && audio.click) audio.click();
+  if (typeof spawnHitMarker === 'function') spawnHitMarker(lat, lon, '🛡 ' + sn, '#7fffb0');
+  if (typeof logEvent === 'function') logEvent('🛡 US AD: ' + sn + ' deployed (intercept ' + state.usAdLevel + '%)', 'success');
+}
 function drawUsBatteries() {
   if (typeof ctx === 'undefined' || !ctx || !state.usBatteries || !state.usBatteries.length) return;
   if (typeof usInvVal === 'function' && usInvVal() < 25) return;
+  // km→px scale for coverage rings (same trick as drawPlayerFighters)
+  const _a = geoToScreen(32.0, 35.0), _b = geoToScreen(32.0 + 1 / 111, 35.0);
+  const pxPerKm = Math.max(0.4, Math.hypot(_b[0] - _a[0], _b[1] - _a[1]));
   state.usBatteries.forEach(function (b) {
     const p = geoToScreen(b.lat, b.lon); if (!isFinite(p[0]) || !isFinite(p[1])) return;
-    if (p[0] < -20 || p[0] > canvasW + 20 || p[1] < -20 || p[1] > canvasH + 20) return;
-    const col = (BATTERY_TYPES[b.type] && BATTERY_TYPES[b.type].color) || '#7fb0ff';
-    ctx.fillStyle = col; ctx.strokeStyle = '#02101f'; ctx.lineWidth = 1.2;
+    if (p[0] < -40 || p[0] > canvasW + 40 || p[1] < -40 || p[1] > canvasH + 40) return;
+    const bt = BATTERY_TYPES[b.type] || {};
+    const col = bt.color || '#7fb0ff';
+    const sel = state.selectedUsBattery === b.id;
+    // coverage ring
+    if (bt.rangeKm) {
+      const rr = bt.rangeKm * pxPerKm;
+      ctx.strokeStyle = sel ? 'rgba(127,255,176,0.55)' : 'rgba(127,176,255,0.18)';
+      ctx.lineWidth = sel ? 1.4 : 1; ctx.setLineDash([4, 5]);
+      ctx.beginPath(); ctx.arc(p[0], p[1], rr, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+    }
+    // battery triangle
+    ctx.fillStyle = col; ctx.strokeStyle = sel ? '#ffffff' : '#02101f'; ctx.lineWidth = sel ? 2 : 1.2;
     ctx.beginPath(); ctx.moveTo(p[0], p[1] - 5); ctx.lineTo(p[0] + 5, p[1] + 4); ctx.lineTo(p[0] - 5, p[1] + 4); ctx.closePath(); ctx.fill(); ctx.stroke();
+    if (sel) { ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(p[0], p[1], 11, 0, Math.PI * 2); ctx.stroke(); }
+    if (camera.zoom >= 6) { ctx.fillStyle = col; ctx.font = '8px Consolas'; ctx.textAlign = 'center'; ctx.fillText((bt.shortName || b.type).toUpperCase(), p[0], p[1] - 8); ctx.textAlign = 'left'; }
   });
 }
 function strikeUSTarget(target) {
