@@ -1213,6 +1213,7 @@ body.targeting-cursor #map-canvas {
   <div class="menu-hint">New here? Pick a scenario — defence runs itself, just watch and step in when you want. There's a how-to-play guide on your first game.</div>
   <button class="menu-button" id="btn-scenarios">▶ PLAY · SCENARIOS</button>
   <button class="menu-button" id="btn-sandbox" style="background:rgba(192,57,43,0.15);border-color:#c0392b;color:#ff8a76;">⚡ SANDBOX · FREE PLAY</button>
+  <button class="menu-button" id="btn-escalation" style="background:rgba(150,60,40,0.2);border-color:#e07a3a;color:#ffb27a;">🔥 ESCALATION · ATTACK OR BE ATTACKED <small style="color:#ffaa00;font-size:10px;">NEW</small></button>
   <button class="menu-button" id="btn-multiplayer" style="background:rgba(40,90,150,0.18);border-color:#2e6da4;color:#7fd1ff;">🌐 MULTIPLAYER · 1v1 DEFENDER vs OPFOR <small style="color:#ffaa00;font-size:10px;">BETA</small></button>
   <button class="menu-button" id="btn-multiplayer-ffa" style="background:rgba(60,110,170,0.18);border-color:#3d7fd4;color:#9fd0ff;">🌐 MULTI-FACTION · 2–6 PLAYERS <small style="color:#ffaa00;font-size:10px;">NEW</small></button>
   <button class="menu-button" id="btn-info">ⓘ ABOUT THE DEFENCE SYSTEMS</button>
@@ -1279,6 +1280,33 @@ body.targeting-cursor #map-canvas {
   </div>
 
   <button class="menu-button" id="btn-sandbox-back" style="margin-top:30px; min-width:200px; padding:10px 24px; font-size:13px;">◀ BACK</button>
+</div>
+
+<!-- ===== ESCALATION MODE SELECT (v2.31.0) ===== -->
+<div id="escalation-menu" class="fullscreen hidden">
+  <div class="menu-title" style="font-size:48px; letter-spacing:8px; color:#ff8a5b;">ESCALATION</div>
+  <div class="menu-subtitle">PICK A SIDE · IT DEPENDS ON YOU — HOW HARD YOU HIT, THE HARDER THEY HIT BACK</div>
+
+  <div class="scenarios" id="escalation-list" style="grid-template-columns:repeat(2,1fr); max-width:900px;">
+    <div class="scenario-card" id="escalation-israel" style="border-left-color:#00d4ff; cursor:pointer;">
+      <h3 style="color:#7fd1ff;">🛡 ISRAEL · OFFENSIVE</h3>
+      <p>Go on the attack. Strike Gaza, Lebanon, Iran and Yemen — cities, strategic sites, launch pads and air defence — with <b>M270 MLRS</b>, <b>Hermes UAVs</b>, <b>kamikaze drones</b> and <b>fighter JDAMs</b>. Your Iron Dome / Arrow grid still defends you, because the harder you hit, the harder they retaliate.</p>
+      <div class="scenario-difficulty">
+        <span style="color:#7fd1ff;">You strike</span>
+        <span style="color:var(--amber);">Live escalation</span>
+      </div>
+    </div>
+    <div class="scenario-card" id="escalation-axis" style="border-left-color:#c0392b; cursor:pointer;">
+      <h3 style="color:#ff6b5e;">⚔ RESISTANCE AXIS</h3>
+      <p>Play Hamas / Hezbollah / Iran / Houthis. Pick faction, base and weapon, then strike Israel. The IDF answers each blow — and the exchange escalates the more you push.</p>
+      <div class="scenario-difficulty">
+        <span style="color:var(--red);">You strike Israel</span>
+        <span style="color:var(--amber);">IDF retaliates</span>
+      </div>
+    </div>
+  </div>
+
+  <button class="menu-button" id="btn-escalation-back" style="margin-top:30px; min-width:200px; padding:10px 24px; font-size:13px;">◀ BACK</button>
 </div>
 
 <!-- ===== MULTIPLAYER LOBBY (v2.25.0) ===== -->
@@ -2188,6 +2216,18 @@ const CITIES_BASE = [
 // Bump major (X.Y) for big new systems / mechanics; patch (X.Y.Z) for fixes.
 // Displayed in start menu + in-game HUD subtitle.
 // Recent history:
+//   2.31.0  — NEW MODE: ESCALATION (separate from the 50-wave Defend / Attack sandboxes). Pick a side —
+//            ISRAEL (offensive) or the RESISTANCE AXIS — and it plays as a live exchange, not fixed waves:
+//            the harder you hit, the harder they hit back (a real-time escalation meter). As ISRAEL you go
+//            on the attack against Gaza / Lebanon / Iran / Yemen — cities, strategic sites, launch pads and
+//            SAM/air-defence — with four new Israeli weapons: M270 MLRS (guided rocket salvo, ballistic
+//            arc), Hermes UAV (precise recon-strike drone), kamikaze drones (loitering munitions that dive
+//            & detonate) and fighter JDAMs (strike jets, reuse the airstrike system). New flying-munition
+//            system (state.israeliMunitions + spawnIsraeliMunition/updateIsraeliMunitions/drawIsraeliMunitions),
+//            LOD-aware so it stays smooth. Arm a weapon in the 🛡 IDF STRIKE COMMAND panel, click a red enemy
+//            target; your Iron Dome/Arrow grid still defends you while the enemy retaliates, scaled by the
+//            escalation level (ilScheduleEnemyRetaliation). Icons are placeholder glyphs for now. The AXIS
+//            side reuses the proven attacker sandbox under the escalation banner. Menu: 🔥 ESCALATION → side.
 //   2.30.0  — PERFORMANCE: mass launches no longer lag. During big salvos the frame cost was dominated
 //            by rendering — every threat re-projected its whole trail 4× per frame + built a fresh radial
 //            gradient; every interceptor did an O(n) find() over all threats (→ O(n²)) and drew a contrail
@@ -3510,7 +3550,7 @@ const CITIES_BASE = [
 //           Iron Dome now intercepts heavyRocket; weapon-name picker uses cheap-ammo principle
 //   2.1.0 — RISK indicator on TST cards; Hamas drone removal (zero capacity);
 //           targetDurability scaling (Sinwar bunker = 9 sorties, Natanz = 14)
-const GAME_VERSION = '2.30.0';
+const GAME_VERSION = '2.31.0';
 
 const BATTERY_TYPES = {
   ironDome: {
@@ -4222,6 +4262,198 @@ const ENEMY_TARGETS = [
   { id: 't_houthi_c2',     name: 'Drone command center',       lat: 15.4000, lon: 44.1800, faction: 'houthi',    importance: 7,  type: 'c2',      hardness: 0.45 }
 ];
 
+/* ============================================================================
+   ESCALATION MODE — ISRAELI OFFENSE (v2.31.0)
+   A separate mode: play Israel (offensive) OR the Resistance Axis. As Israel you
+   strike Gaza / Lebanon / Iran / Yemen — cities, strategic sites, launch sites and
+   SAM/air-defence — with M270 MLRS, Hermes UAVs, kamikaze drones and fighter JDAMs.
+   Every strike RAISES escalation; the higher it climbs the harder the enemy hits
+   back (ilScheduleEnemyRetaliation). Icons are placeholder glyphs — swap for art later.
+   ============================================================================ */
+const IL_WEAPONS = {
+  m270:     { name: 'M270 MLRS',    short: 'M270',   icon: '≣', color: '#8fd3ff', kind: 'rocket', flightMs: 1600, arc: 0.26, salvo: 8, blast: 24, dmg: 30,  esc: 3, from: 'ground', desc: 'Guided rocket salvo — fast ballistic arc' },
+  hermes:   { name: 'Hermes UAV',   short: 'HERMES', icon: '⊹', color: '#9ff0b8', kind: 'drone',  flightMs: 5200, arc: 0.03, salvo: 1, blast: 18, dmg: 44,  esc: 2, from: 'air',    desc: 'Recon-strike drone — one precise missile' },
+  kamikaze: { name: 'Kamikaze UAV', short: 'KAMI',   icon: '◄', color: '#ffd06b', kind: 'drone',  flightMs: 3400, arc: 0.02, salvo: 3, blast: 22, dmg: 30,  esc: 2, from: 'ground', desc: 'Loitering munitions — dive and detonate' },
+  jdam:     { name: 'Fighter JDAM', short: 'JDAM',   icon: '▼', color: '#ff9a5b', kind: 'air',    flightMs: 0,    arc: 0,    salvo: 1, blast: 34, dmg: 999, esc: 4, from: 'jet',    desc: 'Strike jet drops guided bombs (heavy)' }
+};
+// Israeli surface launch origins (M270 / drones fly from the nearest one to the target)
+const IL_LAUNCH_SITES = [
+  { id: 'il_galilee', name: 'Northern Command (Galilee)', lat: 33.02, lon: 35.30 },
+  { id: 'il_golan',   name: 'Golan launch complex',       lat: 33.10, lon: 35.72 },
+  { id: 'il_gaza',    name: 'Gaza Division (south)',       lat: 31.46, lon: 34.53 },
+  { id: 'il_center',  name: 'Central Command',             lat: 32.05, lon: 34.85 },
+  { id: 'il_negev',   name: 'Negev launch complex',        lat: 30.80, lon: 34.78 }
+];
+function escEnsure() { if (state.escalationLevel == null) state.escalationLevel = 0; }
+function escVal() { return state.escalationLevel != null ? state.escalationLevel : 0; }
+function escAdd(v) { escEnsure(); state.escalationLevel = Math.max(0, Math.min(100, state.escalationLevel + v)); if (typeof escUpdateHud === 'function') escUpdateHud(); }
+function escTier() { const v = escVal(); return v >= 80 ? { t: 'TOTAL WAR', c: '#ff3b30' } : v >= 55 ? { t: 'High', c: '#ff8a5b' } : v >= 30 ? { t: 'Rising', c: '#ffd479' } : { t: 'Low', c: '#7fffb0' }; }
+function ilNearestOrigin(lat, lon, air) {
+  const list = air ? ((typeof IL_AIRBASES !== 'undefined') ? IL_AIRBASES : IL_LAUNCH_SITES) : IL_LAUNCH_SITES;
+  let best = list[0], bd = Infinity;
+  for (const s of list) { const d = haversineKm(lat, lon, s.lat, s.lon); if (d < bd) { bd = d; best = s; } }
+  return best;
+}
+// Pick the enemy target nearest a screen click (armed-weapon aim).
+function ilPickTarget(sx, sy) {
+  let best = null, bd = 24;
+  (state.enemyTargets || []).forEach(function (t) {
+    if (t.alive === false) return;
+    const p = geoToScreen(t.lat, t.lon);
+    const d = Math.hypot(p[0] - sx, p[1] - sy);
+    if (d < bd) { bd = d; best = t; }
+  });
+  return best;
+}
+// Fire an Israeli weapon at an enemy target. JDAM → strike jets (existing airstrike system); others → flying munitions.
+function ilFireWeapon(weaponId, target) {
+  if (!target || target.alive === false) return;
+  const w = IL_WEAPONS[weaponId]; if (!w) return;
+  escEnsure();
+  if (weaponId === 'jdam') {
+    if (typeof launchAirStrike === 'function') launchAirStrike(target.lat, target.lon, true);   // jets scramble + bomb
+    else return;
+  } else {
+    const origin = ilNearestOrigin(target.lat, target.lon, w.from === 'air');
+    for (let k = 0; k < (w.salvo || 1); k++) {
+      const sp = (w.salvo > 1) ? (k - (w.salvo - 1) / 2) * 0.012 : 0;   // tight spread on the target
+      spawnIsraeliMunition(weaponId, origin, target, sp);
+    }
+  }
+  // escalation rises with the value of what you struck
+  const impW = 1 + (target.importance || 5) * 0.10 + ((target.type === 'capital' || target.type === 'leader' || target.type === 'strategic') ? 1.4 : 0);
+  escAdd(w.esc * impW * 0.55);
+  if (typeof logEvent === 'function') logEvent('🛡 IDF ' + w.short + ' → ' + (target.name || 'target'), 'warn');
+  if (typeof audio !== 'undefined' && audio.launch) try { audio.launch(); } catch (e) {}
+  ilScheduleEnemyRetaliation(target.faction);   // enemy hits back, scaled by escalation
+}
+function spawnIsraeliMunition(weaponId, origin, target, spread) {
+  const w = IL_WEAPONS[weaponId];
+  state.israeliMunitions = state.israeliMunitions || [];
+  const tLat = target.lat + (spread || 0) * 0.6, tLon = target.lon + (spread || 0);
+  const distKm = haversineKm(origin.lat, origin.lon, tLat, tLon);
+  // flight time = weapon base × a mild distance factor, so both a Gaza hop and a Tehran strike are
+  // VISIBLE (a couple of seconds), not a one-frame teleport.
+  const flightMs = (w.flightMs || 2500) * Math.max(0.6, Math.min(2.4, 0.6 + distKm / 1100));
+  state.israeliMunitions.push({
+    id: 'ilm_' + (nextId++), weaponId: weaponId, kind: w.kind, color: w.color, icon: w.icon,
+    startLat: origin.lat, startLon: origin.lon, curLat: origin.lat, curLon: origin.lon,
+    targetLat: tLat, targetLon: tLon, targetId: target.id,
+    progress: 0, flightMs: flightMs, arc: w.arc, blast: w.blast, dmg: w.dmg,
+    distanceKm: Math.max(8, distKm), trail: []
+  });
+  if (typeof createExplosion === 'function') try { createExplosion(origin.lat, origin.lon, 9, 450, false); } catch (e) {}   // muzzle flash
+  state.pings = state.pings || []; state.pings.push({ lat: origin.lat, lon: origin.lon, life: 1, maxLife: 650 });
+}
+function updateIsraeliMunitions(dt) {
+  const list = state.israeliMunitions; if (!list || !list.length) return;
+  for (let i = list.length - 1; i >= 0; i--) {
+    const m = list[i];
+    m.progress += dt / (m.flightMs || 2500);   // fixed-time flight → always a visible few seconds
+    const p = Math.min(1, m.progress);
+    m.curLat = m.startLat + (m.targetLat - m.startLat) * p;
+    m.curLon = m.startLon + (m.targetLon - m.startLon) * p;
+    m.trail.push({ lat: m.curLat, lon: m.curLon, p: p }); if (m.trail.length > 26) m.trail.shift();
+    if (m.progress >= 1) { ilMunitionImpact(m); list.splice(i, 1); }
+  }
+}
+function ilMunitionImpact(m) {
+  const target = (state.enemyTargets || []).find(function (t) { return t.id === m.targetId; });
+  if (target && target.alive !== false) {
+    const dur = (typeof targetDurability === 'function') ? targetDurability(target) : 1;
+    target.damage = Math.min(100, (target.damage || 0) + (m.dmg / dur));
+    const destroyed = target.damage >= 100;
+    if (destroyed) { target.alive = false; target.damage = 100; }
+    if (typeof enemyTargetHitFx === 'function') enemyTargetHitFx(target, destroyed);
+    else if (typeof createExplosion === 'function') createExplosion(m.targetLat, m.targetLon, m.blast, 1500, true);
+  } else if (typeof createExplosion === 'function') {
+    createExplosion(m.targetLat, m.targetLon, m.blast, 1400, true);   // missed / already dead — still a blast
+  }
+}
+// Draw Israeli munitions in flight — distinct Israeli cyan/white look, LOD-aware (shares the mass-launch perf system).
+function drawIsraeliMunitions() {
+  if (typeof ctx === 'undefined' || !ctx) return;
+  const list = state.israeliMunitions; if (!list || !list.length) return;
+  const lod = (state._perf || { lod: 0 }).lod;
+  list.forEach(function (m) {
+    const a0 = geoToScreen(m.startLat, m.startLon), a1 = geoToScreen(m.targetLat, m.targetLon);
+    const dist = Math.hypot(a1[0] - a0[0], a1[1] - a0[1]);
+    const apex = Math.min(Math.max(28, (canvasH || 600) * 0.24), dist * (m.arc || 0.1));
+    const cc = geoToScreen(m.curLat, m.curLon);
+    const sx = cc[0], sy = cc[1] - Math.sin(Math.min(1, m.progress) * Math.PI) * apex;
+    if (!isFinite(sx) || !isFinite(sy)) return;
+    if (m.trail && m.trail.length > 1 && lod < 2) {
+      const N = m.trail.length, pts = new Array(N);
+      for (let i = 0; i < N; i++) { const c = geoToScreen(m.trail[i].lat, m.trail[i].lon); pts[i] = [c[0], c[1] - Math.sin(Math.min(1, m.trail[i].p) * Math.PI) * apex]; }
+      ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      if (lod === 0) { ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.lineWidth = 4; ctx.globalAlpha = 0.5; ctx.beginPath(); for (let i = 0; i < N; i++) { if (i === 0) ctx.moveTo(pts[i][0], pts[i][1]); else ctx.lineTo(pts[i][0], pts[i][1]); } ctx.stroke(); }
+      ctx.strokeStyle = m.color; ctx.lineWidth = 2.4; ctx.globalAlpha = 0.9; ctx.beginPath(); for (let i = 0; i < N; i++) { if (i === 0) ctx.moveTo(pts[i][0], pts[i][1]); else ctx.lineTo(pts[i][0], pts[i][1]); } ctx.stroke();
+      ctx.globalAlpha = 1; ctx.lineCap = 'butt'; ctx.lineJoin = 'miter';
+    }
+    if (lod < 2) { const spr = (typeof getGlowSprite === 'function') ? getGlowSprite(m.color, 12) : null; if (spr) ctx.drawImage(spr, sx - 12, sy - 12); }
+    ctx.fillStyle = m.color; ctx.strokeStyle = '#04121f'; ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.arc(sx, sy, 4.2, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    if (lod < 1) { ctx.fillStyle = '#eaf6ff'; ctx.font = 'bold 9px Consolas'; ctx.textAlign = 'center'; ctx.fillText(m.icon, sx, sy + 3); ctx.textAlign = 'left'; }
+  });
+}
+// Enemy retaliation — count/size scale with the current escalation level ("as you attack, you are attacked").
+function ilScheduleEnemyRetaliation(fromFaction) {
+  if (state.playAs === 'attacker') return;
+  const esc = escVal();
+  const shots = 1 + Math.floor(esc / 22) + (Math.random() < (esc / 150) ? 1 : 0);
+  const factions = ['hamas', 'hezbollah', 'iran', 'houthi'];
+  const gen = state.scenarioGen;
+  for (let k = 0; k < shots; k++) {
+    const f = (Math.random() < 0.5 && fromFaction) ? fromFaction : factions[Math.floor(Math.random() * factions.length)];
+    setTimeout(function () {
+      if (state.scenarioGen !== gen || !state.active || state.playAs === 'attacker') return;
+      const types = (typeof ENEMIES !== 'undefined' && ENEMIES[f]) ? ENEMIES[f].threats : ['rocket'];
+      const ty = types[Math.floor(Math.random() * types.length)];
+      if (typeof spawnThreat === 'function') try { spawnThreat(ty, f); } catch (e) {}
+    }, 900 + k * (650 + Math.random() * 900));
+  }
+}
+// Escalation drifts down slowly when you stop attacking.
+function ilEscalationTick(dt) {
+  if (state.escalationMode !== 'israel') return;
+  escEnsure();
+  if (state.escalationLevel > 0) { state.escalationLevel = Math.max(0, state.escalationLevel - dt * 0.00016); if (typeof escUpdateHud === 'function') escUpdateHud(); }
+}
+/* ---- Israeli offense panel (shown in Escalation-Israel) ---- */
+function showIlOffensePanel() {
+  let p = document.getElementById('il-offense-panel');
+  if (!p) {
+    p = document.createElement('div');
+    p.id = 'il-offense-panel';
+    p.style.cssText = 'position:fixed;top:88px;right:12px;width:214px;z-index:60;background:rgba(8,16,26,0.93);border:1px solid #2f6da4;border-radius:8px;padding:10px;font-family:monospace;color:#cfe8ff;box-shadow:0 4px 18px rgba(0,0,0,0.5);';
+    let html = '<div style="font-weight:bold;color:#7fd1ff;letter-spacing:1px;margin-bottom:3px;">🛡 IDF STRIKE COMMAND</div>' +
+      '<div id="il-esc-line" style="font-size:11px;margin-bottom:6px;">Escalation: <b>Low</b> (0)</div>' +
+      '<div style="font-size:10px;color:#9fbada;margin-bottom:7px;line-height:1.4;">Arm a weapon, then CLICK a red enemy target on the map (cities, ПВО, launch sites, strategic). Right-click cancels.</div>';
+    for (const id in IL_WEAPONS) { const w = IL_WEAPONS[id];
+      html += '<button class="il-wpn" data-w="' + id + '" style="width:100%;margin-bottom:5px;padding:6px 7px;text-align:left;background:rgba(40,90,150,.22);border:1px solid ' + w.color + ';color:#dff;border-radius:4px;cursor:pointer;font-family:monospace;line-height:1.3;">'
+        + '<span style="font-size:14px;">' + w.icon + '</span> <b>' + w.name + '</b><br><span style="font-size:9px;color:#9fbada;">' + w.desc + '</span></button>';
+    }
+    p.innerHTML = html;
+    document.body.appendChild(p);
+    p.querySelectorAll('.il-wpn').forEach(function (b) { b.onclick = function () { ilArmWeapon(b.dataset.w); }; });
+  }
+  p.style.display = 'block';
+  escUpdateHud();
+}
+function hideIlOffensePanel() { const p = document.getElementById('il-offense-panel'); if (p) p.style.display = 'none'; }
+function ilArmWeapon(id) {
+  if (state.ilWeapon === id) { state.ilWeapon = null; document.body.classList.remove('targeting-cursor'); }
+  else { state.ilWeapon = id; document.body.classList.add('targeting-cursor'); }
+  document.querySelectorAll('#il-offense-panel .il-wpn').forEach(function (b) { b.style.background = (b.dataset.w === state.ilWeapon) ? 'rgba(90,200,160,.35)' : 'rgba(40,90,150,.22)'; });
+  const w = IL_WEAPONS[id];
+  if (typeof mpToast === 'function') mpToast(state.ilWeapon ? (w.name + ' armed — click an enemy target') : 'Weapon safe', 'info');
+}
+function escUpdateHud() {
+  const line = document.getElementById('il-esc-line'); if (!line) return;
+  const ti = escTier();
+  line.innerHTML = 'Escalation: <b style="color:' + ti.c + '">' + ti.t + '</b> (' + Math.round(escVal()) + ')';
+}
+
 // === Attack sources — real launch sites by faction ===
 // Each faction has launchSites array (lat/lon of real cities/areas)
 const ENEMIES = {
@@ -4365,6 +4597,29 @@ const SCENARIOS = {
     dynamic: false,
     playAs: 'attacker',
     sandbox: true,
+    requiredSafety: 0
+  },
+  // === v2.31.0 — ESCALATION MODE (two sides) ===
+  escalationIsrael: {
+    name: 'Escalation - Israel',
+    description: 'Go on the OFFENSIVE as Israel: strike Gaza / Lebanon / Iran / Yemen with M270 MLRS, Hermes UAVs, kamikaze drones and fighter JDAMs. The harder you hit, the harder they hit back.',
+    difficulty: 6,
+    waves: [{ delay: 999999, threats: [] }],
+    dynamic: true,          // enemy fires back (scaled by escalation)
+    playAs: 'defender',     // you keep your IDF air-defence grid — the enemy retaliates
+    sandbox: true,          // full grid, no defeat, big budget
+    escalation: 'israel',
+    requiredSafety: 0
+  },
+  escalationAxis: {
+    name: 'Escalation - Resistance Axis',
+    description: 'Play the Resistance Axis in an open-ended escalation: strike Israel and watch the IDF retaliate harder as the exchange climbs.',
+    difficulty: 6,
+    waves: [{ delay: 999999, threats: [] }],
+    dynamic: false,
+    playAs: 'attacker',
+    sandbox: true,
+    escalation: 'axis',
     requiredSafety: 0
   }
 };
@@ -7235,7 +7490,7 @@ function render() {
   if (state.playAs === 'attacker') { if (typeof mpDrawReachZone === 'function') mpDrawReachZone(); drawAttackerBases(); }
   if (Date.now() < (state.intelRevealUntil || 0)) drawIntelReveal();
   if (state.tsts && state.tsts.length > 0) drawTSTMarkers();
-  if (L.enemyTargets !== false) { drawEnemyTargets(); if (typeof drawHitMarkers === 'function') drawHitMarkers(); if (typeof drawUSTargets === 'function') drawUSTargets(); if (typeof drawUsBatteries === 'function') drawUsBatteries(); if (typeof drawMobileLaunchers === 'function') drawMobileLaunchers(); if (typeof drawTomahawks === 'function') drawTomahawks(); }
+  if (L.enemyTargets !== false) { drawEnemyTargets(); if (typeof drawHitMarkers === 'function') drawHitMarkers(); if (typeof drawUSTargets === 'function') drawUSTargets(); if (typeof drawUsBatteries === 'function') drawUsBatteries(); if (typeof drawMobileLaunchers === 'function') drawMobileLaunchers(); if (typeof drawTomahawks === 'function') drawTomahawks(); if (typeof drawIsraeliMunitions === 'function') drawIsraeliMunitions(); }
   if (L.airbases !== false) drawAirbases();
   if (L.factories !== false) drawFactories();
   if (L.coverage !== false) drawCoverage();
@@ -14381,6 +14636,8 @@ function gameLoop(time) {
       if (typeof updateHitMarkers === 'function') updateHitMarkers(dt);   // v2.26.4 #6 — floating hit/destroyed markers
       if (typeof updateMobileLaunchers === 'function') updateMobileLaunchers();   // v2.27.7 — expire exposed mobile launchers
       if (typeof updateTomahawks === 'function') updateTomahawks(dt);             // v2.28.0 — Tomahawk cruise missiles in flight
+      if (typeof updateIsraeliMunitions === 'function') updateIsraeliMunitions(dt);   // v2.31.0 — Escalation: Israeli offensive munitions in flight
+      if (typeof ilEscalationTick === 'function') ilEscalationTick(dt);               // v2.31.0 — Escalation: level drifts down when you stop attacking
       tickFighterChases(dt);                  // F-16 anti-UAV intercepts (auto)
       tickPlayerFighters(dt);                 // NEW v2.17.0: player-commanded F-16 squadrons
       tickCrisis(dt);                         // crisis-popup spawn + countdown
@@ -21020,8 +21277,14 @@ function setupCanvasInteraction() {
       const usIsMe = (typeof MP !== 'undefined' && MP.enabled && MP.myFaction === 'usa');
       const attackerArmed = (state.playAs === 'attacker' && !usIsMe && state.attackMode && state.attackMode.type);
       if (!isDragging) {
+        // === ESCALATION (Israel) — a weapon is armed: click an enemy target to strike it ===
+        if (state.escalationMode === 'israel' && state.ilWeapon && typeof ilFireWeapon === 'function') {
+          const tgt = ilPickTarget(sx, sy);
+          if (tgt) ilFireWeapon(state.ilWeapon, tgt);
+          else if (typeof mpToast === 'function') mpToast('No target there — click a red enemy marker', 'warn');
+        }
         // === US PLAYER — AD placement mode: click the map to deploy a US battery there ===
-        if (state.usAdPlaceMode && typeof usPlaceAdAt === 'function') {
+        else if (state.usAdPlaceMode && typeof usPlaceAdAt === 'function') {
           const [lat, lon] = screenToGeo(sx, sy);
           usPlaceAdAt(state.usAdPlaceMode, lat, lon);   // stays armed for multi-placement; right-click cancels
         }
@@ -21140,6 +21403,8 @@ function setupCanvasInteraction() {
   // ПКМ — команда выбранным истребителям / отмена выбора батареи / снятие оружия
   canvas.addEventListener('contextmenu', (e) => {
     e.preventDefault();
+    // === ESCALATION (Israel) — right-click disarms the selected strike weapon (v2.31.0) ===
+    if (state.escalationMode === 'israel' && state.ilWeapon) { state.ilWeapon = null; document.body.classList.remove('targeting-cursor'); document.querySelectorAll('#il-offense-panel .il-wpn').forEach(function (b) { b.style.background = 'rgba(40,90,150,.22)'; }); if (typeof mpToast === 'function') mpToast('Weapon safe', 'info'); return; }
     // === US PLAYER — right-click cancels an armed AD-placement / strike mode (v2.29.0) ===
     if (state.usAdPlaceMode) { state.usAdPlaceMode = null; document.body.classList.remove('targeting-cursor'); if (typeof mpToast === 'function') mpToast('US AD placement OFF', 'info'); return; }
     if (state.usStrikeMode) { state.usStrikeMode = false; document.body.classList.remove('targeting-cursor'); if (typeof usUpdateStrikeBtns === 'function') usUpdateStrikeBtns(); if (typeof mpToast === 'function') mpToast('US strike mode OFF', 'info'); return; }
@@ -22914,6 +23179,7 @@ function startScenario(name) {
   state.usAdLevel = 40; state.usFightersBanned = false; state.usIntelCutUntil = 0;   // v2.28.3 — US air-defense level + pressure flags reset
   state.usBatteries = [];   // v2.28.5 — US AD batteries reset (re-deployed to bases on first usTargetsEnsure)
   state.usAdPlaceMode = null; state.selectedUsBattery = null;   // v2.29.0 — US AD click-to-place mode / selection reset
+  state.israeliMunitions = []; state.escalationLevel = 0; state.escalationMode = null; state.ilWeapon = null;   // v2.31.0 — Escalation mode reset
   state.usStrikeMode = false; state.usStrikeWeapon = 'air';   // v2.28.4 — US pick-target strike mode reset
   state.iranDelayUntil = 0;
   state.sandstormUntil = 0;
@@ -23012,8 +23278,15 @@ function startScenario(name) {
     state.waveDelayTimer = 999999;
   }
 
-  // Камера: для сценариев с дальними угрозами (Иран/Йемен/Resistance Axis) — региональный вид
-  const wide = (name === 'iran' || name === 'fullWar' || name === 'resistanceAxis');
+  // === ESCALATION MODE (v2.31.0) — Israel offensive OR Resistance Axis, with a live escalation meter ===
+  state.escalationMode = state.scenario.escalation || null;
+  if (state.escalationMode === 'israel') {
+    if (typeof usTargetsEnsure === 'function') { /* no-op */ }
+    if (typeof showIlOffensePanel === 'function') showIlOffensePanel();
+  } else if (typeof hideIlOffensePanel === 'function') { hideIlOffensePanel(); }
+
+  // Камера: для сценариев с дальними угрозами (Иран/Йемен/Resistance Axis/Эскалация) — региональный вид
+  const wide = (name === 'iran' || name === 'fullWar' || name === 'resistanceAxis' || name === 'escalationIsrael' || name === 'escalationAxis');
   if (wide) {
     camera.centerLat = 28.0; camera.centerLon = 45.0; camera.zoom = 5;
   } else if (name === 'hezbollah') {
@@ -23161,10 +23434,11 @@ document.addEventListener('DOMContentLoaded', () => {
   // Сценарии — only real scenarios; sandbox + resistanceAxis live on their own screen
   const scenList = document.getElementById('scenarios-list');
   Object.entries(SCENARIOS).forEach(([id, sc]) => {
-    if (id === 'sandbox' || id === 'resistanceAxis') return;     // moved to sandbox menu
+    if (id === 'sandbox' || id === 'resistanceAxis' || id === 'escalationIsrael' || id === 'escalationAxis') return;     // these live on their own menus
     const card = document.createElement('div');
     card.className = 'scenario-card';
-    const stars = '★'.repeat(sc.difficulty) + '☆'.repeat(5 - sc.difficulty);
+    const _diff = Math.max(0, Math.min(5, sc.difficulty || 0));   // clamp so difficulty>5 never breaks repeat()
+    const stars = '★'.repeat(_diff) + '☆'.repeat(5 - _diff);
     let infoLine;
     if (sc.campaign) {
       infoLine = '<span>' + (sc.cardInfo || 'Campaign · open-ended') + '</span>';
@@ -23217,6 +23491,31 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btn-sandbox-back').onclick = () => {
     audio.click();
     document.getElementById('sandbox-menu').classList.add('hidden');
+    document.getElementById('start-menu').classList.remove('hidden');
+  };
+  // === ESCALATION mode (v2.31.0) ===
+  const btnEsc = document.getElementById('btn-escalation');
+  if (btnEsc) btnEsc.onclick = () => {
+    audio.init(); audio.click();
+    document.getElementById('start-menu').classList.add('hidden');
+    document.getElementById('escalation-menu').classList.remove('hidden');
+  };
+  const escIL = document.getElementById('escalation-israel');
+  if (escIL) escIL.onclick = () => {
+    audio.init(); audio.click();
+    document.getElementById('escalation-menu').classList.add('hidden');
+    startScenario('escalationIsrael');
+  };
+  const escAx = document.getElementById('escalation-axis');
+  if (escAx) escAx.onclick = () => {
+    audio.init(); audio.click();
+    document.getElementById('escalation-menu').classList.add('hidden');
+    startScenario('escalationAxis');
+  };
+  const escBack = document.getElementById('btn-escalation-back');
+  if (escBack) escBack.onclick = () => {
+    audio.click();
+    document.getElementById('escalation-menu').classList.add('hidden');
     document.getElementById('start-menu').classList.remove('hidden');
   };
   document.getElementById('btn-info').onclick = () => {
